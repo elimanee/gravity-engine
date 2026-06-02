@@ -344,6 +344,139 @@ fn decode_gif_bytes(data: &[u8], max_px: u32) -> Option<GifFrames> {
     if frames.is_empty() { None } else { Some(GifFrames { frames, delays_ms }) }
 }
 
+// ── Logo sources ─────────────────────────────────────────────────
+
+// Popular Steam app IDs for SteamGridDB logo fetching
+const STEAM_APP_IDS: &[u32] = &[
+    // Valve
+    730, 570, 440, 400, 620, 220, 550, 4000, 240, 380, 10, 70, 80,
+    // Action / shooter
+    1245620, 1091500, 271590, 578080, 359550, 1938090, 1172470,
+    1551360, 1716740, 1203220, 814380, 570940, 1517290, 1093900,
+    // RPG
+    292030, 374320, 489830, 72850, 306130, 413150, 1145360,
+    582010, 1091500, 1174180, 2767030, 2358720,
+    // Indie / platformer
+    367520, 1222670, 391540, 548430, 824270, 1942280, 1085660,
+    105600, 413150, 1318690, 1062090, 774361, 1150690,
+    // Strategy / simulation
+    281990, 8930, 294100, 739630, 1158310, 255710, 236850,
+    322330, 4920, 251570, 242760, 108600,
+    // Horror / thriller
+    319510, 418370, 601150, 698780, 1253920, 952060, 782330,
+    // Sports / racing
+    1449560, 1303850, 230410, 304930, 311210,
+    // Classics
+    4560, 8190, 17390, 22200, 32400, 7670, 2600, 6860,
+    // More popular
+    1091500, 1172620, 1283500, 1593500, 1818750, 1817190,
+];
+
+fn read_sgdb_key() -> Option<String> {
+    // Try env var first
+    if let Ok(k) = std::env::var("SGDB_API_KEY") {
+        if !k.trim().is_empty() { return Some(k.trim().to_string()); }
+    }
+    // Then config file
+    let path = dirs_home().map(|h| h.join(".config/gravity_engine/sgdb_key"));
+    if let Some(p) = path {
+        if let Ok(k) = std::fs::read_to_string(&p) {
+            let k = k.trim().to_string();
+            if !k.is_empty() { return Some(k); }
+        }
+    }
+    None
+}
+
+fn dirs_home() -> Option<std::path::PathBuf> {
+    std::env::var("HOME").ok().map(std::path::PathBuf::from)
+}
+
+// Extract the first image URL from a SteamGridDB JSON response
+fn sgdb_first_url(json: &str) -> Option<String> {
+    // Looks for: "url":"https://..."
+    for chunk in json.split("\"url\":\"") {
+        let end = chunk.find('"')?;
+        let url = &chunk[..end];
+        if url.starts_with("https://") {
+            return Some(url.to_string());
+        }
+    }
+    None
+}
+
+fn fetch_logos(tx: std::sync::mpsc::Sender<(String, Vec<u8>)>, count: usize) {
+    std::thread::spawn(move || {
+        use std::io::Read;
+
+        let api_key = match read_sgdb_key() {
+            Some(k) => k,
+            None => {
+                // No key — signal with a special sentinel so the UI can show a message
+                let _ = tx.send(("__no_sgdb_key__".to_string(), Vec::new()));
+                return;
+            }
+        };
+
+        // Shuffle app IDs
+        let n = STEAM_APP_IDS.len();
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos() as u64;
+        let mut s = seed;
+        let mut ids: Vec<u32> = STEAM_APP_IDS.to_vec();
+        for i in (1..n).rev() {
+            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let j = (s >> 33) as usize % (i + 1);
+            ids.swap(i, j);
+        }
+
+        let mut sent = 0;
+        // Try more candidates than needed to account for missing logos
+        for &app_id in ids.iter().take(count * 3) {
+            if sent >= count { break; }
+
+            let api_url = format!(
+                "https://www.steamgriddb.com/api/v2/logos/steam/{}",
+                app_id
+            );
+            let resp = match ureq::get(&api_url)
+                .set("Authorization", &format!("Bearer {}", api_key))
+                .timeout(std::time::Duration::from_secs(10))
+                .call()
+            {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+
+            let json = match resp.into_string() {
+                Ok(j) => j,
+                Err(_) => continue,
+            };
+
+            let img_url = match sgdb_first_url(&json) {
+                Some(u) => u,
+                None    => continue,
+            };
+
+            if let Ok(img_resp) = ureq::get(&img_url)
+                .timeout(std::time::Duration::from_secs(10))
+                .call()
+            {
+                let mut bytes = Vec::new();
+                if img_resp.into_reader().take(4_000_000).read_to_end(&mut bytes).is_ok()
+                    && bytes.len() > 64
+                {
+                    let fname = format!("sgdb_{}.png", app_id);
+                    if tx.send((fname, bytes)).is_err() { break; }
+                    sent += 1;
+                }
+            }
+        }
+    });
+}
+
 // ── 88×31 button fetcher ────────────────────────────────────────
 fn scrape_urls(page_url: &str, base: &str) -> Vec<String> {
     let html = match ureq::get(page_url)
@@ -430,6 +563,36 @@ fn fetch_88x31(tx: std::sync::mpsc::Sender<(String, Vec<u8>)>, count: usize) {
 // Rasterise an SVG at up to max_px on the longest side.
 // tiny_skia outputs premultiplied RGBA so we unmultiply before handing the
 // bytes to macroquad (which expects straight alpha).
+fn decode_svg_bytes(data: &[u8], max_px: u32) -> Option<(Texture2D, image::RgbaImage)> {
+    let options = resvg::usvg::Options::default();
+    let tree    = resvg::usvg::Tree::from_data(data, &options).ok()?;
+    let sz      = tree.size();
+    let (sw, sh) = (sz.width(), sz.height());
+    // No .min(1.0) — SVGs are vector and scale up perfectly
+    let scale   = max_px as f32 / sw.max(sh);
+    let ow      = ((sw * scale) as u32).max(1);
+    let oh      = ((sh * scale) as u32).max(1);
+    let mut pm  = resvg::tiny_skia::Pixmap::new(ow, oh)?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(ow as f32 / sw, oh as f32 / sh),
+        &mut pm.as_mut(),
+    );
+    let mut bytes = pm.data().to_vec();
+    for px in bytes.chunks_exact_mut(4) {
+        let a = px[3] as f32 / 255.0;
+        if a > 0.0 {
+            px[0] = (px[0] as f32 / a).min(255.0) as u8;
+            px[1] = (px[1] as f32 / a).min(255.0) as u8;
+            px[2] = (px[2] as f32 / a).min(255.0) as u8;
+        }
+    }
+    let rgba = image::RgbaImage::from_raw(ow, oh, bytes.clone())?;
+    let tex  = Texture2D::from_rgba8(ow as u16, oh as u16, &bytes);
+    tex.set_filter(FilterMode::Linear);
+    Some((tex, rgba))
+}
+
 fn load_svg(path: &str, max_px: u32) -> Option<(Texture2D, image::RgbaImage)> {
     let data    = std::fs::read(path).ok()?;
     let options = resvg::usvg::Options::default();
@@ -620,10 +783,11 @@ impl PhysicsImage {
         bodies:    &mut RigidBodySet,
         colliders: &mut ColliderSet,
     ) -> Option<Self> {
-        let is_gif = name.ends_with(".gif") || {
-            // Detect by GIF magic bytes
-            data.len() >= 6 && (&data[..6] == b"GIF87a" || &data[..6] == b"GIF89a")
-        };
+        let is_gif = name.ends_with(".gif") ||
+            (data.len() >= 6 && (&data[..6] == b"GIF87a" || &data[..6] == b"GIF89a"));
+        let is_svg = !is_gif && (name.ends_with(".svg") ||
+            data.starts_with(b"<svg") || data.starts_with(b"<?xml") ||
+            data.starts_with(b"<!--"));
 
         let (texture, gif, tex_w, tex_h, hull_pts) = if is_gif {
             let frames = decode_gif_bytes(data, MAX_IMG_PX)?;
@@ -631,6 +795,12 @@ impl PhysicsImage {
             let th = frames.frames[0].height();
             let tex = frames.frames[0].clone();
             (tex, Some(frames), tw, th, None)
+        } else if is_svg {
+            let (tex, raw) = decode_svg_bytes(data, MAX_IMG_PX)?;
+            let tw = tex.width();
+            let th = tex.height();
+            let hull = compute_hull_pts(&raw);
+            (tex, None, tw, th, hull)
         } else {
             let (tex, raw) = decode_image_bytes(data, MAX_IMG_PX)?;
             let tw = tex.width();
@@ -1849,6 +2019,104 @@ impl GravityBomb {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// F1 keybind help overlay
+// ═══════════════════════════════════════════════════════════════
+struct F1Help { visible: bool, fade: f32 }
+
+impl F1Help {
+    fn new() -> Self { F1Help { visible: false, fade: 0.0 } }
+    fn toggle(&mut self) { self.visible = !self.visible; }
+    fn update(&mut self, dt: f32) {
+        let t = if self.visible { 1.0_f32 } else { 0.0 };
+        self.fade += (t - self.fade) * (dt * 14.0).min(1.0);
+        if self.fade < 0.005 { self.fade = 0.0; }
+    }
+    fn draw(&self, sw: f32, sh: f32) {
+        if self.fade < 0.01 { return; }
+        let f   = self.fade;
+        let a   = |v: u8| (v as f32 * f) as u8;
+
+        // Dim backdrop
+        draw_rectangle(0.0, 0.0, sw, sh, Color::from_rgba(0, 0, 0, a(180)));
+
+        let col_w  = 320.0_f32;
+        let col_gap = 24.0_f32;
+        let cols: &[&[(&str, &str)]] = &[
+            &[
+                ("OBJECTS",         ""),
+                ("A",               "Open file picker"),
+                ("N",               "Object spawner"),
+                ("F",               "Fetch 88×31 buttons"),
+                ("L",               "Fetch 20 random logos"),
+                ("Right-click",     "Context menu"),
+                ("",                ""),
+                ("PHYSICS",         ""),
+                ("Left-drag",       "Interact (drag mode)"),
+                ("Tab",             "Drag mode picker"),
+                ("Space",           "Pause / unpause"),
+                ("R",               "Clear all objects"),
+            ],
+            &[
+                ("WORLD",           ""),
+                ("B",               "Cycle border mode"),
+                ("G",               "Cycle background"),
+                ("W",               "Toggle window shake"),
+                ("Gravity buttons", "Change gravity preset"),
+                ("",                ""),
+                ("AUDIO",           ""),
+                ("M",               "Load audio file"),
+                ("P",               "Pause / resume audio"),
+                ("",                ""),
+                ("OTHER",           ""),
+                ("T",               "Toggle object trails"),
+                ("D",               "Debug overlay"),
+                ("Q / Esc",         "Quit"),
+                ("F1",              "This help screen"),
+            ],
+        ];
+
+        let row_h   = 22.0_f32;
+        let pad     = 28.0_f32;
+        let max_rows = cols.iter().map(|c| c.len()).max().unwrap_or(0);
+        let panel_h = max_rows as f32 * row_h + pad * 2.0 + 28.0;
+        let panel_w = cols.len() as f32 * col_w + (cols.len() - 1) as f32 * col_gap + pad * 2.0;
+        let px = (sw - panel_w) / 2.0;
+        let py = (sh - panel_h) / 2.0;
+
+        draw_rectangle(px, py, panel_w, panel_h, Color::from_rgba(12, 10, 24, a(245)));
+        draw_rectangle_lines(px, py, panel_w, panel_h, 1.5,
+                             Color::from_rgba(80, 75, 140, a(255)));
+
+        let title = "KEYBINDS  —  F1 to close";
+        let tw = measure_text(title, None, 15, 1.0).width;
+        draw_text(title, px + (panel_w - tw) / 2.0, py + 20.0, 15.0,
+                  Color::from_rgba(200, 195, 255, a(230)));
+
+        for (ci, col) in cols.iter().enumerate() {
+            let cx = px + pad + ci as f32 * (col_w + col_gap);
+            let mut ry = py + pad + 24.0;
+            for &(key, desc) in *col {
+                if desc.is_empty() && !key.is_empty() {
+                    // Section header
+                    draw_text(key, cx, ry + 14.0, 12.0,
+                              Color::from_rgba(140, 130, 220, a(220)));
+                    draw_line(cx, ry + 17.0, cx + col_w - 10.0, ry + 17.0, 1.0,
+                              Color::from_rgba(60, 55, 100, a(200)));
+                } else if !key.is_empty() {
+                    let kw = measure_text(key, None, 13, 1.0).width;
+                    draw_text(key,  cx, ry + 14.0, 13.0,
+                              Color::from_rgba(220, 215, 255, a(255)));
+                    draw_text(desc, cx + kw + 10.0, ry + 14.0, 13.0,
+                              Color::from_rgba(130, 125, 180, a(220)));
+                }
+                ry += row_h;
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Drag-mode grid picker  (Tab to open/close)
 // ═══════════════════════════════════════════════════════════════
 struct DragModeMenu {
@@ -2477,6 +2745,7 @@ async fn main() {
     let mut drag:         Option<DragState> = None;
     let mut drag_mode       = DragMode::Spring;
     let mut drag_mode_menu  = DragModeMenu::new();
+    let mut f1_help         = F1Help::new();
     let mut gravity_bombs: Vec<GravityBomb> = Vec::new();
     let mut background = Background::new();
     let mut spawner    = Spawner::new();
@@ -2485,7 +2754,9 @@ async fn main() {
     let mut win_force_slider = Slider::new(8.0, 0.0, 40.0);
     let mut win_shake_on     = true;
     let mut btn_rx: Option<std::sync::mpsc::Receiver<(String, Vec<u8>)>> = None;
-    let mut btn_pending = 0usize; // how many still expected
+    let mut btn_pending = 0usize;
+    let mut logo_rx: Option<std::sync::mpsc::Receiver<(String, Vec<u8>)>> = None;
+    let mut logo_pending = 0usize;
     let mut field_active    = false;
     let mut slider_radius = Slider::new(150.0, 30.0,  450.0); // pixels
     let mut slider_force  = Slider::new(300.0, 20.0, 1500.0);
@@ -2527,6 +2798,7 @@ async fn main() {
         // ── animation ─────────────────────────────────────────
         menu.update(dt);
         drag_mode_menu.update(dt);
+        f1_help.update(dt);
         spawner.update(dt);
 
         let audio_loaded = mod_player.info().loaded
@@ -2766,8 +3038,11 @@ async fn main() {
         }
 
         // ── keyboard ──────────────────────────────────────────
+        if is_key_pressed(KeyCode::F1) { f1_help.toggle(); }
         if is_key_pressed(KeyCode::Q) || is_key_pressed(KeyCode::Escape) {
-            if menu.visible { menu.close(); } else { break; }
+            if f1_help.visible { f1_help.visible = false; }
+            else if menu.visible { menu.close(); }
+            else { break; }
         }
         if is_key_pressed(KeyCode::Space) { paused = !paused; }
         if is_key_pressed(KeyCode::Tab) {
@@ -2781,6 +3056,13 @@ async fn main() {
             fetch_88x31(tx, 20);
             btn_rx      = Some(rx);
             btn_pending = 20;
+        }
+        if is_key_pressed(KeyCode::L) && (logo_pending == 0 || logo_pending == 999) {
+            logo_pending = 0;
+            let (tx, rx) = std::sync::mpsc::channel();
+            fetch_logos(tx, 20);
+            logo_rx      = Some(rx);
+            logo_pending = 20;
         }
         if is_key_pressed(KeyCode::G) {
             if background.mode == BgMode::Custom {
@@ -3207,6 +3489,39 @@ async fn main() {
                 }
             }
             if btn_pending == 0 { btn_rx = None; }
+        }
+
+        // ── drain incoming logos ───────────────────────────────
+        if let Some(ref rx) = logo_rx {
+            loop {
+                match rx.try_recv() {
+                    Ok((name, data)) => {
+                        logo_pending = logo_pending.saturating_sub(1);
+                        if name == "__no_sgdb_key__" {
+                            logo_pending = 0;
+                            logo_rx     = None;
+                            // Show message by reusing the pending counter trick:
+                            // set to a special sentinel value so the overlay shows
+                            logo_pending = 999;
+                            break;
+                        }
+                        let sx = rand::gen_range(50.0_f32, sw - 50.0);
+                        if let Some(obj) = PhysicsImage::from_bytes(
+                            &name, &data, (sx, 40.0),
+                            &mut pw.bodies, &mut pw.colliders)
+                        {
+                            objects.push(obj);
+                        }
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        logo_pending = 0;
+                        logo_rx = None;
+                        break;
+                    }
+                }
+            }
+            if logo_pending == 0 { logo_rx = None; }
         }
 
         // ── side-border logic ─────────────────────────────────
@@ -3641,12 +3956,12 @@ async fn main() {
             draw_rectangle(0.0, (hud_y + HUD_H).max(0.0), sw, 2.0,
                            Color::from_rgba(100, 90, 180, (t * 180.0) as u8));
         }
-        draw_text(
-            "A = images  |  N = spawner  |  F = 88x31 buttons  |  W = window shake  |  Left-drag = throw  |  Right-click = menu  |  M = music  |  D = debug",
-            10.0, 18.0 + hud_y, 14.0, Color::from_rgba(160, 155, 210, 255));
+        draw_text("F1 = keybinds",
+                  10.0, 18.0 + hud_y, 13.0,
+                  Color::from_rgba(120, 115, 175, 200));
 
         let right_str = format!(
-            "Tab=drag:{}   B=sides:{}   G=bg:{}   R=clear   Space=pause   Q=quit   obj:{}{}",
+            "drag:{}  sides:{}  bg:{}  obj:{}{}",
             drag_mode.label(),
             pw.border_mode.label(),
             background.mode.label(),
@@ -3830,17 +4145,35 @@ async fn main() {
 
         // Drag-mode picker (grid, above everything)
         // Fetch status overlay
-        if btn_pending > 0 {
-            let msg = format!("Fetching 88x31 buttons… {} left", btn_pending);
-            let mw  = measure_text(&msg, None, 15, 1.0).width;
-            let t   = get_time() as f32;
-            let a   = ((t * 4.0).sin() * 0.25 + 0.75) as f32;
-            draw_text(&msg, (sw - mw) / 2.0, sh / 2.0,
-                      15.0, Color { a, ..Color::from_rgba(180, 200, 255, 255) });
+        {
+            let t = get_time() as f32;
+            let a = ((t * 4.0).sin() * 0.25 + 0.75) as f32;
+            let mut fetch_y = sh / 2.0;
+            if btn_pending > 0 {
+                let msg = format!("Fetching 88×31 buttons… {} left", btn_pending);
+                let mw  = measure_text(&msg, None, 15, 1.0).width;
+                draw_text(&msg, (sw - mw) / 2.0, fetch_y, 15.0,
+                          Color { a, ..Color::from_rgba(180, 200, 255, 255) });
+                fetch_y += 22.0;
+            }
+            if logo_pending == 999 {
+                let msg = "No SGDB key found. Add it to ~/.config/gravity_engine/sgdb_key";
+                let mw  = measure_text(msg, None, 14, 1.0).width;
+                draw_text(msg, (sw - mw) / 2.0, fetch_y, 14.0,
+                          Color::from_rgba(255, 120, 100, 255));
+            } else if logo_pending > 0 {
+                let msg = format!("Fetching game logos… {} left", logo_pending);
+                let mw  = measure_text(&msg, None, 15, 1.0).width;
+                draw_text(&msg, (sw - mw) / 2.0, fetch_y, 15.0,
+                          Color { a, ..Color::from_rgba(255, 210, 150, 255) });
+            }
         }
 
         drag_mode_menu.draw(drag_mode);
         spawner.draw();
+
+        // F1 help — drawn above everything
+        f1_help.draw(sw, sh);
 
         // Context menu is always on top
         menu.draw();
