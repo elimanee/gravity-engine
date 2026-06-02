@@ -8,6 +8,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 - **Drop any image** — PNG, JPG, GIF (animated), WebP, BMP, SVG and more; each becomes a rigid body
 - **Object spawner** (`N`) — spawn Circle, Box, Triangle, Pentagon or Star shapes with custom size and color
+- **88×31 button fetcher** (`F`) — fetches 20 random classic web buttons from [cyber.dabamos.de](https://cyber.dabamos.de/88x31/) and [hellnet.work](https://hellnet.work/8831/) and drops them as live physics objects (animated GIFs supported)
 - **8 drag modes** — press `Tab` to open the grid picker:
   | Mode | Description |
   |------|-------------|
@@ -38,7 +39,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | Sunset | Purple sky fading to an orange horizon with a glowing sun |
   | Ocean | Deep blue with animated caustic ripple rings |
   | Custom | Load any image as a background |
-- **Window shake physics** — moving or shaking the window pushes all rigid bodies via inertia (Linux / X11)
+- **Window shake physics** (`W` to toggle) — moving or shaking the window pushes all rigid bodies via inertia; works natively on KDE Wayland via KWin DBus, falls back to X11
 - **Gravity presets** — ZERO / MOON / MARS / EARTH / JUPITER / HEAVY / REVERSE
 - **Animated trails** — motion-blur-style ghost trail with length and fade sliders
 - **Audio player** — load tracker modules (.mod/.xm/.it/.s3m) or common formats (.mp3/.flac/.wav/.ogg); supports `.pls` playlists and HTTP radio streams
@@ -52,11 +53,13 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 |-------------|--------|
 | `A` | Open file picker (add image) |
 | `N` | Open object spawner |
+| `F` | Fetch 20 random 88×31 buttons from the web |
 | Left-drag | Throw / interact with objects (depends on drag mode) |
 | Right-click | Context menu (Resize, Copy & Paste, Size All, Delete) |
 | `Tab` | Open drag mode picker |
 | `B` | Cycle border mode |
 | `G` | Cycle background (or load custom image) |
+| `W` | Toggle window shake on/off |
 | `Space` | Pause / unpause physics (reveals UI sliders) |
 | `T` | Toggle object trails |
 | `M` | Load audio file |
@@ -90,4 +93,6 @@ cargo run --release
 - [`resvg`](https://github.com/RazrFalcon/resvg) — SVG rasterization
 - [`rfd`](https://github.com/PolyMeilex/rfd) — native file dialog
 - [`image`](https://github.com/image-rs/image) — image loading and processing
-- [`x11`](https://github.com/erlepereira/x11-rs) — window position tracking for shake physics (Linux)
+- [`ureq`](https://github.com/algesten/ureq) — HTTP for 88×31 button fetching and audio streams
+- [`x11`](https://github.com/erlepereira/x11-rs) — window position tracking for shake physics (X11)
+- [`zbus`](https://github.com/dbus2/zbus) — KDE KWin DBus for window position on Wayland
