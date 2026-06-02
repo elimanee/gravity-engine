@@ -84,7 +84,7 @@ impl WindowTracker {
         (x as f32, y as f32)
     }
 
-    fn tick(&mut self, bodies: &mut RigidBodySet) {
+    fn tick(&mut self, bodies: &mut RigidBodySet, sensitivity: f32) {
         #[cfg(target_os = "linux")]
         let (cx, cy) = unsafe { Self::query(self.dpy) };
         #[cfg(not(target_os = "linux"))]
@@ -99,7 +99,6 @@ impl WindowTracker {
 
         // Window moved dx,dy pixels → objects feel inertia in the opposite direction.
         // Divide by PPM to convert px to physics-metres; y axis is flipped.
-        let sensitivity = 8.0_f32;
         let vx = -dx / PPM * sensitivity;
         let vy =  dy / PPM * sensitivity;
 
@@ -2248,7 +2247,8 @@ async fn main() {
     let mut background = Background::new();
     let mut spawner    = Spawner::new();
     let mut spawner_size_drag = false;
-    let mut win_tracker = WindowTracker::new();
+    let mut win_tracker   = WindowTracker::new();
+    let mut win_force_slider = Slider::new(8.0, 0.0, 40.0);
     let mut field_active    = false;
     let mut slider_radius = Slider::new(150.0, 30.0,  450.0); // pixels
     let mut slider_force  = Slider::new(300.0, 20.0, 1500.0);
@@ -2260,6 +2260,7 @@ async fn main() {
     let mut trail_slide       = -(188.0_f32 + 16.0); // start off-screen left
     let mut hud_y         = 0.0_f32;   // 0=fully visible, -(HUD_H-4)=peeking
     let mut panel_slide   = 1.0_f32;   // 0=on-screen, 1=slid off right edge
+    let mut win_slide     = 1.0_f32;   // window-force panel, same convention
     let mut show_title  = true;
     let mut pixel_out: Option<PixelOut> = None;
     let mut show_debug  = false;
@@ -2295,7 +2296,7 @@ async fn main() {
             || reg_player.as_ref().map_or(false, |p| p.info().loaded);
         // HUD slides up to leave a 4 px peek strip; stays visible when
         // the mouse is near the top, the vol slider is being dragged, or physics is paused.
-        let hud_near = paused || vol_slider.dragging;
+        let hud_near = paused || vol_slider.dragging || win_force_slider.dragging;
         hud_y += ((if hud_near { 0.0 } else { -(HUD_H - 4.0) }) - hud_y)
                   * (dt * 10.0).min(1.0);
 
@@ -2312,6 +2313,10 @@ async fn main() {
         trail_slide += ((if near_trail { 0.0_f32 } else { -(188.0 + 16.0) }) - trail_slide)
                         * (dt * 10.0).min(1.0);
 
+        let show_win_panel = paused || win_force_slider.dragging;
+        win_slide += ((if show_win_panel { 0.0 } else { 1.0 }) - win_slide)
+                      * (dt * 12.0).min(1.0);
+
         let s_panel_w = 230.0_f32;
         let s_panel_h = 88.0_f32;
         let s_panel_x = sw - s_panel_w - 8.0 + panel_slide * (s_panel_w + 16.0);
@@ -2321,6 +2326,13 @@ async fn main() {
         let f_track   = Rect::new(s_panel_x + 10.0, s_panel_y + 64.0, s_panel_w - 20.0, 10.0);
 
         let vol_track = Rect::new(sw / 2.0 - 70.0, 34.0 + hud_y, 140.0, 6.0);
+
+        // Window-force panel (bottom-right, above drag-mode panel, pause-only)
+        let wf_panel_w = 230.0_f32;
+        let wf_panel_h = 50.0_f32;
+        let wf_panel_x = sw - wf_panel_w - 8.0 + win_slide * (wf_panel_w + 16.0);
+        let wf_panel_y = sh - s_panel_h - wf_panel_h - 20.0;
+        let wf_track   = Rect::new(wf_panel_x + 10.0, wf_panel_y + 28.0, wf_panel_w - 20.0, 10.0);
 
         // Trail settings panel (bottom-left, always visible)
         let tp_w   = 188.0_f32;
@@ -2658,6 +2670,7 @@ async fn main() {
             slider_force.continue_drag(f_track, mx);
         }
         if audio_loaded { vol_slider.continue_drag(vol_track, mx); }
+        win_force_slider.continue_drag(wf_track, mx);
         if trail_enabled {
             trail_len_slider.continue_drag(tp_sld,  mx);
             trail_fade_slider.continue_drag(tp_sld2, mx);
@@ -2739,6 +2752,8 @@ async fn main() {
         if is_mouse_button_pressed(MouseButton::Left) {
             if let Some(g) = grav_btns.handle_click(mx, my) {
                 pw.set_gravity(g);
+            } else if win_force_slider.try_start(wf_track, mx, my) {
+                // win force drag started
             } else if audio_loaded && vol_slider.try_start(vol_track, mx, my) {
                 // volume drag started — handled by continue_drag above
             } else if drag_mode_menu.fade > 0.01 {
@@ -2872,6 +2887,7 @@ async fn main() {
             vol_slider.stop();
             trail_len_slider.stop();
             trail_fade_slider.stop();
+            win_force_slider.stop();
             if let Some(ref ds) = drag {
                 if let Some(body) = pw.bodies.get_mut(
                         objects[ds.object_idx].body_handle) {
@@ -2919,7 +2935,7 @@ async fn main() {
 
         // ── physics step ──────────────────────────────────────
         if !paused {
-            win_tracker.tick(&mut pw.bodies);
+            win_tracker.tick(&mut pw.bodies, win_force_slider.value);
             pw.step();
         }
 
@@ -3518,6 +3534,16 @@ async fn main() {
                 trail_fade_slider.draw(tp_sld2,
                     &format!("Fade  {:.1}s", trail_fade_slider.value));
             }
+        }
+
+        // Window-force panel
+        if win_slide < 0.99 {
+            draw_rectangle(wf_panel_x, wf_panel_y, wf_panel_w, wf_panel_h,
+                           Color::from_rgba(18, 16, 32, 230));
+            draw_rectangle_lines(wf_panel_x, wf_panel_y, wf_panel_w, wf_panel_h, 1.0,
+                                 Color::from_rgba(75, 70, 125, 255));
+            win_force_slider.draw(wf_track,
+                &format!("Window Force  {:.1}", win_force_slider.value));
         }
 
         // Drag-mode picker (grid, above everything)
