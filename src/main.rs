@@ -374,15 +374,22 @@ fn scrape_urls(page_url: &str, base: &str) -> Vec<String> {
 
 fn fetch_88x31(tx: std::sync::mpsc::Sender<(String, Vec<u8>)>, count: usize) {
     std::thread::spawn(move || {
-        // Scrape both galleries and merge the lists
-        let mut urls = scrape_urls(
-            "https://cyber.dabamos.de/88x31/",
-            "https://cyber.dabamos.de/88x31/",
-        );
-        urls.extend(scrape_urls(
-            "https://hellnet.work/8831/",
-            "https://hellnet.work/8831/",
-        ));
+        // Scrape all known 88×31 galleries and merge
+        let sources: &[(&str, &str)] = &[
+            ("https://cyber.dabamos.de/88x31/",                    "https://cyber.dabamos.de/88x31/"),
+            ("https://hellnet.work/8831/",                         "https://hellnet.work/8831/"),
+            ("https://anlucas.neocities.org/88x31Buttons",         "https://anlucas.neocities.org/"),
+            ("https://88x31.neocities.org/",                       "https://88x31.neocities.org/"),
+            ("https://goblin-heart.net/sadgrl/webmastery/",        "https://goblin-heart.net/"),
+            ("https://pixelbuttons.neocities.org/",                "https://pixelbuttons.neocities.org/"),
+            ("https://alistairshepherd.uk/buttons/",               "https://alistairshepherd.uk/buttons/"),
+            ("https://dimden.dev/buttons/",                        "https://dimden.dev/buttons/"),
+        ];
+        let mut urls: Vec<String> = Vec::new();
+        for &(page, base) in sources {
+            urls.extend(scrape_urls(page, base));
+        }
+        urls.sort();
         urls.dedup();
 
         if urls.is_empty() { return; }
