@@ -958,6 +958,317 @@ impl PhysWorld {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Object spawner
+// ═══════════════════════════════════════════════════════════════
+#[derive(Clone, Copy, PartialEq)]
+enum SpawnShape { Circle, Box, Triangle, Pentagon, Star }
+
+impl SpawnShape {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Circle   => "Circle",
+            Self::Box      => "Box",
+            Self::Triangle => "Triangle",
+            Self::Pentagon => "Pentagon",
+            Self::Star     => "Star",
+        }
+    }
+    fn all() -> &'static [SpawnShape] {
+        &[Self::Circle, Self::Box, Self::Triangle, Self::Pentagon, Self::Star]
+    }
+}
+
+const SPAWN_COLORS: &[(u8, u8, u8)] = &[
+    (220, 80,  80),   // red
+    (80,  180, 80),   // green
+    (80,  130, 230),  // blue
+    (230, 180, 50),   // yellow
+    (200, 80,  200),  // purple
+    (80,  210, 200),  // cyan
+    (240, 130, 50),   // orange
+    (200, 200, 200),  // white
+];
+
+fn make_spawn_texture(shape: SpawnShape, size: u32, r: u8, g: u8, b: u8) -> (Texture2D, image::RgbaImage) {
+    let s = size as i32;
+    let cx = s / 2;
+    let cy = s / 2;
+    let mut img = image::RgbaImage::new(size, size);
+
+    let fill = |img: &mut image::RgbaImage, px: i32, py: i32| {
+        if px >= 0 && py >= 0 && px < s && py < s {
+            img.put_pixel(px as u32, py as u32, image::Rgba([r, g, b, 255]));
+        }
+    };
+
+    match shape {
+        SpawnShape::Circle => {
+            let r2 = (cx * cx) as f32;
+            for py in 0..s {
+                for px in 0..s {
+                    let dx = px - cx;
+                    let dy = py - cy;
+                    if (dx*dx + dy*dy) as f32 <= r2 * 0.96 {
+                        img.put_pixel(px as u32, py as u32, image::Rgba([r, g, b, 255]));
+                    }
+                }
+            }
+        }
+        SpawnShape::Box => {
+            let pad = (s as f32 * 0.05) as i32;
+            for py in pad..s-pad {
+                for px in pad..s-pad {
+                    img.put_pixel(px as u32, py as u32, image::Rgba([r, g, b, 255]));
+                }
+            }
+        }
+        SpawnShape::Triangle => {
+            // Equilateral triangle
+            for py in 0..s {
+                let t = py as f32 / (s - 1) as f32;
+                let half = (t * cx as f32 * 0.94) as i32;
+                let base_y = (s as f32 * 0.08) as i32;
+                if py >= base_y {
+                    for px in cx-half..=cx+half {
+                        fill(&mut img, px, py);
+                    }
+                }
+            }
+        }
+        SpawnShape::Pentagon => {
+            let rf = cx as f32 * 0.9;
+            let pts: Vec<(f32, f32)> = (0..5).map(|i| {
+                let a = i as f32 * std::f32::consts::TAU / 5.0 - std::f32::consts::FRAC_PI_2;
+                (cx as f32 + a.cos() * rf, cy as f32 + a.sin() * rf)
+            }).collect();
+            for py in 0..s {
+                for px in 0..s {
+                    if point_in_polygon(px as f32, py as f32, &pts) {
+                        img.put_pixel(px as u32, py as u32, image::Rgba([r, g, b, 255]));
+                    }
+                }
+            }
+        }
+        SpawnShape::Star => {
+            let ro = cx as f32 * 0.92;
+            let ri = cx as f32 * 0.40;
+            let pts: Vec<(f32, f32)> = (0..10).map(|i| {
+                let a = i as f32 * std::f32::consts::TAU / 10.0 - std::f32::consts::FRAC_PI_2;
+                let rad = if i % 2 == 0 { ro } else { ri };
+                (cx as f32 + a.cos() * rad, cy as f32 + a.sin() * rad)
+            }).collect();
+            for py in 0..s {
+                for px in 0..s {
+                    if point_in_polygon(px as f32, py as f32, &pts) {
+                        img.put_pixel(px as u32, py as u32, image::Rgba([r, g, b, 255]));
+                    }
+                }
+            }
+        }
+    }
+
+    let tex = Texture2D::from_rgba8(size as u16, size as u16, &img);
+    (tex, img)
+}
+
+fn point_in_polygon(px: f32, py: f32, pts: &[(f32, f32)]) -> bool {
+    let n = pts.len();
+    let mut inside = false;
+    let mut j = n - 1;
+    for i in 0..n {
+        let (xi, yi) = pts[i];
+        let (xj, yj) = pts[j];
+        if ((yi > py) != (yj > py)) &&
+           (px < (xj - xi) * (py - yi) / (yj - yi) + xi)
+        {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+struct Spawner {
+    visible:    bool,
+    fade:       f32,
+    shape:      SpawnShape,
+    size:       f32,      // diameter in pixels
+    color_idx:  usize,
+}
+
+impl Spawner {
+    fn new() -> Self {
+        Spawner { visible: false, fade: 0.0, shape: SpawnShape::Circle, size: 80.0, color_idx: 0 }
+    }
+
+    fn toggle(&mut self) { self.visible = !self.visible; }
+
+    fn update(&mut self, dt: f32) {
+        let target = if self.visible { 1.0_f32 } else { 0.0 };
+        self.fade += (target - self.fade) * (dt * 14.0).min(1.0);
+        if self.fade < 0.005 { self.fade = 0.0; }
+    }
+
+    fn panel_rect(&self) -> Rect {
+        let pw = 260.0_f32;
+        let ph = 220.0_f32;
+        Rect::new(
+            (screen_width()  - pw) / 2.0,
+            (screen_height() - ph) / 2.0 + 80.0,
+            pw, ph,
+        )
+    }
+
+    fn handle_click(&mut self, mx: f32, my: f32) -> bool {
+        if self.fade < 0.01 { return false; }
+        let p = self.panel_rect();
+        if !p.contains(vec2(mx, my)) { return false; }
+
+        // Shape buttons (row of 5)
+        let shapes = SpawnShape::all();
+        let btn_w = (p.w - 20.0) / shapes.len() as f32;
+        for (i, &s) in shapes.iter().enumerate() {
+            let r = Rect::new(p.x + 10.0 + i as f32 * btn_w, p.y + 30.0, btn_w - 4.0, 34.0);
+            if r.contains(vec2(mx, my)) { self.shape = s; return true; }
+        }
+
+        // Color swatches
+        let sw = 24.0_f32;
+        let gap = 6.0_f32;
+        let total = SPAWN_COLORS.len() as f32 * (sw + gap) - gap;
+        let sx0 = p.x + (p.w - total) / 2.0;
+        for (i, _) in SPAWN_COLORS.iter().enumerate() {
+            let r = Rect::new(sx0 + i as f32 * (sw + gap), p.y + 100.0, sw, sw);
+            if r.contains(vec2(mx, my)) { self.color_idx = i; return true; }
+        }
+
+        // Size slider (simple click → set)
+        let track = Rect::new(p.x + 20.0, p.y + 158.0, p.w - 40.0, 10.0);
+        if track.contains(vec2(mx, my)) {
+            let t = ((mx - track.x) / track.w).clamp(0.0, 1.0);
+            self.size = 30.0 + t * 150.0;
+            return true;
+        }
+
+        true // consumed
+    }
+
+    fn draw(&self) {
+        if self.fade < 0.01 { return; }
+        let f = self.fade;
+        let a = |v: u8| (v as f32 * f) as u8;
+        let p = self.panel_rect();
+
+        draw_rectangle(p.x, p.y, p.w, p.h, Color::from_rgba(12, 10, 24, a(245)));
+        draw_rectangle_lines(p.x, p.y, p.w, p.h, 1.5, Color::from_rgba(80, 75, 140, a(255)));
+
+        let title = "SPAWN OBJECT";
+        let tw = measure_text(title, None, 14, 1.0).width;
+        draw_text(title, p.x + (p.w - tw) / 2.0, p.y + 18.0, 14.0,
+                  Color::from_rgba(170, 165, 220, a(210)));
+
+        // Shape buttons
+        let shapes = SpawnShape::all();
+        let btn_w = (p.w - 20.0) / shapes.len() as f32;
+        for (i, &s) in shapes.iter().enumerate() {
+            let r = Rect::new(p.x + 10.0 + i as f32 * btn_w, p.y + 30.0, btn_w - 4.0, 34.0);
+            let active = s == self.shape;
+            let bg = if active { Color::from_rgba(55, 50, 115, a(240)) }
+                     else      { Color::from_rgba(22, 19, 45, a(220)) };
+            let border = if active { Color::from_rgba(160, 150, 255, a(255)) }
+                         else      { Color::from_rgba(55, 50, 95, a(180)) };
+            draw_rectangle(r.x, r.y, r.w, r.h, bg);
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0, border);
+            let lw = measure_text(s.label(), None, 12, 1.0).width;
+            let tc = if active { Color::from_rgba(255, 255, 255, a(255)) }
+                     else      { Color::from_rgba(140, 135, 190, a(255)) };
+            draw_text(s.label(), r.x + (r.w - lw) / 2.0, r.y + 22.0, 12.0, tc);
+        }
+
+        // Color label
+        draw_text("Color", p.x + 10.0, p.y + 92.0, 13.0,
+                  Color::from_rgba(130, 125, 180, a(200)));
+
+        // Color swatches
+        let sw = 24.0_f32;
+        let gap = 6.0_f32;
+        let total = SPAWN_COLORS.len() as f32 * (sw + gap) - gap;
+        let sx0 = p.x + (p.w - total) / 2.0;
+        for (i, &(cr, cg, cb)) in SPAWN_COLORS.iter().enumerate() {
+            let rx = sx0 + i as f32 * (sw + gap);
+            let ry = p.y + 100.0;
+            draw_rectangle(rx, ry, sw, sw, Color::from_rgba(cr, cg, cb, a(230)));
+            if i == self.color_idx {
+                draw_rectangle_lines(rx - 1.0, ry - 1.0, sw + 2.0, sw + 2.0, 2.0,
+                                     Color::from_rgba(255, 255, 255, a(255)));
+            }
+        }
+
+        // Size label + slider
+        draw_text(&format!("Size  {}px", self.size as i32),
+                  p.x + 10.0, p.y + 152.0, 13.0,
+                  Color::from_rgba(130, 125, 180, a(200)));
+        let track_x = p.x + 20.0;
+        let track_y = p.y + 158.0;
+        let track_w = p.w - 40.0;
+        draw_rectangle(track_x, track_y, track_w, 6.0,
+                       Color::from_rgba(40, 38, 70, a(255)));
+        let t = (self.size - 30.0) / 150.0;
+        draw_rectangle(track_x, track_y, track_w * t, 6.0,
+                       Color::from_rgba(130, 120, 230, a(255)));
+        draw_circle(track_x + track_w * t, track_y + 3.0, 7.0,
+                    Color::from_rgba(180, 170, 255, a(255)));
+
+        // Hint
+        let hint = "Click in scene to spawn";
+        let hw = measure_text(hint, None, 12, 1.0).width;
+        draw_text(hint, p.x + (p.w - hw) / 2.0, p.y + 200.0, 12.0,
+                  Color::from_rgba(100, 95, 150, a(180)));
+    }
+
+    fn spawn_object(
+        &self,
+        spawn_px: (f32, f32),
+        bodies:    &mut RigidBodySet,
+        colliders: &mut ColliderSet,
+    ) -> Option<PhysicsImage> {
+        let &(cr, cg, cb) = &SPAWN_COLORS[self.color_idx];
+        let size = self.size as u32;
+        let (texture, raw) = make_spawn_texture(self.shape, size, cr, cg, cb);
+        let hull_pts = compute_hull_pts(&raw);
+
+        let half_w = self.size / 2.0 / PPM;
+        let half_h = self.size / 2.0 / PPM;
+
+        let (bx, by) = to_phys(spawn_px.0, spawn_px.1);
+        let body = RigidBodyBuilder::dynamic()
+            .translation(vector![bx, by])
+            .angular_damping(0.6)
+            .build();
+        let body_handle = bodies.insert(body);
+
+        let collider = make_shape_collider(&hull_pts, half_w, half_h, DENSITY);
+        let collider_handle = colliders.insert_with_parent(collider, body_handle, bodies);
+        let fixed_mass = bodies[body_handle].mass();
+
+        Some(PhysicsImage {
+            path: format!("__spawn__{}", self.shape.label()),
+            texture,
+            gif: None,
+            frame_idx: 0,
+            frame_timer: 0.0,
+            body_handle,
+            collider_handle,
+            half_w,
+            half_h,
+            fixed_mass,
+            trail: VecDeque::new(),
+            hull_pts,
+        })
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Background
 // ═══════════════════════════════════════════════════════════════
 #[derive(Clone, Copy, PartialEq)]
@@ -1827,6 +2138,8 @@ async fn main() {
     let mut drag_mode_menu  = DragModeMenu::new();
     let mut gravity_bombs: Vec<GravityBomb> = Vec::new();
     let mut background = Background::new();
+    let mut spawner    = Spawner::new();
+    let mut spawner_size_drag = false;
     let mut field_active    = false;
     let mut slider_radius = Slider::new(150.0, 30.0,  450.0); // pixels
     let mut slider_force  = Slider::new(300.0, 20.0, 1500.0);
@@ -1867,6 +2180,7 @@ async fn main() {
         // ── animation ─────────────────────────────────────────
         menu.update(dt);
         drag_mode_menu.update(dt);
+        spawner.update(dt);
 
         let audio_loaded = mod_player.info().loaded
             || reg_player.as_ref().map_or(false, |p| p.info().loaded);
@@ -2138,6 +2452,7 @@ async fn main() {
             }
         }
         if is_key_pressed(KeyCode::T)     { trail_enabled = !trail_enabled; }
+        if is_key_pressed(KeyCode::N)     { spawner.toggle(); }
         if is_key_pressed(KeyCode::D)     { show_debug = !show_debug; }
         if is_key_pressed(KeyCode::P) {
             if mod_player.info().loaded  { mod_player.toggle_pause(); }
@@ -2222,6 +2537,13 @@ async fn main() {
         // ── mouse motion ──────────────────────────────────────
         menu.handle_motion(mx, my);
         drag_mode_menu.handle_motion(mx, my);
+        if spawner_size_drag {
+            let p = spawner.panel_rect();
+            let track_x = p.x + 20.0;
+            let track_w = p.w - 40.0;
+            let t = ((mx - track_x) / track_w).clamp(0.0, 1.0);
+            spawner.size = 30.0 + t * 150.0;
+        }
         if show_sliders {
             slider_radius.continue_drag(r_track, mx);
             slider_force.continue_drag(f_track, mx);
@@ -2315,6 +2637,21 @@ async fn main() {
                     drag_mode = new_mode;
                     drag = None;
                     field_active = false;
+                }
+            } else if spawner.fade > 0.01 {
+                let p = spawner.panel_rect();
+                let track = Rect::new(p.x + 20.0, p.y + 158.0, p.w - 40.0, 16.0);
+                if track.contains(vec2(mx, my)) {
+                    spawner_size_drag = true;
+                } else if spawner.handle_click(mx, my) {
+                    // panel interaction consumed
+                } else {
+                    // click outside panel → spawn object
+                    if let Some(obj) = spawner.spawn_object(
+                        (mx, my), &mut pw.bodies, &mut pw.colliders)
+                    {
+                        objects.push(obj);
+                    }
                 }
             } else if menu.visible {
                 if let Some((action, idx)) = menu.handle_click(mx, my) {
@@ -2420,6 +2757,7 @@ async fn main() {
         }
 
         if is_mouse_button_released(MouseButton::Left) {
+            spawner_size_drag = false;
             slider_radius.stop();
             slider_force.stop();
             vol_slider.stop();
@@ -2849,7 +3187,7 @@ async fn main() {
                            Color::from_rgba(100, 90, 180, (t * 180.0) as u8));
         }
         draw_text(
-            "A = images  |  Left-drag = throw  |  Right-click = menu  |  M = music  |  D = debug",
+            "A = images  |  N = spawner  |  Left-drag = throw  |  Right-click = menu  |  M = music  |  D = debug",
             10.0, 18.0 + hud_y, 14.0, Color::from_rgba(160, 155, 210, 255));
 
         let right_str = format!(
@@ -3015,6 +3353,7 @@ async fn main() {
 
         // Drag-mode picker (grid, above everything)
         drag_mode_menu.draw(drag_mode);
+        spawner.draw();
 
         // Context menu is always on top
         menu.draw();
