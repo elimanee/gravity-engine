@@ -56,6 +56,19 @@ const GRAVITY_PRESETS: &[(&str, f32, Color)] = &[
 // ═══════════════════════════════════════════════════════════════
 // Coordinate conversion  (physics ↔ screen)
 // ═══════════════════════════════════════════════════════════════
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
+    let i = (h * 6.0) as u32;
+    let f = h * 6.0 - i as f32;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - f * s);
+    let t = v * (1.0 - (1.0 - f) * s);
+    let (r, g, b) = match i % 6 {
+        0 => (v, t, p), 1 => (q, v, p), 2 => (p, v, t),
+        3 => (p, q, v), 4 => (t, p, v), _ => (v, p, q),
+    };
+    ((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
+}
+
 fn to_phys(px: f32, py: f32) -> (f32, f32) {
     (px / PPM, (screen_height() - py) / PPM)
 }
@@ -814,7 +827,7 @@ impl GravityButtons {
 // Side-border mode
 // ═══════════════════════════════════════════════════════════════
 #[derive(Clone, Copy, PartialEq)]
-enum BorderMode { Default, Loop, Kill, Warp, Bounce, Repulse }
+enum BorderMode { Default, Loop, Kill, Warp, Bounce, Repulse, Portal }
 
 impl BorderMode {
     fn next(self) -> Self {
@@ -824,7 +837,8 @@ impl BorderMode {
             Self::Kill    => Self::Warp,
             Self::Warp    => Self::Bounce,
             Self::Bounce  => Self::Repulse,
-            Self::Repulse => Self::Default,
+            Self::Repulse => Self::Portal,
+            Self::Portal  => Self::Default,
         }
     }
     fn label(self) -> &'static str {
@@ -835,6 +849,7 @@ impl BorderMode {
             Self::Warp    => "WARP",
             Self::Bounce  => "BOUNCE",
             Self::Repulse => "REPULSE",
+            Self::Portal  => "PORTAL",
         }
     }
 }
@@ -898,9 +913,10 @@ impl PhysWorld {
         let hw = sw / 2.0;
         let hh = sh / 2.0;
 
-        let mut walls = vec![
-            (vector![hw, WALL_T / 2.0],      vector![hw + WALL_T,   WALL_T / 2.0]), // floor
-        ];
+        let mut walls = vec![];
+        if self.border_mode != BorderMode::Portal {
+            walls.push((vector![hw, WALL_T / 2.0], vector![hw + WALL_T, WALL_T / 2.0])); // floor
+        }
         if matches!(self.border_mode, BorderMode::Default | BorderMode::Bounce | BorderMode::Repulse) {
             walls.push((vector![WALL_T / 2.0, hh],      vector![WALL_T / 2.0, hh + WALL_T])); // left
             walls.push((vector![sw - WALL_T / 2.0, hh], vector![WALL_T / 2.0, hh + WALL_T])); // right
@@ -2909,6 +2925,23 @@ async fn main() {
                         }
                     }
                 }
+                BorderMode::Portal => {
+                    // All 4 edges are portals — wrap in every direction
+                    for obj in &objects {
+                        if let Some(body) = pw.bodies.get_mut(obj.body_handle) {
+                            let pos = *body.translation();
+                            let mut nx = pos.x;
+                            let mut ny = pos.y;
+                            if pos.x < -1.0             { nx = pos.x + sw_phys + 1.0; }
+                            else if pos.x > sw_phys + 1.0 { nx = pos.x - sw_phys - 1.0; }
+                            if pos.y < -1.0             { ny = pos.y + sh_phys + 1.0; }
+                            else if pos.y > sh_phys + 1.0 { ny = pos.y - sh_phys - 1.0; }
+                            if nx != pos.x || ny != pos.y {
+                                body.set_translation(vector![nx, ny], true);
+                            }
+                        }
+                    }
+                }
                 BorderMode::Default => {}
             }
         }
@@ -3031,6 +3064,46 @@ async fn main() {
                 draw_line(ft * 3.0, 0.0, ft * 3.0, sh, 1.0, Color::from_rgba(200, 100, 255, la));
                 draw_line(sw - ft * 3.0, 0.0, sw - ft * 3.0, sh, 1.0, Color::from_rgba(200, 100, 255, la));
                 draw_line(0.0, sh - ft * 3.0, sw, sh - ft * 3.0, 1.0, Color::from_rgba(200, 100, 255, la));
+            }
+            BorderMode::Portal => {
+                // Animated rainbow portals on all 4 edges
+                let t       = get_time() as f32;
+                let spacing = 52.0_f32;
+                let scroll  = (t * 38.0) % spacing;
+                // Hue-cycling border strips
+                let hue = (t * 0.4) % 1.0;
+                let (pr, pg, pb) = hsv_to_rgb(hue, 0.8, 1.0);
+                let (pr2, pg2, pb2) = hsv_to_rgb((hue + 0.5) % 1.0, 0.8, 1.0);
+                let strip_a = 55u8;
+                draw_rectangle(0.0,      0.0, ft, sh, Color::from_rgba(pr,  pg,  pb,  strip_a));
+                draw_rectangle(sw - ft,  0.0, ft, sh, Color::from_rgba(pr2, pg2, pb2, strip_a));
+                draw_rectangle(0.0,      0.0, sw, ft, Color::from_rgba(pr,  pg,  pb,  strip_a));
+                draw_rectangle(0.0, sh - ft, sw, ft,  Color::from_rgba(pr2, pg2, pb2, strip_a));
+                // Bright edge lines
+                let line_a = 220u8;
+                draw_line(ft, 0.0, ft, sh, 1.5, Color::from_rgba(pr,  pg,  pb,  line_a));
+                draw_line(sw - ft, 0.0, sw - ft, sh, 1.5, Color::from_rgba(pr2, pg2, pb2, line_a));
+                draw_line(0.0, ft, sw, ft, 1.5, Color::from_rgba(pr,  pg,  pb,  line_a));
+                draw_line(0.0, sh - ft, sw, sh - ft, 1.5, Color::from_rgba(pr2, pg2, pb2, line_a));
+                // Scrolling arrow pairs on all 4 edges
+                let acol  = Color::from_rgba(pr,  pg,  pb,  210);
+                let acol2 = Color::from_rgba(pr2, pg2, pb2, 210);
+                let cx_l  = ft * 0.5;
+                let cx_r  = sw - ft * 0.5;
+                let cy_t  = ft * 0.5;
+                let cy_b  = sh - ft * 0.5;
+                let mut y = -scroll;
+                while y < sh {
+                    draw_triangle(vec2(cx_l - 5.0, y - 4.0), vec2(cx_l - 5.0, y + 4.0), vec2(cx_l + 6.0, y), acol);
+                    draw_triangle(vec2(cx_r + 5.0, y - 4.0), vec2(cx_r + 5.0, y + 4.0), vec2(cx_r - 6.0, y), acol2);
+                    y += spacing;
+                }
+                let mut x = -scroll;
+                while x < sw {
+                    draw_triangle(vec2(x - 4.0, cy_t + 5.0), vec2(x + 4.0, cy_t + 5.0), vec2(x, cy_t - 6.0), acol);
+                    draw_triangle(vec2(x - 4.0, cy_b - 5.0), vec2(x + 4.0, cy_b - 5.0), vec2(x, cy_b + 6.0), acol2);
+                    x += spacing;
+                }
             }
         }
 
