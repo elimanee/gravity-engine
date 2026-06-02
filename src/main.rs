@@ -958,6 +958,145 @@ impl PhysWorld {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Background
+// ═══════════════════════════════════════════════════════════════
+#[derive(Clone, Copy, PartialEq)]
+enum BgMode { Dark, Space, Grid, Sunset, Ocean, Custom }
+
+impl BgMode {
+    fn next(self) -> Self {
+        match self {
+            Self::Dark   => Self::Space,
+            Self::Space  => Self::Grid,
+            Self::Grid   => Self::Sunset,
+            Self::Sunset => Self::Ocean,
+            Self::Ocean  => Self::Custom,
+            Self::Custom => Self::Dark,
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Dark   => "Dark",
+            Self::Space  => "Space",
+            Self::Grid   => "Grid",
+            Self::Sunset => "Sunset",
+            Self::Ocean  => "Ocean",
+            Self::Custom => "Custom",
+        }
+    }
+}
+
+struct Background {
+    mode:    BgMode,
+    texture: Option<Texture2D>,
+    // star positions (x, y, radius, twinkle-offset) generated once
+    stars:   Vec<(f32, f32, f32, f32)>,
+}
+
+impl Background {
+    fn new() -> Self {
+        let stars = (0..220).map(|i| {
+            let x = (i as f32 * 137.508).fract() * 4000.0;
+            let y = (i as f32 * 97.312).fract()  * 2500.0;
+            let r = (i as f32 * 53.1).fract() * 1.4 + 0.3;
+            let o = (i as f32 * 23.7).fract() * std::f32::consts::TAU;
+            (x, y, r, o)
+        }).collect();
+        Background { mode: BgMode::Dark, texture: None, stars }
+    }
+
+    fn draw(&self, sw: f32, sh: f32) {
+        let t = get_time() as f32;
+        match self.mode {
+            BgMode::Dark => {
+                clear_background(Color::from_rgba(15, 14, 25, 255));
+                draw_rectangle(0.0, 0.0,      sw, sh / 2.0, Color::from_rgba(12, 12, 22, 255));
+                draw_rectangle(0.0, sh / 2.0, sw, sh / 2.0, Color::from_rgba(28, 18, 48, 255));
+            }
+            BgMode::Space => {
+                clear_background(Color::from_rgba(4, 4, 12, 255));
+                // Nebula gradient
+                draw_rectangle(0.0, 0.0, sw, sh * 0.6,
+                               Color::from_rgba(8, 6, 22, 255));
+                draw_rectangle(0.0, sh * 0.4, sw, sh * 0.6,
+                               Color::from_rgba(18, 5, 30, 255));
+                // Stars with twinkle
+                for &(sx, sy, sr, off) in &self.stars {
+                    let sx = sx % sw;
+                    let sy = sy % sh;
+                    let twinkle = ((t * 1.8 + off).sin() * 0.4 + 0.6).max(0.1);
+                    let a = (twinkle * 220.0) as u8;
+                    draw_circle(sx, sy, sr, Color::from_rgba(200, 210, 255, a));
+                }
+            }
+            BgMode::Grid => {
+                clear_background(Color::from_rgba(10, 10, 18, 255));
+                let step = 48.0_f32;
+                let col  = Color::from_rgba(35, 35, 60, 255);
+                let col2 = Color::from_rgba(50, 50, 80, 255);
+                let mut x = 0.0_f32;
+                while x <= sw {
+                    let thick = if (x / step) as i32 % 4 == 0 { 1.5 } else { 0.7 };
+                    let c = if (x / step) as i32 % 4 == 0 { col2 } else { col };
+                    draw_line(x, 0.0, x, sh, thick, c);
+                    x += step;
+                }
+                let mut y = 0.0_f32;
+                while y <= sh {
+                    let thick = if (y / step) as i32 % 4 == 0 { 1.5 } else { 0.7 };
+                    let c = if (y / step) as i32 % 4 == 0 { col2 } else { col };
+                    draw_line(0.0, y, sw, y, thick, c);
+                    y += step;
+                }
+            }
+            BgMode::Sunset => {
+                clear_background(Color::from_rgba(20, 10, 30, 255));
+                // Sky gradient: deep purple → orange → warm pink
+                draw_rectangle(0.0, 0.0,          sw, sh * 0.35, Color::from_rgba(20,  10,  50, 255));
+                draw_rectangle(0.0, sh * 0.35,    sw, sh * 0.25, Color::from_rgba(130, 40,  60, 255));
+                draw_rectangle(0.0, sh * 0.60,    sw, sh * 0.20, Color::from_rgba(220, 100, 30, 255));
+                draw_rectangle(0.0, sh * 0.80,    sw, sh * 0.20, Color::from_rgba(240, 160, 40, 255));
+                // Sun glow
+                let sun_x = sw * 0.5;
+                let sun_y = sh * 0.72;
+                draw_circle(sun_x, sun_y, 60.0, Color::from_rgba(255, 220, 100, 200));
+                draw_circle(sun_x, sun_y, 38.0, Color::from_rgba(255, 240, 180, 230));
+                draw_circle(sun_x, sun_y, 20.0, Color::from_rgba(255, 255, 220, 255));
+            }
+            BgMode::Ocean => {
+                clear_background(Color::from_rgba(5, 15, 35, 255));
+                draw_rectangle(0.0, 0.0,       sw, sh * 0.4, Color::from_rgba(5,  18, 45, 255));
+                draw_rectangle(0.0, sh * 0.4,  sw, sh * 0.3, Color::from_rgba(8,  35, 70, 255));
+                draw_rectangle(0.0, sh * 0.7,  sw, sh * 0.3, Color::from_rgba(12, 55, 95, 255));
+                // Animated caustic ripples
+                for i in 0..6u8 {
+                    let cx = sw * (0.15 + i as f32 * 0.14);
+                    let cy = sh * (0.55 + (i as f32 * 0.07).sin() * 0.15);
+                    let r  = 40.0 + (t * 1.2 + i as f32 * 1.1).sin() * 15.0;
+                    let a  = (30.0 + (t * 1.5 + i as f32 * 0.9).sin() * 20.0) as u8;
+                    draw_circle_lines(cx, cy, r, 1.0, Color::from_rgba(40, 130, 200, a));
+                }
+            }
+            BgMode::Custom => {
+                if let Some(ref tex) = self.texture {
+                    draw_texture_ex(tex, 0.0, 0.0, WHITE, DrawTextureParams {
+                        dest_size: Some(vec2(sw, sh)),
+                        ..Default::default()
+                    });
+                } else {
+                    // Fallback when no image loaded yet
+                    clear_background(Color::from_rgba(15, 14, 25, 255));
+                    let msg = "Press G to load a background image";
+                    let mw  = measure_text(msg, None, 18, 1.0).width;
+                    draw_text(msg, (sw - mw) / 2.0, sh / 2.0, 18.0,
+                              Color::from_rgba(120, 115, 180, 200));
+                }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Drag modes
 // ═══════════════════════════════════════════════════════════════
 #[derive(Clone, Copy, PartialEq)]
@@ -1687,6 +1826,7 @@ async fn main() {
     let mut drag_mode       = DragMode::Spring;
     let mut drag_mode_menu  = DragModeMenu::new();
     let mut gravity_bombs: Vec<GravityBomb> = Vec::new();
+    let mut background = Background::new();
     let mut field_active    = false;
     let mut slider_radius = Slider::new(150.0, 30.0,  450.0); // pixels
     let mut slider_force  = Slider::new(300.0, 20.0, 1500.0);
@@ -1963,6 +2103,40 @@ async fn main() {
             else { drag_mode_menu.open(); }
         }
         if is_key_pressed(KeyCode::B)     { pw.set_border_mode(pw.border_mode.next()); }
+        if is_key_pressed(KeyCode::G) {
+            if background.mode == BgMode::Custom {
+                // Load a custom background image
+                if let Some(path) = FileDialog::new()
+                    .add_filter("Image", &["png","jpg","jpeg","webp","bmp","gif"])
+                    .pick_file()
+                {
+                    if let Ok(bytes) = std::fs::read(&path) {
+                        if let Ok(img) = image::load_from_memory(&bytes) {
+                            let img   = img.to_rgba8();
+                            let tex   = Texture2D::from_rgba8(img.width() as u16, img.height() as u16, &img);
+                            background.texture = Some(tex);
+                        }
+                    }
+                }
+            } else {
+                background.mode = background.mode.next();
+                // If we just switched to Custom, open picker immediately
+                if background.mode == BgMode::Custom {
+                    if let Some(path) = FileDialog::new()
+                        .add_filter("Image", &["png","jpg","jpeg","webp","bmp","gif"])
+                        .pick_file()
+                    {
+                        if let Ok(bytes) = std::fs::read(&path) {
+                            if let Ok(img) = image::load_from_memory(&bytes) {
+                                let img   = img.to_rgba8();
+                                let tex   = Texture2D::from_rgba8(img.width() as u16, img.height() as u16, &img);
+                                background.texture = Some(tex);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if is_key_pressed(KeyCode::T)     { trail_enabled = !trail_enabled; }
         if is_key_pressed(KeyCode::D)     { show_debug = !show_debug; }
         if is_key_pressed(KeyCode::P) {
@@ -2412,9 +2586,7 @@ async fn main() {
         // ══════════════════════════════════════════════════════
         // Draw
         // ══════════════════════════════════════════════════════
-        clear_background(Color::from_rgba(15, 14, 25, 255));
-        draw_rectangle(0.0, 0.0, sw, sh / 2.0, Color::from_rgba(12, 12, 22, 255));
-        draw_rectangle(0.0, sh / 2.0, sw, sh / 2.0, Color::from_rgba(28, 18, 48, 255));
+        background.draw(sw, sh);
 
         let ft  = (WALL_T * PPM) as f32;
         // Floor (always solid)
@@ -2681,9 +2853,10 @@ async fn main() {
             10.0, 18.0 + hud_y, 14.0, Color::from_rgba(160, 155, 210, 255));
 
         let right_str = format!(
-            "Tab=drag:{}   B=sides:{}   R=clear   Space=pause   Q=quit   obj:{}{}",
+            "Tab=drag:{}   B=sides:{}   G=bg:{}   R=clear   Space=pause   Q=quit   obj:{}{}",
             drag_mode.label(),
             pw.border_mode.label(),
+            background.mode.label(),
             objects.len(),
             if paused { "  PAUSED" } else { "" },
         );
