@@ -33,6 +33,98 @@ use std::io::BufReader;
 use std::collections::VecDeque;
 
 // ═══════════════════════════════════════════════════════════════
+// Window movement tracker — shakes rigid bodies when window moves
+// ═══════════════════════════════════════════════════════════════
+struct WindowTracker {
+    prev_x: f32,
+    prev_y: f32,
+    #[cfg(target_os = "linux")]
+    dpy: *mut x11::xlib::Display,
+}
+
+// Raw pointer is only used on the main thread.
+unsafe impl Send for WindowTracker {}
+
+impl WindowTracker {
+    fn new() -> Self {
+        #[cfg(target_os = "linux")]
+        unsafe {
+            let dpy = x11::xlib::XOpenDisplay(std::ptr::null());
+            let (px, py) = Self::query(dpy);
+            return WindowTracker { dpy, prev_x: px, prev_y: py };
+        }
+        #[cfg(not(target_os = "linux"))]
+        WindowTracker { prev_x: 0.0, prev_y: 0.0 }
+    }
+
+    #[cfg(target_os = "linux")]
+    unsafe fn query(dpy: *mut x11::xlib::Display) -> (f32, f32) {
+        use x11::xlib::*;
+        if dpy.is_null() { return (0.0, 0.0); }
+        let mut win: Window = 0;
+        let mut revert = 0i32;
+        XGetInputFocus(dpy, &mut win, &mut revert);
+        if win <= 1 { return (0.0, 0.0); }
+        let root = XDefaultRootWindow(dpy);
+        let mut w = win;
+        for _ in 0..8 {
+            let mut parent: Window = 0;
+            let mut rw:     Window = 0;
+            let mut children: *mut Window = std::ptr::null_mut();
+            let mut n: u32 = 0;
+            XQueryTree(dpy, w, &mut rw, &mut parent, &mut children, &mut n);
+            if !children.is_null() { XFree(children as *mut _); }
+            if parent == root || parent == 0 { break; }
+            w = parent;
+        }
+        let mut x = 0i32;
+        let mut y = 0i32;
+        let mut child: Window = 0;
+        XTranslateCoordinates(dpy, w, root, 0, 0, &mut x, &mut y, &mut child);
+        (x as f32, y as f32)
+    }
+
+    fn tick(&mut self, bodies: &mut RigidBodySet) {
+        #[cfg(target_os = "linux")]
+        let (cx, cy) = unsafe { Self::query(self.dpy) };
+        #[cfg(not(target_os = "linux"))]
+        let (cx, cy) = (self.prev_x, self.prev_y);
+
+        let dx = cx - self.prev_x;
+        let dy = cy - self.prev_y;
+        self.prev_x = cx;
+        self.prev_y = cy;
+
+        if dx.abs() < 0.5 && dy.abs() < 0.5 { return; }
+
+        // Window moved dx,dy pixels → objects feel inertia in the opposite direction.
+        // Divide by PPM to convert px to physics-metres; y axis is flipped.
+        let sensitivity = 8.0_f32;
+        let vx = -dx / PPM * sensitivity;
+        let vy =  dy / PPM * sensitivity;
+
+        for (_, body) in bodies.iter_mut() {
+            if body.is_dynamic() {
+                let v = *body.linvel();
+                body.set_linvel(vector![v.x + vx, v.y + vy], true);
+                body.wake_up(true);
+            }
+        }
+    }
+}
+
+impl Drop for WindowTracker {
+    fn drop(&mut self) {
+        #[cfg(target_os = "linux")]
+        unsafe {
+            if !self.dpy.is_null() {
+                x11::xlib::XCloseDisplay(self.dpy);
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Constants
 // ═══════════════════════════════════════════════════════════════
 const PPM:        f32 = 60.0;
@@ -2156,6 +2248,7 @@ async fn main() {
     let mut background = Background::new();
     let mut spawner    = Spawner::new();
     let mut spawner_size_drag = false;
+    let mut win_tracker = WindowTracker::new();
     let mut field_active    = false;
     let mut slider_radius = Slider::new(150.0, 30.0,  450.0); // pixels
     let mut slider_force  = Slider::new(300.0, 20.0, 1500.0);
@@ -2825,7 +2918,10 @@ async fn main() {
         }
 
         // ── physics step ──────────────────────────────────────
-        if !paused { pw.step(); }
+        if !paused {
+            win_tracker.tick(&mut pw.bodies);
+            pw.step();
+        }
 
         // ── side-border logic ─────────────────────────────────
         if !paused {

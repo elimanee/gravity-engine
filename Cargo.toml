@@ -32,6 +32,9 @@ resvg       = "0.44"
 # Utility
 glam        = "0.29"   # re-exported by rapier, listed explicitly for clarity
 
+[target.'cfg(target_os = "linux")'.dependencies]
+x11 = { version = "2.21", features = ["xlib"] }
+
 [profile.release]
 opt-level     = 3
 lto           = "fat"   # whole-program link-time optimisation across all crates
