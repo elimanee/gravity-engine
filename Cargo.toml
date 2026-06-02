@@ -1,0 +1,47 @@
+[package]
+name    = "gravity_engine"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "gravity_engine"
+path = "src/main.rs"
+
+[dependencies]
+# Window + input + rendering
+macroquad   = "0.4"
+# Physics
+rapier2d    = { version = "0.22", features = ["default"] }
+# Image loading — default features already include png, jpeg, gif, webp, bmp,
+# tiff, ico, tga, qoi, hdr, exr, pnm (ppm/pgm/pbm), dds, farbfeld, …
+image       = { version = "0.25" }
+# Animated GIF frame extraction
+gif         = "0.13"
+# Native file dialog (replaces drag & drop on Linux)
+rfd         = "0.15"
+# Tracker module playback
+openmpt     = "0.3"    # libopenmpt bindings (.mod / .xm / .it / .s3m / …)
+cpal        = "0.15"   # cross-platform audio output
+ringbuf     = "0.3"    # lock-free ring buffer for the decode→playback pipe
+# Common audio playback (.mp3 / .flac / .wav / .ogg / …)
+rodio       = { version = "0.19", features = ["symphonia-all"] }
+# Synchronous HTTP for internet-radio streams in .pls playlists
+ureq        = "2"
+# SVG rasteriser (includes usvg + tiny_skia as re-exports)
+resvg       = "0.44"
+# Utility
+glam        = "0.29"   # re-exported by rapier, listed explicitly for clarity
+
+[profile.release]
+opt-level     = 3
+lto           = "fat"   # whole-program link-time optimisation across all crates
+codegen-units = 1       # single codegen unit maximises inlining across modules
+panic         = "abort" # removes unwinding machinery (~5–10 % size reduction)
+strip         = true    # strip debug symbols → smaller binary
+
+# Tune for the host CPU (SIMD, etc.) — binary won't be portable but fastest here
+[profile.release.build-override]
+opt-level = 3
+
+[build]
+rustflags = ["-C", "target-cpu=native"]
