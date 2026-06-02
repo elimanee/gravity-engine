@@ -34,31 +34,85 @@ use std::collections::VecDeque;
 
 // ═══════════════════════════════════════════════════════════════
 // Window movement tracker — shakes rigid bodies when window moves
+// Supports X11 and KDE Wayland (via KWin DBus).
 // ═══════════════════════════════════════════════════════════════
 struct WindowTracker {
     prev_x: f32,
     prev_y: f32,
     #[cfg(target_os = "linux")]
-    dpy: *mut x11::xlib::Display,
+    x11_dpy: *mut x11::xlib::Display,
+    #[cfg(target_os = "linux")]
+    kde:     Option<zbus::blocking::Connection>, // Some on KDE Wayland
 }
 
-// Raw pointer is only used on the main thread.
 unsafe impl Send for WindowTracker {}
 
 impl WindowTracker {
     fn new() -> Self {
+        #[cfg(not(target_os = "linux"))]
+        return WindowTracker { prev_x: 0.0, prev_y: 0.0 };
+
         #[cfg(target_os = "linux")]
-        unsafe {
-            let dpy = x11::xlib::XOpenDisplay(std::ptr::null());
-            let (px, py) = Self::query(dpy);
-            return WindowTracker { dpy, prev_x: px, prev_y: py };
+        {
+            let x11_dpy = unsafe { x11::xlib::XOpenDisplay(std::ptr::null()) };
+
+            // On Wayland, try to connect to KWin DBus
+            let kde = if std::env::var("WAYLAND_DISPLAY").is_ok() {
+                zbus::blocking::Connection::session().ok().filter(|conn| {
+                    conn.call_method(
+                        Some("org.kde.KWin"), "/KWin",
+                        Some("org.kde.KWin"), "activeClient", &(),
+                    ).is_ok()
+                })
+            } else {
+                None
+            };
+
+            let mut t = WindowTracker { x11_dpy, kde, prev_x: 0.0, prev_y: 0.0 };
+            let (px, py) = t.get_pos();
+            t.prev_x = px;
+            t.prev_y = py;
+            t
+        }
+    }
+
+    fn get_pos(&self) -> (f32, f32) {
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(ref conn) = self.kde {
+                if let Some(pos) = Self::kde_pos(conn) { return pos; }
+            }
+            return unsafe { Self::x11_pos(self.x11_dpy) };
         }
         #[cfg(not(target_os = "linux"))]
-        WindowTracker { prev_x: 0.0, prev_y: 0.0 }
+        (self.prev_x, self.prev_y)
     }
 
     #[cfg(target_os = "linux")]
-    unsafe fn query(dpy: *mut x11::xlib::Display) -> (f32, f32) {
+    fn kde_pos(conn: &zbus::blocking::Connection) -> Option<(f32, f32)> {
+        use std::collections::HashMap;
+        use zbus::zvariant::OwnedValue;
+
+        // Get focused window ID from KWin
+        let id: u32 = conn.call_method(
+            Some("org.kde.KWin"), "/KWin",
+            Some("org.kde.KWin"), "activeClient", &(),
+        ).ok()?.body().deserialize().ok()?;
+        if id == 0 { return None; }
+
+        // Get window geometry from KWin
+        let info: HashMap<String, OwnedValue> = conn.call_method(
+            Some("org.kde.KWin"), "/KWin",
+            Some("org.kde.KWin"), "getWindowInfo", &(id,),
+        ).ok()?.body().deserialize().ok()?;
+
+        let x: i32 = i32::try_from(info.get("x")?).ok()?;
+        let y: i32 = i32::try_from(info.get("y")?).ok()?;
+        Some((x as f32, y as f32))
+    }
+
+    #[cfg(target_os = "linux")]
+    unsafe fn x11_pos(dpy: *mut x11::xlib::Display) -> (f32, f32) {
         use x11::xlib::*;
         if dpy.is_null() { return (0.0, 0.0); }
         let mut win: Window = 0;
@@ -85,11 +139,7 @@ impl WindowTracker {
     }
 
     fn tick(&mut self, bodies: &mut RigidBodySet, sensitivity: f32) {
-        #[cfg(target_os = "linux")]
-        let (cx, cy) = unsafe { Self::query(self.dpy) };
-        #[cfg(not(target_os = "linux"))]
-        let (cx, cy) = (self.prev_x, self.prev_y);
-
+        let (cx, cy) = self.get_pos();
         let dx = cx - self.prev_x;
         let dy = cy - self.prev_y;
         self.prev_x = cx;
@@ -97,8 +147,6 @@ impl WindowTracker {
 
         if dx.abs() < 0.5 && dy.abs() < 0.5 { return; }
 
-        // Window moved dx,dy pixels → objects feel inertia in the opposite direction.
-        // Divide by PPM to convert px to physics-metres; y axis is flipped.
         let vx = -dx / PPM * sensitivity;
         let vy =  dy / PPM * sensitivity;
 
@@ -116,8 +164,8 @@ impl Drop for WindowTracker {
     fn drop(&mut self) {
         #[cfg(target_os = "linux")]
         unsafe {
-            if !self.dpy.is_null() {
-                x11::xlib::XCloseDisplay(self.dpy);
+            if !self.x11_dpy.is_null() {
+                x11::xlib::XCloseDisplay(self.x11_dpy);
             }
         }
     }
@@ -241,6 +289,135 @@ fn load_static_image_raw(path: &str, max_px: u32) -> Option<(Texture2D, image::R
 
 fn load_static_image(path: &str, max_px: u32) -> Option<Texture2D> {
     load_static_image_raw(path, max_px).map(|(t, _)| t)
+}
+
+fn decode_image_bytes(data: &[u8], max_px: u32) -> Option<(Texture2D, image::RgbaImage)> {
+    let img = image::load_from_memory(data).ok()?.into_rgba8();
+    let (w, h) = img.dimensions();
+    let scale  = (max_px as f32 / w.max(h) as f32).min(1.0);
+    let nw = ((w as f32 * scale) as u32).max(1);
+    let nh = ((h as f32 * scale) as u32).max(1);
+    let resized = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
+    let tex = Texture2D::from_rgba8(nw as u16, nh as u16, &resized);
+    tex.set_filter(FilterMode::Linear);
+    Some((tex, resized))
+}
+
+fn decode_gif_bytes(data: &[u8], max_px: u32) -> Option<GifFrames> {
+    let mut decoder = gif::DecodeOptions::new();
+    decoder.set_color_output(gif::ColorOutput::RGBA);
+    let mut decoder = decoder.read_info(std::io::Cursor::new(data)).ok()?;
+    let orig_w = decoder.width()  as u32;
+    let orig_h = decoder.height() as u32;
+    let scale  = (max_px as f32 / orig_w.max(orig_h) as f32).min(1.0);
+    let out_w  = ((orig_w as f32 * scale) as u32).max(1);
+    let out_h  = ((orig_h as f32 * scale) as u32).max(1);
+    let mut frames    = Vec::new();
+    let mut delays_ms = Vec::new();
+    let mut canvas    = vec![0u8; (orig_w * orig_h * 4) as usize];
+    while let Some(frame) = decoder.read_next_frame().ok().flatten() {
+        let delay_ms = (frame.delay as u16).max(2) * 10;
+        let fx = frame.left  as usize;
+        let fy = frame.top   as usize;
+        let fw = frame.width as usize;
+        for row in 0..frame.height as usize {
+            for col in 0..frame.width as usize {
+                let src_i = (row * fw + col) * 4;
+                let dst_x = fx + col;
+                let dst_y = fy + row;
+                let dst_i = (dst_y * orig_w as usize + dst_x) * 4;
+                if dst_i + 3 < canvas.len() && src_i + 3 < frame.buffer.len()
+                    && frame.buffer[src_i + 3] > 0
+                {
+                    canvas[dst_i..dst_i + 4].copy_from_slice(&frame.buffer[src_i..src_i + 4]);
+                }
+            }
+        }
+        let src_img = image::RgbaImage::from_raw(orig_w, orig_h, canvas.clone())?;
+        let resized  = image::imageops::resize(&src_img, out_w, out_h,
+                                               image::imageops::FilterType::Triangle);
+        let tex = Texture2D::from_rgba8(out_w as u16, out_h as u16, &resized);
+        tex.set_filter(FilterMode::Linear);
+        frames.push(tex);
+        delays_ms.push(delay_ms);
+    }
+    if frames.is_empty() { None } else { Some(GifFrames { frames, delays_ms }) }
+}
+
+// ── 88×31 button fetcher ────────────────────────────────────────
+fn scrape_urls(page_url: &str, base: &str) -> Vec<String> {
+    let html = match ureq::get(page_url)
+        .timeout(std::time::Duration::from_secs(15))
+        .call()
+        .ok()
+        .and_then(|r| r.into_string().ok())
+    {
+        Some(h) => h,
+        None    => return Vec::new(),
+    };
+    let mut urls = Vec::new();
+    for chunk in html.split("src=\"") {
+        let end = match chunk.find('"') { Some(i) => i, None => continue };
+        let src = &chunk[..end];
+        if !src.ends_with(".gif") && !src.ends_with(".png") && !src.ends_with(".jpg") {
+            continue;
+        }
+        let url = if src.starts_with("http") {
+            src.to_string()
+        } else {
+            format!("{}{}", base, src.trim_start_matches("./").trim_start_matches('/'))
+        };
+        if !urls.contains(&url) { urls.push(url); }
+    }
+    urls
+}
+
+fn fetch_88x31(tx: std::sync::mpsc::Sender<(String, Vec<u8>)>, count: usize) {
+    std::thread::spawn(move || {
+        // Scrape both galleries and merge the lists
+        let mut urls = scrape_urls(
+            "https://cyber.dabamos.de/88x31/",
+            "https://cyber.dabamos.de/88x31/",
+        );
+        urls.extend(scrape_urls(
+            "https://hellnet.work/8831/",
+            "https://hellnet.work/8831/",
+        ));
+        urls.dedup();
+
+        if urls.is_empty() { return; }
+
+        // Simple LCG shuffle (no rand crate available in threads)
+        let n = urls.len();
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos() as u64;
+        let mut s = seed;
+        let mut indices: Vec<usize> = (0..n).collect();
+        for i in (1..n).rev() {
+            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let j = (s >> 33) as usize % (i + 1);
+            indices.swap(i, j);
+        }
+
+        use std::io::Read;
+        for &idx in indices.iter().take(count) {
+            let url = &urls[idx];
+            if let Ok(resp) = ureq::get(url)
+                .timeout(std::time::Duration::from_secs(8))
+                .call()
+            {
+                let mut bytes = Vec::new();
+                if resp.into_reader().take(512_000).read_to_end(&mut bytes).is_ok()
+                    && !bytes.is_empty()
+                {
+                    let name = url.split('/').last().unwrap_or("button.gif").to_string();
+                    if tx.send((name, bytes)).is_err() { break; }
+                }
+            }
+        }
+    });
 }
 
 // Rasterise an SVG at up to max_px on the longest side.
@@ -428,6 +605,56 @@ impl PhysicsImage {
 
     fn texture_w(&self) -> f32 { self.half_w * 2.0 * PPM }
     fn texture_h(&self) -> f32 { self.half_h * 2.0 * PPM }
+
+    fn from_bytes(
+        name:      &str,
+        data:      &[u8],
+        spawn_px:  (f32, f32),
+        bodies:    &mut RigidBodySet,
+        colliders: &mut ColliderSet,
+    ) -> Option<Self> {
+        let is_gif = name.ends_with(".gif") || {
+            // Detect by GIF magic bytes
+            data.len() >= 6 && (&data[..6] == b"GIF87a" || &data[..6] == b"GIF89a")
+        };
+
+        let (texture, gif, tex_w, tex_h, hull_pts) = if is_gif {
+            let frames = decode_gif_bytes(data, MAX_IMG_PX)?;
+            let tw = frames.frames[0].width();
+            let th = frames.frames[0].height();
+            let tex = frames.frames[0].clone();
+            (tex, Some(frames), tw, th, None)
+        } else {
+            let (tex, raw) = decode_image_bytes(data, MAX_IMG_PX)?;
+            let tw = tex.width();
+            let th = tex.height();
+            let hull = compute_hull_pts(&raw);
+            (tex, None, tw, th, hull)
+        };
+
+        let half_w = tex_w / 2.0 / PPM;
+        let half_h = tex_h / 2.0 / PPM;
+        let (bx, by) = to_phys(spawn_px.0, spawn_px.1);
+        let body = RigidBodyBuilder::dynamic()
+            .translation(vector![bx, by])
+            .linvel(vector![rand::gen_range(-1.0f32, 1.0), 0.0])
+            .angular_damping(0.6)
+            .build();
+        let body_handle = bodies.insert(body);
+        let collider = make_shape_collider(&hull_pts, half_w, half_h, DENSITY);
+        let collider_handle = colliders.insert_with_parent(collider, body_handle, bodies);
+        let fixed_mass = bodies[body_handle].mass();
+
+        Some(PhysicsImage {
+            path: name.to_string(),
+            texture, gif,
+            frame_idx: 0, frame_timer: 0.0,
+            body_handle, collider_handle,
+            half_w, half_h, fixed_mass,
+            trail: VecDeque::new(),
+            hull_pts,
+        })
+    }
 
     fn update_anim(&mut self, dt_ms: f32) {
         let Some(gif) = &self.gif else { return };
@@ -2249,6 +2476,9 @@ async fn main() {
     let mut spawner_size_drag = false;
     let mut win_tracker   = WindowTracker::new();
     let mut win_force_slider = Slider::new(8.0, 0.0, 40.0);
+    let mut win_shake_on     = true;
+    let mut btn_rx: Option<std::sync::mpsc::Receiver<(String, Vec<u8>)>> = None;
+    let mut btn_pending = 0usize; // how many still expected
     let mut field_active    = false;
     let mut slider_radius = Slider::new(150.0, 30.0,  450.0); // pixels
     let mut slider_force  = Slider::new(300.0, 20.0, 1500.0);
@@ -2538,6 +2768,13 @@ async fn main() {
             else { drag_mode_menu.open(); }
         }
         if is_key_pressed(KeyCode::B)     { pw.set_border_mode(pw.border_mode.next()); }
+        if is_key_pressed(KeyCode::W)     { win_shake_on = !win_shake_on; }
+        if is_key_pressed(KeyCode::F) && btn_pending == 0 {
+            let (tx, rx) = std::sync::mpsc::channel();
+            fetch_88x31(tx, 20);
+            btn_rx      = Some(rx);
+            btn_pending = 20;
+        }
         if is_key_pressed(KeyCode::G) {
             if background.mode == BgMode::Custom {
                 // Load a custom background image
@@ -2935,8 +3172,34 @@ async fn main() {
 
         // ── physics step ──────────────────────────────────────
         if !paused {
-            win_tracker.tick(&mut pw.bodies, win_force_slider.value);
+            if win_shake_on { win_tracker.tick(&mut pw.bodies, win_force_slider.value); }
             pw.step();
+        }
+
+        // ── drain incoming 88x31 buttons ─────────────────────
+        if let Some(ref rx) = btn_rx {
+            loop {
+                match rx.try_recv() {
+                    Ok((name, data)) => {
+                        btn_pending = btn_pending.saturating_sub(1);
+                        let sx = rand::gen_range(50.0_f32, sw - 50.0);
+                        let sy = 40.0_f32;
+                        if let Some(obj) = PhysicsImage::from_bytes(
+                            &name, &data, (sx, sy),
+                            &mut pw.bodies, &mut pw.colliders)
+                        {
+                            objects.push(obj);
+                        }
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        btn_pending = 0;
+                        btn_rx = None;
+                        break;
+                    }
+                }
+            }
+            if btn_pending == 0 { btn_rx = None; }
         }
 
         // ── side-border logic ─────────────────────────────────
@@ -3372,7 +3635,7 @@ async fn main() {
                            Color::from_rgba(100, 90, 180, (t * 180.0) as u8));
         }
         draw_text(
-            "A = images  |  N = spawner  |  Left-drag = throw  |  Right-click = menu  |  M = music  |  D = debug",
+            "A = images  |  N = spawner  |  F = 88x31 buttons  |  W = window shake  |  Left-drag = throw  |  Right-click = menu  |  M = music  |  D = debug",
             10.0, 18.0 + hud_y, 14.0, Color::from_rgba(160, 155, 210, 255));
 
         let right_str = format!(
@@ -3542,11 +3805,33 @@ async fn main() {
                            Color::from_rgba(18, 16, 32, 230));
             draw_rectangle_lines(wf_panel_x, wf_panel_y, wf_panel_w, wf_panel_h, 1.0,
                                  Color::from_rgba(75, 70, 125, 255));
-            win_force_slider.draw(wf_track,
-                &format!("Window Force  {:.1}", win_force_slider.value));
+
+            // ON / OFF toggle label (top-right corner of panel)
+            let (tog_label, tog_col) = if win_shake_on {
+                ("ON",  Color::from_rgba(150, 215, 150, 255))
+            } else {
+                ("OFF", Color::from_rgba(215, 100, 100, 255))
+            };
+            let tlw = measure_text(tog_label, None, 12, 1.0).width;
+            draw_text(tog_label,
+                      wf_panel_x + wf_panel_w - tlw - 8.0,
+                      wf_panel_y + 14.0, 12.0, tog_col);
+
+            let label = format!("Window Force  {:.1}  [W]", win_force_slider.value);
+            win_force_slider.draw(wf_track, &label);
         }
 
         // Drag-mode picker (grid, above everything)
+        // Fetch status overlay
+        if btn_pending > 0 {
+            let msg = format!("Fetching 88x31 buttons… {} left", btn_pending);
+            let mw  = measure_text(&msg, None, 15, 1.0).width;
+            let t   = get_time() as f32;
+            let a   = ((t * 4.0).sin() * 0.25 + 0.75) as f32;
+            draw_text(&msg, (sw - mw) / 2.0, sh / 2.0,
+                      15.0, Color { a, ..Color::from_rgba(180, 200, 255, 255) });
+        }
+
         drag_mode_menu.draw(drag_mode);
         spawner.draw();
 
