@@ -7,6 +7,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 ## Features
 
 - **Drop any image** — PNG, JPG, GIF (animated), WebP, BMP, SVG and more; each becomes a rigid body
+- **Object spawner** (`N`) — spawn Circle, Box, Triangle, Pentagon or Star shapes with custom size and color
 - **8 drag modes** — press `Tab` to open the grid picker:
   | Mode | Description |
   |------|-------------|
@@ -18,7 +19,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | Freeze | Slow objects down within a radius |
   | Orbit | Make objects circle the cursor |
   | Bomb | Click to detonate an instant radial explosion |
-- **6 border modes** — press `B` to cycle:
+- **7 border modes** — press `B` to cycle:
   | Mode | Description |
   |------|-------------|
   | Walls | Solid side walls |
@@ -27,6 +28,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | Warp | Objects wrap on all 4 sides |
   | Bounce | Elastic impulse repulsion near edges |
   | Repulse | Soft force field pushing objects away from all edges |
+  | Portal | All 4 edges are portals, no floor — animated rainbow borders |
 - **6 backgrounds** — press `G` to cycle:
   | Mode | Description |
   |------|-------------|
@@ -36,6 +38,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | Sunset | Purple sky fading to an orange horizon with a glowing sun |
   | Ocean | Deep blue with animated caustic ripple rings |
   | Custom | Load any image as a background |
+- **Window shake physics** — moving or shaking the window pushes all rigid bodies via inertia (Linux / X11)
 - **Gravity presets** — ZERO / MOON / MARS / EARTH / JUPITER / HEAVY / REVERSE
 - **Animated trails** — motion-blur-style ghost trail with length and fade sliders
 - **Audio player** — load tracker modules (.mod/.xm/.it/.s3m) or common formats (.mp3/.flac/.wav/.ogg); supports `.pls` playlists and HTTP radio streams
@@ -48,6 +51,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 | Key / Input | Action |
 |-------------|--------|
 | `A` | Open file picker (add image) |
+| `N` | Open object spawner |
 | Left-drag | Throw / interact with objects (depends on drag mode) |
 | Right-click | Context menu (Resize, Copy & Paste, Size All, Delete) |
 | `Tab` | Open drag mode picker |
@@ -60,6 +64,15 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 | `D` | Toggle debug overlay |
 | `R` | Clear all objects |
 | `Q` / `Esc` | Quit |
+
+### Pause menu sliders
+
+| Slider | Description |
+|--------|-------------|
+| Volume | Audio playback volume |
+| Trail Length | Number of ghost frames in the trail |
+| Trail Fade | How long (seconds) before trail ghosts vanish |
+| Window Force | How strongly window movement shakes the rigid bodies (0–40) |
 
 ## Build & Run
 
@@ -77,3 +90,4 @@ cargo run --release
 - [`resvg`](https://github.com/RazrFalcon/resvg) — SVG rasterization
 - [`rfd`](https://github.com/PolyMeilex/rfd) — native file dialog
 - [`image`](https://github.com/image-rs/image) — image loading and processing
+- [`x11`](https://github.com/erlepereira/x11-rs) — window position tracking for shake physics (Linux)
