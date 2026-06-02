@@ -814,14 +814,17 @@ impl GravityButtons {
 // Side-border mode
 // ═══════════════════════════════════════════════════════════════
 #[derive(Clone, Copy, PartialEq)]
-enum BorderMode { Default, Loop, Kill }
+enum BorderMode { Default, Loop, Kill, Warp, Bounce, Repulse }
 
 impl BorderMode {
     fn next(self) -> Self {
         match self {
             Self::Default => Self::Loop,
             Self::Loop    => Self::Kill,
-            Self::Kill    => Self::Default,
+            Self::Kill    => Self::Warp,
+            Self::Warp    => Self::Bounce,
+            Self::Bounce  => Self::Repulse,
+            Self::Repulse => Self::Default,
         }
     }
     fn label(self) -> &'static str {
@@ -829,6 +832,9 @@ impl BorderMode {
             Self::Default => "WALLS",
             Self::Loop    => "LOOP",
             Self::Kill    => "KILL",
+            Self::Warp    => "WARP",
+            Self::Bounce  => "BOUNCE",
+            Self::Repulse => "REPULSE",
         }
     }
 }
@@ -895,7 +901,7 @@ impl PhysWorld {
         let mut walls = vec![
             (vector![hw, WALL_T / 2.0],      vector![hw + WALL_T,   WALL_T / 2.0]), // floor
         ];
-        if self.border_mode == BorderMode::Default {
+        if matches!(self.border_mode, BorderMode::Default | BorderMode::Bounce | BorderMode::Repulse) {
             walls.push((vector![WALL_T / 2.0, hh],      vector![WALL_T / 2.0, hh + WALL_T])); // left
             walls.push((vector![sw - WALL_T / 2.0, hh], vector![WALL_T / 2.0, hh + WALL_T])); // right
         }
@@ -2296,6 +2302,7 @@ async fn main() {
         // ── side-border logic ─────────────────────────────────
         if !paused {
             let sw_phys = sw / PPM;
+            let sh_phys = sh / PPM;
             match pw.border_mode {
                 BorderMode::Loop => {
                     for obj in &objects {
@@ -2327,9 +2334,68 @@ async fn main() {
                                     &mut pw.impulse_joints,
                                     &mut pw.multibody_joints);
                     }
-                    // Renumber drag index if an earlier object was deleted
-                    // (handled by clearing drag on deletion above; the
-                    // index check above only clears for exact matches.)
+                }
+                BorderMode::Warp => {
+                    // Wrap all four sides
+                    for obj in &objects {
+                        if let Some(body) = pw.bodies.get_mut(obj.body_handle) {
+                            let pos = *body.translation();
+                            let mut nx = pos.x;
+                            let mut ny = pos.y;
+                            if pos.x < -1.0        { nx = pos.x + sw_phys + 1.0; }
+                            else if pos.x > sw_phys + 1.0 { nx = pos.x - sw_phys - 1.0; }
+                            if pos.y < -1.0        { ny = pos.y + sh_phys + 1.0; }
+                            else if pos.y > sh_phys + 1.0 { ny = pos.y - sh_phys - 1.0; }
+                            if nx != pos.x || ny != pos.y {
+                                body.set_translation(vector![nx, ny], true);
+                            }
+                        }
+                    }
+                }
+                BorderMode::Bounce => {
+                    // Strong impulse-based repulsion near edges (trampolines)
+                    let margin = 1.5_f32;
+                    let strength = 120.0_f32;
+                    for obj in &objects {
+                        if let Some(body) = pw.bodies.get_mut(obj.body_handle) {
+                            let pos = *body.translation();
+                            let vel = *body.linvel();
+                            let mut imp = vector![0.0_f32, 0.0];
+                            if pos.x < margin && vel.x < 0.0 {
+                                imp.x += strength * (margin - pos.x) / margin;
+                            }
+                            if pos.x > sw_phys - margin && vel.x > 0.0 {
+                                imp.x -= strength * (pos.x - (sw_phys - margin)) / margin;
+                            }
+                            if imp.x != 0.0 || imp.y != 0.0 {
+                                body.apply_impulse(imp, true);
+                            }
+                        }
+                    }
+                }
+                BorderMode::Repulse => {
+                    // Soft continuous force pushing away from all walls
+                    let zone = 3.0_f32;
+                    let strength = 80.0_f32;
+                    for obj in &objects {
+                        if let Some(body) = pw.bodies.get_mut(obj.body_handle) {
+                            let pos = *body.translation();
+                            let mut fx = 0.0_f32;
+                            let fy;
+                            let dl = (pos.x).max(0.0);
+                            let dr = (sw_phys - pos.x).max(0.0);
+                            if dl < zone { fx +=  strength * (1.0 - dl / zone); }
+                            if dr < zone { fx -= strength * (1.0 - dr / zone); }
+                            // Also push off the floor gently
+                            let db = (pos.y).max(0.0);
+                            fy = if db < zone { strength * (1.0 - db / zone) } else { 0.0 };
+                            if fx != 0.0 || fy != 0.0 {
+                                body.reset_forces(true);
+                                body.add_force(vector![fx, fy], true);
+                                body.wake_up(true);
+                            }
+                        }
+                    }
                 }
                 BorderMode::Default => {}
             }
@@ -2406,6 +2472,55 @@ async fn main() {
                     draw_line(cx_r + s, y - s, cx_r - s, y + s, 1.5, mark_col);
                     y += spacing;
                 }
+            }
+            BorderMode::Warp => {
+                // Cyan portals on all four edges, scrolling arrows on sides + top
+                let t       = get_time() as f32;
+                let spacing = 52.0_f32;
+                let scroll  = (t * 42.0) % spacing;
+                let col     = Color::from_rgba(0, 220, 200, 55);
+                let acol    = Color::from_rgba(0, 220, 200, 200);
+                draw_rectangle(0.0,      0.0, ft, sh, col);
+                draw_rectangle(sw - ft, 0.0, ft, sh, col);
+                draw_rectangle(0.0,      0.0, sw, ft, col);
+                let cx_l = ft * 0.5;
+                let cx_r = sw - ft * 0.5;
+                let cy_t = ft * 0.5;
+                let mut y = -scroll;
+                while y < sh {
+                    draw_triangle(vec2(cx_l - 6.0, y - 5.0), vec2(cx_l - 6.0, y + 5.0), vec2(cx_l + 7.0, y), acol);
+                    draw_triangle(vec2(cx_r + 6.0, y - 5.0), vec2(cx_r + 6.0, y + 5.0), vec2(cx_r - 7.0, y), acol);
+                    y += spacing;
+                }
+                let mut x = -scroll;
+                while x < sw {
+                    draw_triangle(vec2(x - 5.0, cy_t + 6.0), vec2(x + 5.0, cy_t + 6.0), vec2(x, cy_t - 7.0), acol);
+                    x += spacing;
+                }
+            }
+            BorderMode::Bounce => {
+                // Green neon glow strips on side walls
+                let t     = get_time() as f32;
+                let pulse = (t * 4.0).sin() * 0.4 + 0.6;
+                let a     = (60.0 * pulse) as u8;
+                let ga    = (180.0 * pulse) as u8;
+                draw_rectangle(0.0,      0.0, ft, sh, Color::from_rgba(60, 255, 100, a));
+                draw_rectangle(sw - ft, 0.0, ft, sh, Color::from_rgba(60, 255, 100, a));
+                draw_line(ft, 0.0, ft, sh, 1.5, Color::from_rgba(60, 255, 100, ga));
+                draw_line(sw - ft, 0.0, sw - ft, sh, 1.5, Color::from_rgba(60, 255, 100, ga));
+            }
+            BorderMode::Repulse => {
+                // Purple gradient glow fading inward on all sides
+                let t     = get_time() as f32;
+                let pulse = (t * 2.5).sin() * 0.3 + 0.7;
+                let a     = (50.0 * pulse) as u8;
+                let la    = (160.0 * pulse) as u8;
+                draw_rectangle(0.0,      0.0, ft * 3.0, sh, Color::from_rgba(180, 80, 255, a));
+                draw_rectangle(sw - ft * 3.0, 0.0, ft * 3.0, sh, Color::from_rgba(180, 80, 255, a));
+                draw_rectangle(0.0, sh - ft * 3.0, sw, ft * 3.0, Color::from_rgba(180, 80, 255, a));
+                draw_line(ft * 3.0, 0.0, ft * 3.0, sh, 1.0, Color::from_rgba(200, 100, 255, la));
+                draw_line(sw - ft * 3.0, 0.0, sw - ft * 3.0, sh, 1.0, Color::from_rgba(200, 100, 255, la));
+                draw_line(0.0, sh - ft * 3.0, sw, sh - ft * 3.0, 1.0, Color::from_rgba(200, 100, 255, la));
             }
         }
 
