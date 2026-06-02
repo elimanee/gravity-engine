@@ -7,7 +7,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 ## Features
 
 - **Drop any image** — PNG, JPG, GIF (animated), WebP, BMP, SVG and more; each becomes a rigid body
-- **8 drag modes** — switch with `Tab` to open the grid picker:
+- **8 drag modes** — press `Tab` to open the grid picker:
   | Mode | Description |
   |------|-------------|
   | Spring | Pull and throw objects with a spring force |
@@ -18,6 +18,24 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | Freeze | Slow objects down within a radius |
   | Orbit | Make objects circle the cursor |
   | Bomb | Click to detonate an instant radial explosion |
+- **6 border modes** — press `B` to cycle:
+  | Mode | Description |
+  |------|-------------|
+  | Walls | Solid side walls |
+  | Loop | Objects wrap left ↔ right |
+  | Kill | Objects leaving the sides are deleted |
+  | Warp | Objects wrap on all 4 sides |
+  | Bounce | Elastic impulse repulsion near edges |
+  | Repulse | Soft force field pushing objects away from all edges |
+- **6 backgrounds** — press `G` to cycle:
+  | Mode | Description |
+  |------|-------------|
+  | Dark | Default dark purple gradient |
+  | Space | Deep space with twinkling stars and nebula |
+  | Grid | Dark grid (useful for observing physics) |
+  | Sunset | Purple sky fading to an orange horizon with a glowing sun |
+  | Ocean | Deep blue with animated caustic ripple rings |
+  | Custom | Load any image as a background |
 - **Gravity presets** — ZERO / MOON / MARS / EARTH / JUPITER / HEAVY / REVERSE
 - **Animated trails** — motion-blur-style ghost trail with length and fade sliders
 - **Audio player** — load tracker modules (.mod/.xm/.it/.s3m) or common formats (.mp3/.flac/.wav/.ogg); supports `.pls` playlists and HTTP radio streams
@@ -29,12 +47,13 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 | Key / Input | Action |
 |-------------|--------|
-| `A` | Open file picker |
+| `A` | Open file picker (add image) |
 | Left-drag | Throw / interact with objects (depends on drag mode) |
 | Right-click | Context menu (Resize, Copy & Paste, Size All, Delete) |
 | `Tab` | Open drag mode picker |
-| `Space` | Pause / unpause physics (shows UI) |
-| `B` | Cycle border mode (loop / kill) |
+| `B` | Cycle border mode |
+| `G` | Cycle background (or load custom image) |
+| `Space` | Pause / unpause physics (reveals UI sliders) |
 | `T` | Toggle object trails |
 | `M` | Load audio file |
 | `P` | Pause / resume audio |
