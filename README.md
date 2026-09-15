@@ -20,6 +20,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | Freeze | Slow objects down within a radius |
   | Orbit | Make objects circle the cursor |
   | Bomb | Click to detonate an instant radial explosion |
+  | SOON | Might add more|
 - **7 border modes** — press `B` to cycle:
   | Mode | Description |
   |------|-------------|
@@ -30,6 +31,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | Bounce | Elastic impulse repulsion near edges |
   | Repulse | Soft force field pushing objects away from all edges |
   | Portal | All 4 edges are portals, no floor — animated rainbow borders |
+  | SOON | Might add more|
 - **6 backgrounds** — press `G` to cycle:
   | Mode | Description |
   |------|-------------|
