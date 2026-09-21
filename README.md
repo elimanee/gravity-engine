@@ -88,7 +88,7 @@ cargo run --release
 ```
 ## Usage of AI
 this project is mainly developed by ai (totally not with claude )BUT the project will be rewritten at some point in future (if i don't get too lazy)
-(might not be GPDR friendly)
+(might not be GDPR friendly)
 
 ## Stack
 
