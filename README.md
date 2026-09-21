@@ -3,7 +3,7 @@
 A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/macroquad) and [rapier2d](https://rapier.rs/). Drop images into the window and watch them fall, collide, and fly.
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
-![Static Badge](https://img.shields.io/badge/ai%20usage?logo=claude&logoColor=%23D97757&label=YES)
+![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
 
 
 ## Features
