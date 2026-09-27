@@ -914,7 +914,7 @@ impl App {
         for row in (0..h).rev() {
             flipped.extend_from_slice(&img.bytes[row * w * 4..(row + 1) * w * 4]);
         }
-        for px in flipped.chunks_exact_mut(4) {
+        for px in flipped.as_chunks_mut::<4>().0 {
             px[3] = 255;
         }
         let result = (|| -> Result<std::path::PathBuf, String> {

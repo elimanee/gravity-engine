@@ -171,7 +171,7 @@ fn decode_svg(data: &[u8], max_px: u32, upscale: bool) -> Option<Decoded> {
     resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(ow as f32 / sw, oh as f32 / sh), &mut pm.as_mut());
     // tiny_skia is premultiplied; textures expect straight alpha.
     let mut bytes = pm.take();
-    for px in bytes.chunks_exact_mut(4) {
+    for px in bytes.as_chunks_mut::<4>().0 {
         let a = px[3] as f32 / 255.0;
         if a > 0.0 {
             for c in &mut px[..3] {
