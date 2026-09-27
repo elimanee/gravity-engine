@@ -1,0 +1,178 @@
+//! Rapier world wrapper, coordinate conversion and the arena walls.
+
+pub mod borders;
+pub mod object;
+pub mod tools;
+
+use crate::config::{BOUNCE, FRICTION, PHYSICS_DT, PPM, WALL_T};
+use borders::BorderMode;
+use macroquad::prelude::{screen_height, vec2, Vec2};
+use rapier2d::prelude::*;
+
+/// Screen pixels → physics metres (y up).
+pub fn to_phys(px: f32, py: f32) -> (f32, f32) {
+    (px / PPM, (screen_height() - py) / PPM)
+}
+
+/// Physics metres → screen pixels (y down).
+pub fn to_screen(bx: f32, by: f32) -> Vec2 {
+    vec2(bx * PPM, screen_height() - by * PPM)
+}
+
+pub struct PhysWorld {
+    pub bodies: RigidBodySet,
+    pub colliders: ColliderSet,
+    pub gravity: Vector<f32>,
+    params: IntegrationParameters,
+    pipeline: PhysicsPipeline,
+    pub islands: IslandManager,
+    broad_phase: DefaultBroadPhase,
+    narrow_phase: NarrowPhase,
+    pub impulse_joints: ImpulseJointSet,
+    pub multibody_joints: MultibodyJointSet,
+    ccd: CCDSolver,
+    query: QueryPipeline,
+    walls: Vec<RigidBodyHandle>,
+    pub border: BorderMode,
+    /// Arena size in metres.
+    pub arena: (f32, f32),
+}
+
+impl PhysWorld {
+    pub fn new(gravity_y: f32, border: BorderMode, arena_px: (f32, f32)) -> Self {
+        let mut w = PhysWorld {
+            bodies: RigidBodySet::new(),
+            colliders: ColliderSet::new(),
+            gravity: vector![0.0, gravity_y],
+            params: IntegrationParameters::default(),
+            pipeline: PhysicsPipeline::new(),
+            islands: IslandManager::new(),
+            broad_phase: DefaultBroadPhase::new(),
+            narrow_phase: NarrowPhase::new(),
+            impulse_joints: ImpulseJointSet::new(),
+            multibody_joints: MultibodyJointSet::new(),
+            ccd: CCDSolver::new(),
+            query: QueryPipeline::new(),
+            walls: vec![],
+            border,
+            arena: (arena_px.0 / PPM, arena_px.1 / PPM),
+        };
+        w.rebuild_walls();
+        w
+    }
+
+    pub fn resize(&mut self, arena_px: (f32, f32)) {
+        self.arena = (arena_px.0 / PPM, arena_px.1 / PPM);
+        self.rebuild_walls();
+    }
+
+    pub fn set_border(&mut self, mode: BorderMode) {
+        self.border = mode;
+        self.rebuild_walls();
+        self.wake_all();
+    }
+
+    fn rebuild_walls(&mut self) {
+        for h in std::mem::take(&mut self.walls) {
+            self.remove_body(h);
+        }
+        let (sw, sh) = self.arena;
+        let (hw, hh) = (sw / 2.0, sh / 2.0);
+        let spec = self.border.walls();
+        let t = WALL_T / 2.0;
+
+        let mut walls = vec![];
+        if spec.floor {
+            walls.push((vector![hw, t], vector![hw + WALL_T, t]));
+        }
+        if spec.ceiling {
+            walls.push((vector![hw, sh + t], vector![hw + WALL_T, t]));
+        }
+        if spec.sides {
+            walls.push((vector![t, hh], vector![t, hh + WALL_T]));
+            walls.push((vector![sw - t, hh], vector![t, hh + WALL_T]));
+        }
+        for (pos, half) in walls {
+            let bh = self.bodies.insert(RigidBodyBuilder::fixed().translation(pos));
+            let col = ColliderBuilder::cuboid(half.x, half.y).restitution(BOUNCE * 0.6).friction(FRICTION);
+            self.colliders.insert_with_parent(col, bh, &mut self.bodies);
+            self.walls.push(bh);
+        }
+    }
+
+    pub fn set_gravity(&mut self, gy: f32) {
+        self.gravity = vector![0.0, gy];
+        self.wake_all();
+    }
+
+    pub fn wake_all(&mut self) {
+        for (_, b) in self.bodies.iter_mut() {
+            if b.is_dynamic() {
+                b.wake_up(true);
+            }
+        }
+    }
+
+    /// Advance the simulation by one rendered frame. The frame is split into
+    /// equal sub-steps no longer than `PHYSICS_DT`, so the simulation speed no
+    /// longer depends on the monitor refresh rate.
+    pub fn step_frame(&mut self, frame_dt: f32, time_scale: f32) {
+        let total = frame_dt.min(1.0 / 20.0) * time_scale;
+        if total <= 0.0 {
+            return;
+        }
+        let n = ((total / PHYSICS_DT).ceil() as usize).clamp(1, 8);
+        self.params.dt = total / n as f32;
+        for _ in 0..n {
+            self.step_once();
+        }
+    }
+
+    /// One fixed step (used for frame-by-frame stepping while paused).
+    pub fn step_fixed(&mut self) {
+        self.params.dt = PHYSICS_DT;
+        self.step_once();
+    }
+
+    fn step_once(&mut self) {
+        self.pipeline.step(
+            &self.gravity,
+            &self.params,
+            &mut self.islands,
+            &mut self.broad_phase,
+            &mut self.narrow_phase,
+            &mut self.bodies,
+            &mut self.colliders,
+            &mut self.impulse_joints,
+            &mut self.multibody_joints,
+            &mut self.ccd,
+            Some(&mut self.query),
+            &(),
+            &(),
+        );
+    }
+
+    pub fn remove_body(&mut self, h: RigidBodyHandle) {
+        self.bodies.remove(
+            h,
+            &mut self.islands,
+            &mut self.colliders,
+            &mut self.impulse_joints,
+            &mut self.multibody_joints,
+            true,
+        );
+    }
+
+    pub fn remove_collider(&mut self, h: ColliderHandle) {
+        self.colliders.remove(h, &mut self.islands, &mut self.bodies, true);
+    }
+
+    /// Clear user forces on every body (called once per frame before tools add theirs).
+    pub fn reset_forces(&mut self) {
+        for (_, b) in self.bodies.iter_mut() {
+            if b.user_force() != vector![0.0, 0.0] {
+                b.reset_forces(false);
+            }
+        }
+    }
+}
