@@ -4,6 +4,7 @@
 use crate::audio::Audio;
 use crate::background::{Background, BgMode};
 use crate::config::{self, ext_of, file_name_of, IMAGE_EXT, SCENE_EXT};
+use crate::config::{PPM, WALL_T};
 use crate::net::{FetchEvent, FetchJob, FetchKind};
 use crate::physics::object::{object_at, Object, Placement, Source, Visual};
 use crate::physics::tools::{self, Grab, Tool};
@@ -22,6 +23,7 @@ use crate::ui::title::{self, PixelOut};
 use crate::ui::toasts::Toasts;
 use crate::ui::tool_card::ToolCard;
 use crate::ui::tool_picker::ToolPicker;
+use crate::ui::visualizer::{self, VisStyle};
 use crate::ui::{debug, icons, theme, Action, Input, ObjectCmd};
 use crate::window_tracker::WindowTracker;
 use macroquad::prelude::*;
@@ -183,6 +185,7 @@ impl App {
         self.sync_settings();
         self.poll_jobs();
         self.audio.tick();
+        self.audio.analyze(dt, self.s.vis_gain);
         self.simulate(dt, input.mouse);
 
         self.draw(dt, &input);
@@ -265,6 +268,9 @@ impl App {
         }
         if pressed(KeyCode::G) {
             actions.push(if shift { Action::PickBackground } else { Action::CycleBackground(1) });
+        }
+        if pressed(KeyCode::V) {
+            actions.push(if shift { Action::SpawnVisualizer } else { Action::CycleVisualizer(1) });
         }
         if pressed(KeyCode::W) {
             self.s.window_shake = !self.s.window_shake;
@@ -545,7 +551,35 @@ impl App {
                 self.bg.mode = self.s.background;
                 self.toasts.info("Settings reset to defaults");
             }
+            Action::CycleVisualizer(d) => {
+                self.s.vis_background = self.s.vis_background.cycle(d, true);
+                let hint = if self.audio.now_playing().is_none() && self.s.vis_background != VisStyle::Off {
+                    "  ·  load music with M"
+                } else {
+                    ""
+                };
+                self.toasts.status("vis", format!("Visualizer: {}{hint}", self.s.vis_background.label()));
+            }
+            Action::CycleVisualizerObject(d) => {
+                self.s.vis_object = self.s.vis_object.cycle(d, false);
+                self.toasts.status("vis", format!("Visualizer objects: {}", self.s.vis_object.label()));
+            }
+            Action::SpawnVisualizer => {
+                // From the keyboard it appears under the cursor, from the drawer near the top.
+                let at = if self.paused { vec2(screen_width() / 2.0, self.spawn_y()) } else { mouse };
+                self.spawn_visualizer(at);
+            }
             Action::Object(cmd, handle) => self.object_cmd(cmd, handle, mouse),
+        }
+    }
+
+    fn spawn_visualizer(&mut self, at: Vec2) {
+        let placement = Placement { pos_px: (at.x, at.y), size_px: Some((240.0, 130.0)), ..Default::default() };
+        if let Some(o) = Object::load(&mut self.world, Source::Visualizer, placement) {
+            self.objects.push(o);
+            if self.audio.now_playing().is_none() {
+                self.toasts.status("vis", "Visualizer added  ·  load music with M to see it move");
+            }
         }
     }
 
@@ -802,6 +836,9 @@ impl App {
                 );
             }
             self.world.border.apply_forces(&mut self.world, &self.objects);
+            if self.s.vis_dance && self.audio.analyzer.beat_now {
+                self.dance();
+            }
             if self.s.window_shake {
                 self.shaker.apply(&mut self.world.bodies, self.s.shake_force);
             }
@@ -835,6 +872,20 @@ impl App {
         self.blasts.retain(Blast::alive);
     }
 
+    /// Make resting objects hop on a beat, harder with more bass.
+    fn dance(&mut self) {
+        let kick = 2.0 + self.audio.analyzer.bass * 3.5;
+        for o in &self.objects {
+            let Some(b) = self.world.bodies.get_mut(o.body) else { continue };
+            if !b.is_dynamic() || b.linvel().y.abs() > 1.5 {
+                continue;
+            }
+            let m = b.mass();
+            b.apply_impulse(rapier2d::na::Vector2::new(rand::gen_range(-0.4, 0.4) * m, kick * m), true);
+            b.apply_torque_impulse(rand::gen_range(-0.3, 0.3) * m, true);
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════
     // Rendering
     // ═══════════════════════════════════════════════════════════
@@ -842,15 +893,22 @@ impl App {
         let (sw, sh) = (screen_width(), screen_height());
         let m = input.mouse;
         self.bg.draw(sw, sh);
+        let floor = if self.world.border.walls().floor { WALL_T * PPM } else { 0.0 };
+        visualizer::draw_background(self.s.vis_background, &self.audio.analyzer, sw, sh, floor);
         self.world.border.draw(sw, sh);
 
         if self.s.trails {
-            for o in &self.objects {
+            for o in self.objects.iter().filter(|o| !o.is_visualizer()) {
                 o.draw_trail(self.s.trail_fade);
             }
         }
         for o in &self.objects {
-            o.draw(&self.world);
+            if o.is_visualizer() {
+                let (p, angle) = o.screen_pos(&self.world);
+                visualizer::draw_object(self.s.vis_object, &self.audio.analyzer, p, angle, o.size, 1.0);
+            } else {
+                o.draw(&self.world);
+            }
         }
         for o in self.objects.iter().filter(|o| o.pinned) {
             let (p, _) = o.screen_pos(&self.world);

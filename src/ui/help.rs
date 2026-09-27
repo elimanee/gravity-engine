@@ -35,6 +35,8 @@ const COLUMNS: &[&[(&str, &str)]] = &[
         ("#", "AUDIO"),
         ("M", "Load music / playlist"),
         ("P", "Play / pause music"),
+        ("V", "Visualizer behind objects"),
+        ("Shift+V", "Spawn a visualizer screen"),
     ],
     &[
         ("#", "SCENE"),

@@ -43,6 +43,7 @@ pub enum SceneSource {
     File { path: String },
     Embedded { name: String, data: String },
     Shape { shape: Shape, rgb: [u8; 3] },
+    Visualizer,
 }
 
 fn b64() -> base64::engine::GeneralPurpose {
@@ -65,6 +66,7 @@ impl SceneSource {
                 SceneSource::Embedded { name: name.clone(), data: b64().encode(data.as_slice()) }
             }
             Source::Shape { shape, rgb } => SceneSource::Shape { shape: *shape, rgb: [rgb.0, rgb.1, rgb.2] },
+            Source::Visualizer => SceneSource::Visualizer,
         }
     }
 
@@ -75,6 +77,7 @@ impl SceneSource {
                 Source::Memory { name: name.clone(), data: Arc::new(b64().decode(data).ok()?) }
             }
             SceneSource::Shape { shape, rgb } => Source::Shape { shape: *shape, rgb: (rgb[0], rgb[1], rgb[2]) },
+            SceneSource::Visualizer => Source::Visualizer,
         })
     }
 }
@@ -169,5 +172,13 @@ mod tests {
             Some(Source::Memory { data, .. }) => assert_eq!(*data, vec![1, 2, 3]),
             _ => panic!("expected memory source"),
         }
+    }
+
+    #[test]
+    fn visualizer_objects_round_trip() {
+        let json = serde_json::to_string(&SceneSource::Visualizer).unwrap();
+        assert_eq!(json, r#"{"type":"visualizer"}"#);
+        let back: SceneSource = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back.to_source(), Some(Source::Visualizer)));
     }
 }

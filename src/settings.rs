@@ -4,6 +4,7 @@ use crate::background::BgMode;
 use crate::physics::borders::BorderMode;
 use crate::physics::tools::Tool;
 use crate::shapes::Shape;
+use crate::ui::visualizer::VisStyle;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +28,15 @@ pub struct Settings {
     pub shake_force: f32,
 
     pub volume: f32,
+
+    /// Visualizer layer drawn behind the objects.
+    pub vis_background: VisStyle,
+    /// Style of visualizer objects (never `Off`).
+    pub vis_object: VisStyle,
+    /// Visualizer sensitivity.
+    pub vis_gain: f32,
+    /// Objects hop on each detected beat.
+    pub vis_dance: bool,
 
     pub spawn_shape: Shape,
     /// Index into `shapes::PALETTE`; `PALETTE.len()` means "random".
@@ -53,6 +63,10 @@ impl Default for Settings {
             window_shake: true,
             shake_force: 8.0,
             volume: 1.0,
+            vis_background: VisStyle::Off,
+            vis_object: VisStyle::Bars,
+            vis_gain: 1.5,
+            vis_dance: false,
             spawn_shape: Shape::Circle,
             spawn_color: 0,
             spawn_size: 80.0,
@@ -69,6 +83,7 @@ pub const SHAKE_RANGE: (f32, f32) = (0.0, 40.0);
 pub const GRAVITY_RANGE: (f32, f32) = (-40.0, 20.0);
 pub const TIME_SCALE_RANGE: (f32, f32) = (0.1, 2.0);
 pub const SPAWN_SIZE_RANGE: (f32, f32) = (24.0, 200.0);
+pub const VIS_GAIN_RANGE: (f32, f32) = (0.3, 5.0);
 
 impl Settings {
     fn path() -> Option<std::path::PathBuf> {
@@ -104,6 +119,10 @@ impl Settings {
         self.trail_fade = clamp(self.trail_fade, TRAIL_FADE_RANGE, d.trail_fade);
         self.shake_force = clamp(self.shake_force, SHAKE_RANGE, d.shake_force);
         self.volume = clamp(self.volume, (0.0, 1.0), d.volume);
+        self.vis_gain = clamp(self.vis_gain, VIS_GAIN_RANGE, d.vis_gain);
+        if self.vis_object == VisStyle::Off {
+            self.vis_object = VisStyle::Bars;
+        }
         self.spawn_size = clamp(self.spawn_size, SPAWN_SIZE_RANGE, d.spawn_size);
         self.spawn_color = self.spawn_color.min(crate::shapes::PALETTE.len());
         self

@@ -1,8 +1,54 @@
 //! Common audio formats (.mp3 / .flac / .wav / .ogg / …) and .pls playlists
 //! (including HTTP radio streams) via rodio + symphonia.
 
+use super::analyzer::Tap;
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 use std::io::BufReader;
+use std::sync::Arc;
+use std::time::Duration;
+
+/// Pass-through source that copies the samples being played to the
+/// visualizer tap, in small chunks.
+struct Tapped<S> {
+    inner: S,
+    tap: Arc<Tap>,
+    chunk: Vec<f32>,
+}
+
+impl<S: Source<Item = f32>> Tapped<S> {
+    fn new(inner: S, tap: Arc<Tap>) -> Self {
+        Tapped { inner, tap, chunk: Vec::with_capacity(1024) }
+    }
+}
+
+impl<S: Source<Item = f32>> Iterator for Tapped<S> {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<f32> {
+        let s = self.inner.next()?;
+        self.chunk.push(s);
+        if self.chunk.len() >= 1024 {
+            self.tap.push_interleaved(&self.chunk, self.inner.channels() as usize, self.inner.sample_rate());
+            self.chunk.clear();
+        }
+        Some(s)
+    }
+}
+
+impl<S: Source<Item = f32>> Source for Tapped<S> {
+    fn current_frame_len(&self) -> Option<usize> {
+        self.inner.current_frame_len()
+    }
+    fn channels(&self) -> u16 {
+        self.inner.channels()
+    }
+    fn sample_rate(&self) -> u32 {
+        self.inner.sample_rate()
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
+}
 
 /// Parse a .pls playlist. Relative paths are resolved against the playlist's
 /// folder; missing local files are skipped, network URLs are kept verbatim.
@@ -81,12 +127,21 @@ pub struct StreamPlayer {
     /// Non-empty when a playlist is loaded; re-queued when the sink drains.
     playlist: Vec<String>,
     volume: f32,
+    tap: Arc<Tap>,
 }
 
 impl StreamPlayer {
-    pub fn new() -> Option<Self> {
+    pub fn new(tap: Arc<Tap>) -> Option<Self> {
         let (stream, handle) = OutputStream::try_default().ok()?;
-        Some(Self { _stream: stream, handle, sink: None, state: StreamInfo::default(), playlist: vec![], volume: 1.0 })
+        Some(Self {
+            _stream: stream,
+            handle,
+            sink: None,
+            state: StreamInfo::default(),
+            playlist: vec![],
+            volume: 1.0,
+            tap,
+        })
     }
 
     fn new_sink(&mut self) -> Result<Sink, String> {
@@ -103,7 +158,7 @@ impl StreamPlayer {
         let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
         let decoder = Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?;
         let sink = self.new_sink()?;
-        sink.append(decoder.repeat_infinite());
+        sink.append(Tapped::new(decoder.convert_samples::<f32>().repeat_infinite(), self.tap.clone()));
         self.sink = Some(sink);
         self.playlist.clear();
         self.state = StreamInfo {
@@ -124,14 +179,14 @@ impl StreamPlayer {
             if lower.starts_with("http://") || lower.starts_with("https://") {
                 match HttpStream::open(p).map(|s| Decoder::new(BufReader::new(s))) {
                     Some(Ok(d)) => {
-                        sink.append(d);
+                        sink.append(Tapped::new(d.convert_samples::<f32>(), self.tap.clone()));
                         n += 1;
                     }
                     _ => eprintln!("stream failed: {p}"),
                 }
             } else if let Ok(f) = std::fs::File::open(p) {
                 if let Ok(d) = Decoder::new(BufReader::new(f)) {
-                    sink.append(d);
+                    sink.append(Tapped::new(d.convert_samples::<f32>(), self.tap.clone()));
                     n += 1;
                 }
             }

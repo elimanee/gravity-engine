@@ -18,18 +18,22 @@ enum SliderId {
     TrailFade,
     Shake,
     Volume,
+    VisGain,
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum ToggleId {
     Trails,
     Shake,
+    Dance,
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum StepperId {
     Border,
     Background,
+    VisBackground,
+    VisObject,
 }
 
 enum Row {
@@ -57,13 +61,14 @@ const AUDIO_BUTTONS: &[(&str, Action)] = &[("Load…", Action::LoadAudio), ("Pla
 const ADD_BUTTONS: &[(&str, Action)] = &[("Images…", Action::AddImages), ("Shapes", Action::ToggleSpawner)];
 const WEB_BUTTONS: &[(&str, Action)] = &[("88×31 buttons", Action::FetchButtons), ("Game logos", Action::FetchLogos)];
 const SCENE_BUTTONS: &[(&str, Action)] = &[("Save…", Action::SaveScene), ("Open…", Action::LoadScene)];
+const VIS_BUTTONS: &[(&str, Action)] = &[("Spawn visualizer  (Shift+V)", Action::SpawnVisualizer)];
 const SCENE_BUTTONS_2: &[(&str, Action)] = &[("Screenshot", Action::Screenshot), ("Clear all", Action::ClearAll)];
 
 #[derive(Default)]
 pub struct Drawer {
     pub fader: Fader,
     scroll: f32,
-    sliders: [SliderState; 6],
+    sliders: [SliderState; 7],
 }
 
 fn slider_index(id: SliderId) -> usize {
@@ -82,6 +87,9 @@ fn slider_spec(id: SliderId, s: &Settings) -> (SliderSpec<'static>, f32) {
         SliderId::Volume => {
             ("Volume", (0.0, 1.0), s.volume, format!("{:.0}%", s.volume * 100.0), Color::new(0.4, 0.8, 1.0, 1.0))
         }
+        SliderId::VisGain => {
+            ("Sensitivity", VIS_GAIN_RANGE, s.vis_gain, format!("×{:.1}", s.vis_gain), Color::new(0.9, 0.5, 1.0, 1.0))
+        }
     };
     (SliderSpec { label, value_text: text, min: range.0, max: range.1, accent }, value)
 }
@@ -94,6 +102,7 @@ fn slider_value(id: SliderId, s: &mut Settings) -> &mut f32 {
         SliderId::TrailFade => &mut s.trail_fade,
         SliderId::Shake => &mut s.shake_force,
         SliderId::Volume => &mut s.volume,
+        SliderId::VisGain => &mut s.vis_gain,
     }
 }
 
@@ -122,6 +131,12 @@ impl Drawer {
             Row::Header("AUDIO"),
             Row::Slider(SliderId::Volume),
             Row::Buttons(AUDIO_BUTTONS),
+            Row::Header("VISUALIZER"),
+            Row::Stepper(StepperId::VisBackground),
+            Row::Stepper(StepperId::VisObject),
+            Row::Slider(SliderId::VisGain),
+            Row::Toggle(ToggleId::Dance),
+            Row::Buttons(VIS_BUTTONS),
             Row::Header("ADD OBJECTS"),
             Row::Buttons(ADD_BUTTONS),
             Row::Buttons(WEB_BUTTONS),
@@ -199,6 +214,7 @@ impl Drawer {
                         match id {
                             ToggleId::Trails => s.trails = !s.trails,
                             ToggleId::Shake => s.window_shake = !s.window_shake,
+                            ToggleId::Dance => s.vis_dance = !s.vis_dance,
                         }
                     }
                 }
@@ -209,6 +225,8 @@ impl Drawer {
                         actions.push(match id {
                             StepperId::Border => Action::CycleBorder(d),
                             StepperId::Background => Action::CycleBackground(d),
+                            StepperId::VisBackground => Action::CycleVisualizer(d),
+                            StepperId::VisObject => Action::CycleVisualizerObject(d),
                         });
                     }
                 }
@@ -264,6 +282,7 @@ impl Drawer {
                     let (label, on) = match id {
                         ToggleId::Trails => ("Motion trails  (T)", s.trails),
                         ToggleId::Shake => ("React to window moves  (W)", s.window_shake),
+                        ToggleId::Dance => ("Objects jump on the beat", s.vis_dance),
                     };
                     draw_toggle_row(r, label, on, hov, f);
                 }
@@ -273,6 +292,12 @@ impl Drawer {
                         StepperId::Border => draw_stepper(sr, "Borders", s.border.label(), s.border.accent(), mouse, f),
                         StepperId::Background => {
                             draw_stepper(sr, "Background", s.background.label(), ACCENT_HI, mouse, f)
+                        }
+                        StepperId::VisBackground => {
+                            draw_stepper(sr, "Behind objects  (V)", s.vis_background.label(), ACCENT_HI, mouse, f)
+                        }
+                        StepperId::VisObject => {
+                            draw_stepper(sr, "Object style", s.vis_object.label(), ACCENT_HI, mouse, f)
                         }
                     }
                 }

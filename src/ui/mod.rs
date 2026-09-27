@@ -16,6 +16,7 @@ pub mod title;
 pub mod toasts;
 pub mod tool_card;
 pub mod tool_picker;
+pub mod visualizer;
 pub mod widgets;
 
 use crate::physics::tools::Tool;
@@ -98,6 +99,12 @@ pub enum Action {
     TogglePause,
     ToggleHelp,
     ResetSettings,
+    /// Cycle the background visualizer (Off / Bars / Wave / Radial).
+    CycleVisualizer(i32),
+    /// Cycle the style of visualizer objects.
+    CycleVisualizerObject(i32),
+    /// Drop a visualizer object into the scene.
+    SpawnVisualizer,
     Object(ObjectCmd, RigidBodyHandle),
 }
 

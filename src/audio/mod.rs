@@ -1,10 +1,13 @@
 //! Audio facade: one entry point for tracker modules, common formats and
 //! playlists.
 
+pub mod analyzer;
 mod stream;
 mod tracker;
 
 use crate::config::{ext_of, file_name_of, PLAYLIST_EXT, TRACKER_EXT};
+use analyzer::{Analyzer, Tap};
+use std::sync::Arc;
 use stream::StreamPlayer;
 use tracker::TrackerPlayer;
 
@@ -21,11 +24,21 @@ pub struct Audio {
     tracker: TrackerPlayer,
     stream: Option<StreamPlayer>,
     volume: f32,
+    tap: Arc<Tap>,
+    /// Live analysis of what is playing, for the visualizer.
+    pub analyzer: Analyzer,
 }
 
 impl Audio {
     pub fn new(volume: f32) -> Self {
-        let mut a = Audio { tracker: TrackerPlayer::start(), stream: StreamPlayer::new(), volume: -1.0 };
+        let tap = Arc::new(Tap::default());
+        let mut a = Audio {
+            tracker: TrackerPlayer::start(tap.clone()),
+            stream: StreamPlayer::new(tap.clone()),
+            volume: -1.0,
+            tap,
+            analyzer: Analyzer::default(),
+        };
         a.set_volume(volume);
         a
     }
@@ -88,6 +101,11 @@ impl Audio {
         if let Some(s) = self.stream.as_mut() {
             s.set_volume(v);
         }
+    }
+
+    /// Refresh the visualizer analysis (once per frame).
+    pub fn analyze(&mut self, dt: f32, gain: f32) {
+        self.analyzer.update(&self.tap, dt, gain);
     }
 
     pub fn tick(&mut self) {
