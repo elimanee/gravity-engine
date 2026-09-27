@@ -4,7 +4,7 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
-## [Unreleased]
+## [2.0.1]
 
 ### Changed
 - **Spring** pulls objects by their centre again, so they no longer start spinning when you let go (the 1.x behaviour)
