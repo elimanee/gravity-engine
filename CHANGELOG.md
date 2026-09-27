@@ -4,6 +4,17 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [Unreleased]
+
+### Added
+- **Audio visualizer**, fed by whatever is playing (tracker modules, audio files, playlists and radio streams):
+  - `V` cycles a layer drawn behind the objects: Bars, Wave or Radial (with a soft flash on each beat)
+  - `Shift+V` (or the settings drawer) spawns a visualizer *screen* — a physics object you can throw, pin, resize, duplicate and save in scenes
+  - Settings drawer section: layer style, screen style, sensitivity, and "objects jump on the beat"
+
+### Changed
+- Tracker module volume changes now apply instantly (they used to lag by up to a second)
+
 ## [2.0.1]
 
 ### Changed

@@ -61,6 +61,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Gravity** — presets ZERO / MOON / MARS / EARTH / JUPITER / HEAVY / REVERSE in the HUD, or any value with the slider
 - **Window shake** (`W`) — moving the window pushes every body; KDE Wayland via KWin DBus, X11 otherwise
 - **Trails** (`T`) — motion-blur ghost trail with length and fade settings
+- **Audio visualizer** — `V` cycles a spectrum layer behind the objects (Bars / Wave / Radial); `Shift+V` drops a visualizer *screen* that is a real physics object (throw it, pin it, resize it). Sensitivity and an optional "objects jump on the beat" mode live in the settings drawer
 - **Audio player** (`M`) — tracker modules (.mod/.xm/.it/.s3m/…), common formats (.mp3/.flac/.wav/.ogg/…), `.pls` playlists including HTTP radio streams
 - **Debug overlay** (`D`) — FPS, collider outlines, velocities and details of the object under the cursor
 
@@ -86,6 +87,7 @@ Press **F1** in the app for the full list.
 | `Shift+G` | Background from an image |
 | `W` / `T` | Toggle window shake / trails |
 | `M` / `P` | Load music / play-pause |
+| `V` / `Shift+V` | Visualizer behind objects / spawn a visualizer screen |
 | `Ctrl+S` / `Ctrl+O` | Save / open a scene |
 | `F12` | Screenshot (scene only, without UI) |
 | `D` | Debug overlay |

@@ -2,6 +2,8 @@
 //! Decoding runs on a background thread via libopenmpt; PCM floats are
 //! streamed to cpal through a lock-free ring buffer.
 
+use super::analyzer::Tap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex};
 
@@ -32,11 +34,11 @@ pub struct TrackerPlayer {
 }
 
 impl TrackerPlayer {
-    pub fn start() -> Self {
+    pub fn start(tap: Arc<Tap>) -> Self {
         let (tx, rx) = std::sync::mpsc::sync_channel::<Cmd>(4);
         let info = Arc::new(Mutex::new(TrackerInfo::default()));
         let info2 = Arc::clone(&info);
-        let thread = std::thread::spawn(move || audio_thread(rx, info2));
+        let thread = std::thread::spawn(move || audio_thread(rx, info2, tap));
         Self { tx, info, _thread: thread }
     }
 
@@ -64,7 +66,7 @@ impl TrackerPlayer {
     }
 }
 
-fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>) {
+fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>, tap: Arc<Tap>) {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use openmpt::module::metadata::MetadataKey;
     use openmpt::module::{Logger, Module};
@@ -81,12 +83,32 @@ fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>) {
 
     // 1 second of stereo headroom.
     let (mut prod, mut cons) = ringbuf::HeapRb::<f32>::new(SR as usize * CH as usize).split();
+    // Volume is applied at output time (not when decoding ahead) so changes are
+    // heard immediately; the visualizer tap sees the pre-volume signal.
+    let volume = Arc::new(AtomicU32::new(1.0f32.to_bits()));
+    let out_volume = Arc::clone(&volume);
 
     let stream = match device.build_output_stream::<f32, _, _>(
         &cfg,
         move |out: &mut [f32], _| {
+            let mut played = false;
             for s in out.iter_mut() {
-                *s = cons.pop().unwrap_or(0.0);
+                *s = match cons.pop() {
+                    Some(v) => {
+                        played = true;
+                        v
+                    }
+                    None => 0.0,
+                };
+            }
+            // Only feed the visualizer while a module is actually playing, so
+            // this idle stream never mixes silence into another player's audio.
+            if played {
+                tap.push_interleaved(out, CH as usize, SR);
+            }
+            let v = f32::from_bits(out_volume.load(Ordering::Relaxed));
+            for s in out.iter_mut() {
+                *s *= v;
             }
         },
         |e| eprintln!("cpal error: {e}"),
@@ -104,7 +126,6 @@ fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>) {
     }
 
     let mut module: Option<Module> = None;
-    let mut volume = 1.0f32;
     let mut playing = false;
     let set = |f: &dyn Fn(&mut TrackerInfo)| {
         if let Ok(mut i) = info.lock() {
@@ -152,7 +173,7 @@ fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>) {
                     playing = false;
                     set(&|i| *i = TrackerInfo::default());
                 }
-                Ok(Cmd::SetVolume(v)) => volume = v.clamp(0.0, 1.0),
+                Ok(Cmd::SetVolume(v)) => volume.store(v.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed),
                 Err(TryRecvError::Disconnected) => return,
                 Err(TryRecvError::Empty) => break,
             }
@@ -168,7 +189,7 @@ fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>) {
                     let mut buf = vec![0.0f32; want * CH as usize];
                     let got = m.read_interleaved_float_stereo(SR as i32, &mut buf);
                     for &s in &buf[..got * CH as usize] {
-                        prod.push(s * volume).ok();
+                        prod.push(s).ok();
                     }
                 }
             }

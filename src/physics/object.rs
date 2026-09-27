@@ -15,8 +15,16 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub enum Source {
     File(String),
-    Memory { name: String, data: Arc<Vec<u8>> },
-    Shape { shape: Shape, rgb: (u8, u8, u8) },
+    Memory {
+        name: String,
+        data: Arc<Vec<u8>>,
+    },
+    Shape {
+        shape: Shape,
+        rgb: (u8, u8, u8),
+    },
+    /// A live audio visualizer screen (drawn every frame, no sprite).
+    Visualizer,
 }
 
 impl Source {
@@ -25,6 +33,7 @@ impl Source {
             Source::File(p) => file_name_of(p),
             Source::Memory { name, .. } => name.clone(),
             Source::Shape { shape, .. } => shape.label().to_string(),
+            Source::Visualizer => "Audio visualizer".to_string(),
         }
     }
 
@@ -35,6 +44,10 @@ impl Source {
             Source::Memory { name, data } => assets::decode(name, data, max_px, upscale),
             Source::Shape { shape, rgb } => {
                 Some(Decoded { frames: vec![shapes::rasterize(*shape, max_px, *rgb)], delays_ms: vec![], hull: None })
+            }
+            // Drawn procedurally; a transparent placeholder keeps the sprite code happy.
+            Source::Visualizer => {
+                Some(Decoded { frames: vec![image::RgbaImage::new(2, 1)], delays_ms: vec![], hull: None })
             }
         }
     }
@@ -54,6 +67,7 @@ impl Source {
                     }
                 }
             },
+            Source::Visualizer => Outline::RoundBox,
             _ => match &decoded.hull {
                 Some(h) => Outline::Hull(h.clone()),
                 None => Outline::Box,
@@ -237,6 +251,10 @@ impl Object {
 
     pub fn name(&self) -> String {
         self.source.display_name()
+    }
+
+    pub fn is_visualizer(&self) -> bool {
+        matches!(self.source, Source::Visualizer)
     }
 
     pub fn is_animated(&self) -> bool {
