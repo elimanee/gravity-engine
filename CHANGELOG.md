@@ -4,6 +4,15 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [Unreleased]
+
+### Changed
+- **Spring** pulls objects by their centre again, so they no longer start spinning when you let go (the 1.x behaviour)
+
+### Added
+- **Swing** tool (`9`): holds an object by the point you click, so it dangles, swings and spins when thrown (the spinning behaviour Spring had in 2.0.0)
+- The tool picker is now a 3 × 3 grid
+
 ## [2.0.0] — Remaster
 
 A complete remaster: the 4,200-line `main.rs` is now a modular codebase, with

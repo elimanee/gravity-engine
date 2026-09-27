@@ -7,7 +7,7 @@ use crate::config::{self, ext_of, file_name_of, IMAGE_EXT, SCENE_EXT};
 use crate::net::{FetchEvent, FetchJob, FetchKind};
 use crate::physics::object::{object_at, Object, Placement, Source, Visual};
 use crate::physics::tools::{self, Grab, Tool};
-use crate::physics::PhysWorld;
+use crate::physics::{to_phys, PhysWorld};
 use crate::scene;
 use crate::settings::{Settings, RADIUS_RANGE, SPAWN_SIZE_RANGE, STRENGTH_RANGE};
 use crate::shapes::{self, Shape};
@@ -251,6 +251,7 @@ impl App {
             KeyCode::Key6,
             KeyCode::Key7,
             KeyCode::Key8,
+            KeyCode::Key9,
         ];
         for (i, k) in digits.iter().enumerate() {
             if pressed(*k) {
@@ -388,8 +389,10 @@ impl App {
                     let handles: Vec<RigidBodyHandle> = self.objects.iter().map(|o| o.body).collect();
                     tools::detonate(&mut self.world.bodies, &handles, pos, self.s.tool_radius, self.s.tool_strength);
                     self.blasts.push(Blast::new(m, self.s.tool_radius));
-                } else if let Some(i) = object_at(&self.objects, &self.world, m.x, m.y) {
-                    self.grab = Some(Grab::new(&self.world.bodies, self.objects[i].body, pos, tool));
+                } else if tool.grabs() {
+                    if let Some(i) = object_at(&self.objects, &self.world, m.x, m.y) {
+                        self.grab = Some(Grab::new(&self.world.bodies, self.objects[i].body, to_phys(m.x, m.y), tool));
+                    }
                 }
             }
         }
@@ -408,7 +411,7 @@ impl App {
 
         if input.left_released || !input.left_down {
             if let Some(g) = self.grab.take() {
-                g.release(&mut self.world.bodies, pos);
+                g.release(&mut self.world.bodies, to_phys(m.x, m.y));
             }
             self.field_active = false;
         }
@@ -785,7 +788,7 @@ impl App {
             let pos = (mouse.x, mouse.y);
             self.world.reset_forces();
             if let Some(g) = &self.grab {
-                g.apply(&mut self.world.bodies, pos);
+                g.apply(&mut self.world.bodies, to_phys(mouse.x, mouse.y));
             }
             if self.field_active {
                 let handles: Vec<RigidBodyHandle> = self.objects.iter().map(|o| o.body).collect();

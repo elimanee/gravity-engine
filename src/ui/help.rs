@@ -18,7 +18,7 @@ const COLUMNS: &[&[(&str, &str)]] = &[
         ("#", "TOOLS"),
         ("Left-drag", "Use the current tool"),
         ("Tab", "Tool picker"),
-        ("1 – 8", "Select a tool"),
+        ("1 – 9", "Select a tool"),
         ("Wheel", "Tool radius"),
         ("Shift+Wheel", "Tool strength"),
     ],
