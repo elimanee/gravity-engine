@@ -111,6 +111,28 @@ pub fn tool(tool: Tool, c: Vec2, size: f32, color: Color, t: f32) {
             }
             draw_circle(c.x - 7.0 * s, c.y, 3.5 * s, Color::new(1.0, 1.0, 1.0, color.a * 0.35));
         }
+        Tool::Swing => {
+            // A box hanging by one corner from the cursor, swinging and turning.
+            let pivot = vec2(c.x, c.y - 17.0 * s);
+            let sway = (t * 2.6).sin() * 0.55;
+            let dir = vec2(sway.sin(), sway.cos());
+            let corner = pivot + dir * 16.0 * s;
+            draw_line(pivot.x, pivot.y, corner.x, corner.y, th, soft);
+            draw_circle(pivot.x, pivot.y, 3.0 * s, color);
+            // Square hanging from `corner`, rotated with the swing plus a spin.
+            let half = 7.0 * s;
+            let rot = sway * 1.8 + std::f32::consts::FRAC_PI_4;
+            let centre = corner + dir * half * std::f32::consts::SQRT_2;
+            draw_poly(centre.x, centre.y, 4, half * std::f32::consts::SQRT_2, rot.to_degrees(), color);
+            // Motion arcs showing the spin.
+            for i in 0..3 {
+                let a0 = rot + 0.6 + i as f32 * 0.35;
+                let r = 13.0 * s;
+                let p0 = centre + vec2(a0.cos(), a0.sin()) * r;
+                let p1 = centre + vec2((a0 + 0.25).cos(), (a0 + 0.25).sin()) * r;
+                draw_line(p0.x, p0.y, p1.x, p1.y, th * 0.7, Color { a: color.a * (0.6 - i as f32 * 0.15), ..color });
+            }
+        }
     }
 }
 

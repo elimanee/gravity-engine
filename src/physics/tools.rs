@@ -16,6 +16,7 @@ pub enum Tool {
     Freeze,
     Orbit,
     Bomb,
+    Swing,
 }
 
 /// Field forces are expressed as accelerations for an object of this mass, so
@@ -23,8 +24,17 @@ pub enum Tool {
 const NOMINAL_MASS: f32 = 2.5;
 
 impl Tool {
-    pub const ALL: &'static [Tool] =
-        &[Tool::Spring, Tool::Slingshot, Tool::Pull, Tool::Push, Tool::Vortex, Tool::Freeze, Tool::Orbit, Tool::Bomb];
+    pub const ALL: &'static [Tool] = &[
+        Tool::Spring,
+        Tool::Slingshot,
+        Tool::Pull,
+        Tool::Push,
+        Tool::Vortex,
+        Tool::Freeze,
+        Tool::Orbit,
+        Tool::Bomb,
+        Tool::Swing,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -36,12 +46,13 @@ impl Tool {
             Tool::Freeze => "Freeze",
             Tool::Orbit => "Orbit",
             Tool::Bomb => "Bomb",
+            Tool::Swing => "Swing",
         }
     }
 
     pub fn description(self) -> &'static str {
         match self {
-            Tool::Spring => "Grab, carry and throw",
+            Tool::Spring => "Grab, carry and throw (no spin)",
             Tool::Slingshot => "Pull back, release to launch",
             Tool::Pull => "Attract everything nearby",
             Tool::Push => "Repel everything nearby",
@@ -49,6 +60,7 @@ impl Tool {
             Tool::Freeze => "Slow objects to a crawl",
             Tool::Orbit => "Make objects circle the cursor",
             Tool::Bomb => "Click to detonate",
+            Tool::Swing => "Hold by a point, throw it spinning",
         }
     }
 
@@ -62,6 +74,7 @@ impl Tool {
             Tool::Freeze => (170, 220, 255),
             Tool::Orbit => (255, 190, 90),
             Tool::Bomb => (255, 96, 48),
+            Tool::Swing => (170, 236, 90),
         };
         Color::from_rgba(r, g, b, 255)
     }
@@ -77,7 +90,15 @@ impl Tool {
     }
 }
 
-/// An object held by the Spring / Slingshot tools (or a pinned object being moved).
+/// Tools that hold a single object.
+impl Tool {
+    pub fn grabs(self) -> bool {
+        matches!(self, Tool::Spring | Tool::Slingshot | Tool::Swing)
+    }
+}
+
+/// An object held by the Spring / Slingshot / Swing tools (or a pinned object
+/// being moved). Positions are physics metres.
 pub struct Grab {
     pub body: RigidBodyHandle,
     /// Grab point in the body's local frame.
@@ -88,13 +109,16 @@ pub struct Grab {
 }
 
 impl Grab {
-    pub fn new(bodies: &RigidBodySet, body: RigidBodyHandle, cursor_px: (f32, f32), tool: Tool) -> Self {
+    pub fn new(bodies: &RigidBodySet, body: RigidBodyHandle, cursor: (f32, f32), tool: Tool) -> Self {
         let b = &bodies[body];
-        let (cx, cy) = to_phys(cursor_px.0, cursor_px.1);
-        let local = if tool == Tool::Spring || !b.is_dynamic() {
+        let (cx, cy) = cursor;
+        // Swing holds the object by the clicked point, so pulling it off-centre
+        // makes it rotate; Spring and Slingshot pull the centre of mass (no
+        // torque). Pinned objects keep their offset so they don't jump.
+        let local = if tool == Tool::Swing || !b.is_dynamic() {
             b.position().inverse_transform_point(&point![cx, cy])
         } else {
-            point![0.0, 0.0]
+            b.position().inverse_transform_point(b.center_of_mass())
         };
         Grab { body, local, anchor: (b.translation().x, b.translation().y), tool }
     }
@@ -105,8 +129,8 @@ impl Grab {
     }
 
     /// Apply this frame's pull toward the cursor.
-    pub fn apply(&self, bodies: &mut RigidBodySet, cursor_px: (f32, f32)) {
-        let (cx, cy) = to_phys(cursor_px.0, cursor_px.1);
+    pub fn apply(&self, bodies: &mut RigidBodySet, cursor: (f32, f32)) {
+        let (cx, cy) = cursor;
         let Some(b) = bodies.get_mut(self.body) else { return };
 
         if b.is_kinematic() {
@@ -129,10 +153,10 @@ impl Grab {
     }
 
     /// Release: the slingshot launches away from where it was pulled.
-    pub fn release(&self, bodies: &mut RigidBodySet, cursor_px: (f32, f32)) {
+    pub fn release(&self, bodies: &mut RigidBodySet, cursor: (f32, f32)) {
         let Some(b) = bodies.get_mut(self.body) else { return };
         if self.tool == Tool::Slingshot && b.is_dynamic() {
-            let (mx, my) = to_phys(cursor_px.0, cursor_px.1);
+            let (mx, my) = cursor;
             let (ax, ay) = self.anchor;
             b.set_linvel(vector![(ax - mx) * 5.5, (ay - my) * 5.5], true);
         }
@@ -250,5 +274,31 @@ mod tests {
         let push = field_force(Tool::Push, b, (1.0, 0.0), 600.0, 300.0).unwrap();
         assert!(pull.x > 0.0 && push.x < 0.0);
         assert!(field_force(Tool::Pull, b, (100.0, 0.0), 60.0, 300.0).is_none());
+    }
+
+    /// Grab a 2 m × 1 m box near its corner, drag it sideways for a second
+    /// and return how far it rotated.
+    fn rotation_after_drag(tool: Tool) -> f32 {
+        use crate::physics::borders::BorderMode;
+        use crate::physics::PhysWorld;
+        // Portal mode has no walls, and gravity is off: only the grab acts.
+        let mut w = PhysWorld::new(0.0, BorderMode::Portal, (1200.0, 1200.0));
+        let h = w.bodies.insert(RigidBodyBuilder::dynamic().translation(vector![10.0, 10.0]));
+        w.colliders.insert_with_parent(ColliderBuilder::cuboid(1.0, 0.5), h, &mut w.bodies);
+
+        let grab = Grab::new(&w.bodies, h, (10.9, 10.4), tool);
+        for _ in 0..60 {
+            w.reset_forces();
+            grab.apply(&mut w.bodies, (14.0, 10.4));
+            w.step_fixed();
+        }
+        grab.release(&mut w.bodies, (14.0, 10.4));
+        w.bodies[h].rotation().angle().abs()
+    }
+
+    #[test]
+    fn spring_does_not_spin_but_swing_does() {
+        assert!(rotation_after_drag(Tool::Spring) < 1e-3, "Spring must pull the centre of mass");
+        assert!(rotation_after_drag(Tool::Swing) > 0.2, "Swing must rotate the object");
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name        = "gravity_engine"
-version     = "2.0.0"
+version     = "2.0.1"
 edition     = "2021"
 description = "A 2D physics sandbox: drop images, shapes and web buttons and watch them fly"
 readme      = "README.md"

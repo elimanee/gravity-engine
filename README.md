@@ -20,7 +20,8 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Drag & drop** files onto the window (images, audio, playlists, scenes).
 - **Screenshots** (`F12`), **slow motion** (`[` / `]`) and **frame-by-frame stepping** (`.` while paused).
 - **Pin objects** in place (right-click → *Pin*); pinned objects can still be dragged around with *Spring*.
-- **Better physics** — frame-rate independent simulation (it used to run faster on high-refresh screens), mass-aware tools, grab at the exact point you click, exact colliders for spawned shapes (balls, capsules, rounded boxes, concave stars), a ceiling so *Reverse* gravity no longer loses your objects.
+- **Swing tool** (`9`) — hold objects by the point you click; they dangle and spin when thrown.
+- **Better physics** — frame-rate independent simulation (it used to run faster on high-refresh screens), mass-aware tools, exact colliders for spawned shapes (balls, capsules, rounded boxes, concave stars), a ceiling so *Reverse* gravity no longer loses your objects.
 - **New content** — Hexagon and Capsule shapes, random-colour spawning, hold-to-spawn, *Aurora* background, smooth gradient backgrounds.
 - **Fixes** — duplicate/resize now work for fetched buttons and spawned shapes, correct animated-GIF disposal, window tracking no longer stalls frames, web fetches run in parallel.
 
@@ -30,11 +31,11 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Shape spawner** (`N`) — Circle, Box, Triangle, Pentagon, Hexagon, Star, Capsule; pick a colour (or random) and size, click or hold to spawn
 - **88×31 button fetcher** (`F`) — 20 random classic web buttons scraped from 8 galleries (animated GIFs supported)
 - **Game logo fetcher** (`L`) — 20 random logos from [SteamGridDB](https://www.steamgriddb.com/) (needs an API key, see below)
-- **8 tools** — `Tab` or `1`–`8`:
+- **9 tools** — `Tab` or `1`–`9`:
 
   | # | Tool | Description |
   |---|------|-------------|
-  | 1 | Spring | Grab, carry and throw |
+  | 1 | Spring | Grab, carry and throw (no spin) |
   | 2 | Slingshot | Pull back, release to launch |
   | 3 | Pull | Attract everything nearby |
   | 4 | Push | Repel everything nearby |
@@ -42,6 +43,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | 6 | Freeze | Slow objects to a crawl |
   | 7 | Orbit | Make objects circle the cursor |
   | 8 | Bomb | Click to detonate |
+  | 9 | Swing | Hold by the clicked point: objects dangle and spin when thrown |
 
   Area tools show a card with radius / strength sliders; the mouse wheel changes the radius (`Shift`+wheel: strength).
 - **7 border modes** — `B` to cycle (`Shift+B` backwards):
@@ -70,7 +72,7 @@ Press **F1** in the app for the full list.
 |-------------|--------|
 | Left-drag | Use the current tool |
 | Right-click | Object menu (Resize, Duplicate, Resize all, Pin, Delete) |
-| `Tab` / `1`–`8` | Tool picker / select a tool |
+| `Tab` / `1`–`9` | Tool picker / select a tool |
 | Wheel / `Shift`+Wheel | Tool radius / strength (spawn size when the spawner is open) |
 | `A` | Add images |
 | `N` | Shape spawner |

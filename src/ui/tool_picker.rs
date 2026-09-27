@@ -1,11 +1,11 @@
-//! Modal grid for choosing the interaction tool (Tab, or keys 1–8).
+//! Modal grid for choosing the interaction tool (Tab, or keys 1–9).
 
 use super::theme::*;
 use super::{icons, Action, Fader, Input};
 use crate::physics::tools::Tool;
 use macroquad::prelude::*;
 
-const COLS: usize = 4;
+const COLS: usize = 3;
 const CELL_W: f32 = 172.0;
 const CELL_H: f32 = 118.0;
 const GAP: f32 = 10.0;
@@ -67,7 +67,7 @@ impl ToolPicker {
         let p = Rect::new(p.x, p.y + lift, p.w, p.h);
         panel(p, f);
         text_bold("Choose a tool", p.x + PAD, p.y + PAD + 12.0, 17.0, fade(TEXT, f));
-        let hint = "1–8 to pick · Tab to close";
+        let hint = "1–9 to pick · Tab to close";
         text(hint, p.x + p.w - PAD - measure(hint, 12.0), p.y + PAD + 12.0, 12.0, fade(TEXT_MUTED, f));
 
         let t = get_time() as f32;
