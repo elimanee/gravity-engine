@@ -4,7 +4,7 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
-## [Unreleased]
+## [2.1.0]
 
 ### Added
 - **Audio visualizer**, fed by whatever is playing (tracker modules, audio files, playlists and radio streams):
