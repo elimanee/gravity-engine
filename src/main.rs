@@ -7,13 +7,19 @@
 //! Usage: `gravity_engine [--no-title] [FILES…]` — files may be images,
 //! audio (tracker modules, mp3/flac/ogg/…, .pls playlists) or `.gscene` scenes.
 
+// No console window behind the game on Windows release builds.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod app;
 mod assets;
 mod audio;
 mod background;
 mod config;
+mod drawing;
+mod history;
 mod net;
 mod physics;
+mod recorder;
 mod scene;
 mod settings;
 mod shapes;

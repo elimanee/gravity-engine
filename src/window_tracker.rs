@@ -1,7 +1,8 @@
 //! Window movement tracking for the "window shake" effect.
 //!
-//! The window position is polled on a background thread (X11, or KWin over
-//! DBus on KDE Wayland) so blocking platform calls never stall a frame.
+//! The window position is polled on a background thread (X11, KWin over
+//! DBus on KDE Wayland, or Win32) so blocking platform calls never stall a
+//! frame.
 
 use crate::config::PPM;
 use rapier2d::prelude::*;
@@ -25,6 +26,11 @@ impl WindowTracker {
         {
             let weak = Arc::downgrade(&shared);
             std::thread::Builder::new().name("window-tracker".into()).spawn(move || linux::poll_loop(weak)).ok();
+        }
+        #[cfg(windows)]
+        {
+            let weak = Arc::downgrade(&shared);
+            std::thread::Builder::new().name("window-tracker".into()).spawn(move || win32::poll_loop(weak)).ok();
         }
         WindowTracker { shared, prev: None }
     }
@@ -154,5 +160,33 @@ mod linux {
         let mut child: Window = 0;
         XTranslateCoordinates(dpy, w, root, 0, 0, &mut x, &mut y, &mut child);
         Some((x as f32, y as f32))
+    }
+}
+
+#[cfg(windows)]
+mod win32 {
+    use super::Shared;
+    use std::sync::atomic::Ordering;
+    use std::sync::Weak;
+    use std::time::Duration;
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowRect};
+
+    pub fn poll_loop(shared: Weak<Shared>) {
+        let title: Vec<u16> = crate::config::APP_NAME.encode_utf16().chain(Some(0)).collect();
+        while let Some(s) = shared.upgrade() {
+            if s.enabled.load(Ordering::Relaxed) {
+                let pos = unsafe {
+                    let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
+                    let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                    (!hwnd.is_null() && GetWindowRect(hwnd, &mut r) != 0).then_some((r.left as f32, r.top as f32))
+                };
+                if let Ok(mut p) = s.pos.lock() {
+                    *p = pos;
+                }
+            }
+            drop(s);
+            std::thread::sleep(Duration::from_millis(8));
+        }
     }
 }

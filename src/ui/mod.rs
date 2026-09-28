@@ -9,6 +9,7 @@ pub mod drawer;
 pub mod help;
 pub mod hud;
 pub mod icons;
+pub mod inspector;
 pub mod now_playing;
 pub mod spawner;
 pub mod theme;
@@ -105,6 +106,10 @@ pub enum Action {
     CycleVisualizerObject(i32),
     /// Drop a visualizer object into the scene.
     SpawnVisualizer,
+    ToggleWater,
+    Undo,
+    Redo,
+    ToggleRecording,
     Object(ObjectCmd, RigidBodyHandle),
 }
 
@@ -114,6 +119,8 @@ pub enum ObjectCmd {
     SizeAll(f32),
     Duplicate,
     TogglePin,
+    Properties,
+    Unlink,
     Delete,
 }
 

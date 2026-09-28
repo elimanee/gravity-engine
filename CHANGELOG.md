@@ -4,6 +4,25 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [2.2.0]
+
+### Added
+- **Draw tool** (`0`): draw with the mouse and your stroke becomes a physics object — a loop becomes a filled shape, a line becomes a plank. Drawings can be pinned in place (toggle in the tool card, `Shift` inverts) to build ramps, funnels and courses
+- **Link tool** (`J`): tie objects together with a **rope**, a **spring** or a **hinge**, or hang them from the background. Right-click a link with the tool to remove it, or use *Detach links* in the object menu
+- **Undo / redo** (`Ctrl+Z`, `Ctrl+Y` or `Ctrl+Shift+Z`) for every edit: adding, drawing, linking, deleting, resizing, pinning, clearing, opening a scene…
+- **Object properties** (right-click → *Properties…*, or `I`): bounce, friction, mass and gravity per object, with *Rubber*, *Ice*, *Heavy* and *Balloon* presets
+- **Water** (`H`): a pool with buoyancy and drag — light objects float, heavy ones sink — and waves that react to splashes and to the music's bass. Level and density in the settings drawer
+- **GIF recording** (`F11`): records the scene (without the interface) to `~/Pictures/gravity_engine/`, up to 30 seconds
+- **Windows build** attached to releases, and window shake now works on Windows too
+
+### Changed
+- The tool picker is now a 4 × 3 grid
+- Scenes (format version 2) also save drawings, links, object properties and water; older scenes still open
+
+### Downloads
+- `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
+- `gravity_engine-windows-x86_64.zip` — Windows build: unzip and run `gravity_engine.exe` (keep the DLLs next to it)
+
 ## [2.1.0]
 
 ### Added

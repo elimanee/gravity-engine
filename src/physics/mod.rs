@@ -1,8 +1,10 @@
 //! Rapier world wrapper, coordinate conversion and the arena walls.
 
 pub mod borders;
+pub mod links;
 pub mod object;
 pub mod tools;
+pub mod water;
 
 use crate::config::{BOUNCE, FRICTION, PHYSICS_DT, PPM, WALL_T};
 use borders::BorderMode;
@@ -33,6 +35,9 @@ pub struct PhysWorld {
     ccd: CCDSolver,
     query: QueryPipeline,
     walls: Vec<RigidBodyHandle>,
+    /// Fixed body at the origin that links attach to when they are pinned to
+    /// the background.
+    pub ground: RigidBodyHandle,
     pub border: BorderMode,
     /// Arena size in metres.
     pub arena: (f32, f32),
@@ -40,8 +45,10 @@ pub struct PhysWorld {
 
 impl PhysWorld {
     pub fn new(gravity_y: f32, border: BorderMode, arena_px: (f32, f32)) -> Self {
+        let mut bodies = RigidBodySet::new();
+        let ground = bodies.insert(RigidBodyBuilder::fixed());
         let mut w = PhysWorld {
-            bodies: RigidBodySet::new(),
+            bodies,
             colliders: ColliderSet::new(),
             gravity: vector![0.0, gravity_y],
             params: IntegrationParameters::default(),
@@ -54,6 +61,7 @@ impl PhysWorld {
             ccd: CCDSolver::new(),
             query: QueryPipeline::new(),
             walls: vec![],
+            ground,
             border,
             arena: (arena_px.0 / PPM, arena_px.1 / PPM),
         };

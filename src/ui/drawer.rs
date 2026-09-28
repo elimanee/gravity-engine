@@ -19,6 +19,8 @@ enum SliderId {
     Shake,
     Volume,
     VisGain,
+    WaterLevel,
+    WaterDensity,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -26,6 +28,7 @@ enum ToggleId {
     Trails,
     Shake,
     Dance,
+    Water,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -63,12 +66,14 @@ const WEB_BUTTONS: &[(&str, Action)] = &[("88×31 buttons", Action::FetchButtons
 const SCENE_BUTTONS: &[(&str, Action)] = &[("Save…", Action::SaveScene), ("Open…", Action::LoadScene)];
 const VIS_BUTTONS: &[(&str, Action)] = &[("Spawn visualizer  (Shift+V)", Action::SpawnVisualizer)];
 const SCENE_BUTTONS_2: &[(&str, Action)] = &[("Screenshot", Action::Screenshot), ("Clear all", Action::ClearAll)];
+const EDIT_BUTTONS: &[(&str, Action)] = &[("Undo  (Ctrl+Z)", Action::Undo), ("Redo  (Ctrl+Y)", Action::Redo)];
+const GIF_BUTTONS: &[(&str, Action)] = &[("Record / stop a GIF  (F11)", Action::ToggleRecording)];
 
 #[derive(Default)]
 pub struct Drawer {
     pub fader: Fader,
     scroll: f32,
-    sliders: [SliderState; 7],
+    sliders: [SliderState; 9],
 }
 
 fn slider_index(id: SliderId) -> usize {
@@ -90,6 +95,14 @@ fn slider_spec(id: SliderId, s: &Settings) -> (SliderSpec<'static>, f32) {
         SliderId::VisGain => {
             ("Sensitivity", VIS_GAIN_RANGE, s.vis_gain, format!("×{:.1}", s.vis_gain), Color::new(0.9, 0.5, 1.0, 1.0))
         }
+        SliderId::WaterLevel => {
+            let text = format!("{:.0}%", s.water_level * 100.0);
+            ("Level", WATER_LEVEL_RANGE, s.water_level, text, Color::new(0.35, 0.65, 1.0, 1.0))
+        }
+        SliderId::WaterDensity => {
+            let text = format!("×{:.1}", s.water_density);
+            ("Density", WATER_DENSITY_RANGE, s.water_density, text, Color::new(0.35, 0.65, 1.0, 1.0))
+        }
     };
     (SliderSpec { label, value_text: text, min: range.0, max: range.1, accent }, value)
 }
@@ -103,6 +116,8 @@ fn slider_value(id: SliderId, s: &mut Settings) -> &mut f32 {
         SliderId::Shake => &mut s.shake_force,
         SliderId::Volume => &mut s.volume,
         SliderId::VisGain => &mut s.vis_gain,
+        SliderId::WaterLevel => &mut s.water_level,
+        SliderId::WaterDensity => &mut s.water_density,
     }
 }
 
@@ -127,6 +142,12 @@ impl Drawer {
         if s.window_shake {
             rows.push(Row::Slider(SliderId::Shake));
         }
+        rows.push(Row::Header("WATER"));
+        rows.push(Row::Toggle(ToggleId::Water));
+        if s.water {
+            rows.push(Row::Slider(SliderId::WaterLevel));
+            rows.push(Row::Slider(SliderId::WaterDensity));
+        }
         rows.extend([
             Row::Header("AUDIO"),
             Row::Slider(SliderId::Volume),
@@ -143,6 +164,8 @@ impl Drawer {
             Row::Header("SCENE"),
             Row::Buttons(SCENE_BUTTONS),
             Row::Buttons(SCENE_BUTTONS_2),
+            Row::Buttons(EDIT_BUTTONS),
+            Row::Buttons(GIF_BUTTONS),
         ]);
         rows
     }
@@ -215,6 +238,7 @@ impl Drawer {
                             ToggleId::Trails => s.trails = !s.trails,
                             ToggleId::Shake => s.window_shake = !s.window_shake,
                             ToggleId::Dance => s.vis_dance = !s.vis_dance,
+                            ToggleId::Water => actions.push(Action::ToggleWater),
                         }
                     }
                 }
@@ -283,6 +307,7 @@ impl Drawer {
                         ToggleId::Trails => ("Motion trails  (T)", s.trails),
                         ToggleId::Shake => ("React to window moves  (W)", s.window_shake),
                         ToggleId::Dance => ("Objects jump on the beat", s.vis_dance),
+                        ToggleId::Water => ("Water  (H)", s.water),
                     };
                     draw_toggle_row(r, label, on, hov, f);
                 }

@@ -3,10 +3,12 @@
 use super::{to_phys, to_screen, PhysWorld};
 use crate::assets::{self, Decoded};
 use crate::config::{file_name_of, BOUNCE, DENSITY, FRICTION, MAX_IMG_PX, PPM, TRAIL_MAX};
+use crate::drawing::Drawing;
 use crate::shapes::{self, Shape, BOX_ROUNDING};
 use macroquad::prelude::*;
 use rapier2d::na;
 use rapier2d::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -25,6 +27,8 @@ pub enum Source {
     },
     /// A live audio visualizer screen (drawn every frame, no sprite).
     Visualizer,
+    /// A shape drawn with the Draw tool.
+    Drawing(Arc<Drawing>),
 }
 
 impl Source {
@@ -34,6 +38,7 @@ impl Source {
             Source::Memory { name, .. } => name.clone(),
             Source::Shape { shape, .. } => shape.label().to_string(),
             Source::Visualizer => "Audio visualizer".to_string(),
+            Source::Drawing(d) => if d.closed { "Drawn shape" } else { "Drawn plank" }.to_string(),
         }
     }
 
@@ -49,6 +54,7 @@ impl Source {
             Source::Visualizer => {
                 Some(Decoded { frames: vec![image::RgbaImage::new(2, 1)], delays_ms: vec![], hull: None })
             }
+            Source::Drawing(d) => Some(Decoded { frames: vec![d.rasterize(max_px)], delays_ms: vec![], hull: None }),
         }
     }
 
@@ -68,6 +74,8 @@ impl Source {
                 }
             },
             Source::Visualizer => Outline::RoundBox,
+            Source::Drawing(d) if d.closed => Outline::Concave(d.points.clone()),
+            Source::Drawing(d) => Outline::Stroke { pts: d.points.clone(), thickness: d.thickness },
             _ => match &decoded.hull {
                 Some(h) => Outline::Hull(h.clone()),
                 None => Outline::Box,
@@ -85,6 +93,11 @@ enum Outline {
     Capsule,
     Hull(Vec<[f32; 2]>),
     Concave(Vec<[f32; 2]>),
+    /// A thick polyline; `thickness` is relative to the longest side.
+    Stroke {
+        pts: Vec<[f32; 2]>,
+        thickness: f32,
+    },
 }
 
 impl Outline {
@@ -109,10 +122,49 @@ impl Outline {
                 let verts = scale(pts);
                 let n = verts.len() as u32;
                 let idx: Vec<[u32; 2]> = (0..n).map(|i| [i, (i + 1) % n]).collect();
-                ColliderBuilder::convex_decomposition(&verts, &idx)
+                let shape = SharedShape::convex_decomposition(&verts, &idx);
+                // Degenerate hand-drawn outlines can decompose into nothing.
+                match shape.as_compound().is_some_and(|c| !c.shapes().is_empty()) {
+                    true => ColliderBuilder::new(shape),
+                    false => ColliderBuilder::convex_hull(&verts).unwrap_or_else(|| ColliderBuilder::cuboid(hw, hh)),
+                }
+            }
+            Outline::Stroke { pts, thickness } => {
+                let verts = scale(pts);
+                let r = (thickness * hw.max(hh)).max(0.02);
+                let mut parts: Vec<(Isometry<f32>, SharedShape)> =
+                    verts.windows(2).map(|w| (Isometry::identity(), SharedShape::capsule(w[0], w[1], r))).collect();
+                match parts.len() {
+                    0 => ColliderBuilder::ball(r),
+                    1 => ColliderBuilder::new(parts.pop().expect("one part").1),
+                    _ => ColliderBuilder::compound(parts),
+                }
             }
         }
     }
+}
+
+/// Surface and motion properties an object can be given from its menu.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Material {
+    /// Restitution.
+    pub bounce: f32,
+    pub friction: f32,
+    /// Multiplier of the world gravity (negative floats up).
+    pub gravity: f32,
+}
+
+impl Default for Material {
+    fn default() -> Self {
+        Material { bounce: BOUNCE, friction: FRICTION, gravity: 1.0 }
+    }
+}
+
+impl Material {
+    pub const RUBBER: Material = Material { bounce: 0.92, friction: 0.9, gravity: 1.0 };
+    pub const ICE: Material = Material { bounce: 0.05, friction: 0.0, gravity: 1.0 };
+    pub const BALLOON: Material = Material { bounce: 0.6, friction: 0.4, gravity: -0.25 };
 }
 
 /// Initial placement of a new object.
@@ -126,6 +178,9 @@ pub struct Placement {
     /// Display size in pixels; `None` keeps the decoded size.
     pub size_px: Option<(f32, f32)>,
     pub pinned: bool,
+    pub material: Material,
+    /// Mass in kg; `None` derives it from the size.
+    pub mass: Option<f32>,
 }
 
 struct Ghost {
@@ -149,6 +204,7 @@ pub struct Object {
     /// Mass is preserved across resizes.
     pub mass: f32,
     pub pinned: bool,
+    pub material: Material,
     trail: VecDeque<Ghost>,
 }
 
@@ -193,17 +249,21 @@ impl Object {
             .rotation(at.angle)
             .linvel(vector![at.linvel.0, at.linvel.1])
             .angvel(at.angvel)
+            .gravity_scale(at.material.gravity)
             .angular_damping(0.6)
             .ccd_enabled(true)
             .build();
         let body = world.bodies.insert(body);
-        let col = visual
+        let mut col = visual
             .outline
             .collider(w / 2.0 / PPM, h / 2.0 / PPM)
             .density(DENSITY)
-            .friction(FRICTION)
-            .restitution(BOUNCE)
+            .friction(at.material.friction)
+            .restitution(at.material.bounce)
             .build();
+        if let Some(m) = at.mass.filter(|m| m.is_finite() && *m > 0.0) {
+            col.set_density(DENSITY * m / col.mass().max(1e-6));
+        }
         let mass = col.mass();
         let collider = world.colliders.insert_with_parent(col, body, &mut world.bodies);
 
@@ -219,6 +279,7 @@ impl Object {
             size: vec2(w, h),
             mass,
             pinned: at.pinned,
+            material: at.material,
             trail: VecDeque::new(),
         }
     }
@@ -235,15 +296,23 @@ impl Object {
         Some(Self::spawn(world, source, visual, at))
     }
 
+    /// This object's sprite and collider geometry (textures are shared).
+    pub fn visual(&self) -> Visual {
+        Visual { frames: self.frames.clone(), delays_ms: self.delays_ms.clone(), outline: self.outline.clone() }
+    }
+
     /// A copy of this object (sharing its textures) at `at`.
     pub fn duplicate(&self, world: &mut PhysWorld, at: Placement) -> Self {
-        let visual =
-            Visual { frames: self.frames.clone(), delays_ms: self.delays_ms.clone(), outline: self.outline.clone() };
         let mut o = Self::spawn(
             world,
             self.source.clone(),
-            visual,
-            Placement { size_px: Some((self.size.x, self.size.y)), ..at },
+            self.visual(),
+            Placement {
+                size_px: Some((self.size.x, self.size.y)),
+                material: self.material,
+                mass: Some(self.mass),
+                ..at
+            },
         );
         o.frame_idx = self.frame_idx;
         o
@@ -276,6 +345,8 @@ impl Object {
             angvel: b.angvel(),
             size_px: Some((self.size.x, self.size.y)),
             pinned: self.pinned,
+            material: self.material,
+            mass: Some(self.mass),
         }
     }
 
@@ -378,8 +449,8 @@ impl Object {
             .outline
             .collider(new.x / 2.0 / PPM, new.y / 2.0 / PPM)
             .density(1.0)
-            .friction(FRICTION)
-            .restitution(BOUNCE)
+            .friction(self.material.friction)
+            .restitution(self.material.bounce)
             .build();
         let unit_mass = col.mass().max(1e-6);
         col.set_density(self.mass / unit_mass);
@@ -387,6 +458,32 @@ impl Object {
         if let Some(b) = world.bodies.get_mut(self.body) {
             b.wake_up(true);
         }
+    }
+
+    pub fn set_material(&mut self, world: &mut PhysWorld, m: Material) {
+        self.material = m;
+        if let Some(c) = world.colliders.get_mut(self.collider) {
+            c.set_restitution(m.bounce);
+            c.set_friction(m.friction);
+        }
+        if let Some(b) = world.bodies.get_mut(self.body) {
+            b.set_gravity_scale(m.gravity, true);
+        }
+    }
+
+    pub fn set_mass(&mut self, world: &mut PhysWorld, mass: f32) {
+        let Some(c) = world.colliders.get_mut(self.collider) else { return };
+        let unit = c.shape().mass_properties(1.0).mass().max(1e-6);
+        c.set_density(mass / unit);
+        self.mass = mass;
+        if let Some(b) = world.bodies.get_mut(self.body) {
+            b.wake_up(true);
+        }
+    }
+
+    /// Area of the collider in m².
+    pub fn area(&self, world: &PhysWorld) -> f32 {
+        world.colliders.get(self.collider).map_or(0.0, |c| c.shape().mass_properties(1.0).mass())
     }
 
     pub fn set_pinned(&mut self, world: &mut PhysWorld, pinned: bool) {
@@ -409,7 +506,34 @@ impl Object {
     }
 }
 
+#[cfg(test)]
+impl Object {
+    /// An object without sprite, for physics tests.
+    pub fn test_stub(body: RigidBodyHandle, collider: ColliderHandle) -> Self {
+        Object {
+            source: Source::Visualizer,
+            frames: vec![],
+            delays_ms: vec![],
+            frame_idx: 0,
+            frame_timer: 0.0,
+            outline: Outline::Box,
+            body,
+            collider,
+            size: vec2(60.0, 60.0),
+            mass: 1.0,
+            pinned: false,
+            material: Material::default(),
+            trail: VecDeque::new(),
+        }
+    }
+}
+
 /// Index of the top-most object under the given screen point.
 pub fn object_at(objects: &[Object], world: &PhysWorld, px: f32, py: f32) -> Option<usize> {
     objects.iter().rposition(|o| o.contains_px(world, px, py))
+}
+
+/// Indices of every object under the given screen point, top-most first.
+pub fn objects_at(objects: &[Object], world: &PhysWorld, px: f32, py: f32) -> Vec<usize> {
+    (0..objects.len()).rev().filter(|&i| objects[i].contains_px(world, px, py)).collect()
 }
