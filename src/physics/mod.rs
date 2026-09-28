@@ -1,10 +1,14 @@
 //! Rapier world wrapper, coordinate conversion and the arena walls.
 
 pub mod borders;
+pub mod events;
+pub mod fracture;
 pub mod links;
+pub mod magnets;
 pub mod object;
 pub mod tools;
 pub mod water;
+pub mod zones;
 
 use crate::config::{BOUNCE, FRICTION, PHYSICS_DT, PPM, WALL_T};
 use borders::BorderMode;
@@ -34,6 +38,7 @@ pub struct PhysWorld {
     pub multibody_joints: MultibodyJointSet,
     ccd: CCDSolver,
     query: QueryPipeline,
+    events: events::Events,
     walls: Vec<RigidBodyHandle>,
     /// Fixed body at the origin that links attach to when they are pinned to
     /// the background.
@@ -60,6 +65,7 @@ impl PhysWorld {
             multibody_joints: MultibodyJointSet::new(),
             ccd: CCDSolver::new(),
             query: QueryPipeline::new(),
+            events: events::Events::default(),
             walls: vec![],
             ground,
             border,
@@ -155,9 +161,14 @@ impl PhysWorld {
             &mut self.multibody_joints,
             &mut self.ccd,
             Some(&mut self.query),
-            &(),
-            &(),
+            &events::Hooks,
+            &self.events,
         );
+    }
+
+    /// Impacts reported since the last call.
+    pub fn take_impacts(&self) -> Vec<events::Impact> {
+        self.events.drain()
     }
 
     pub fn remove_body(&mut self, h: RigidBodyHandle) {

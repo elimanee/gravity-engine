@@ -19,6 +19,7 @@ pub enum Tool {
     Swing,
     Draw,
     Link,
+    Zone,
 }
 
 /// What the bottom-left tool card shows for a tool.
@@ -29,8 +30,10 @@ pub enum Card {
     Area,
     /// Thickness, colour and pinning.
     Draw,
-    /// Rope / spring / hinge.
+    /// Rope / spring / hinge / motor.
     Link,
+    /// Wind / float / portal.
+    Zone,
 }
 
 /// Field forces are expressed as accelerations for an object of this mass, so
@@ -50,6 +53,7 @@ impl Tool {
         Tool::Swing,
         Tool::Draw,
         Tool::Link,
+        Tool::Zone,
     ];
 
     /// Keyboard shortcut.
@@ -66,6 +70,7 @@ impl Tool {
             Tool::Swing => "9",
             Tool::Draw => "0",
             Tool::Link => "J",
+            Tool::Zone => "Z",
         }
     }
 
@@ -82,6 +87,7 @@ impl Tool {
             Tool::Swing => "Swing",
             Tool::Draw => "Draw",
             Tool::Link => "Link",
+            Tool::Zone => "Zone",
         }
     }
 
@@ -97,7 +103,8 @@ impl Tool {
             Tool::Bomb => "Click to detonate",
             Tool::Swing => "Hold by a point, throw it spinning",
             Tool::Draw => "Draw shapes and planks",
-            Tool::Link => "Ropes, springs and hinges",
+            Tool::Link => "Ropes, springs, hinges, motors",
+            Tool::Zone => "Wind, float and portal areas",
         }
     }
 
@@ -114,6 +121,7 @@ impl Tool {
             Tool::Swing => (170, 236, 90),
             Tool::Draw => (255, 140, 190),
             Tool::Link => (226, 190, 140),
+            Tool::Zone => (120, 210, 255),
         };
         Color::from_rgba(r, g, b, 255)
     }
@@ -133,6 +141,7 @@ impl Tool {
             _ if self.has_settings() => Card::Area,
             Tool::Draw => Card::Draw,
             Tool::Link => Card::Link,
+            Tool::Zone => Card::Zone,
             _ => Card::None,
         }
     }
@@ -277,13 +286,15 @@ pub fn apply_field(
 }
 
 /// Instant radial explosion (impulse-based, so light objects fly further).
+/// Returns each body hit with the speed it was kicked to (m/s).
 pub fn detonate(
     bodies: &mut RigidBodySet,
     handles: &[RigidBodyHandle],
     cursor_px: (f32, f32),
     radius_px: f32,
     strength: f32,
-) {
+) -> Vec<(RigidBodyHandle, f32)> {
+    let mut hits = vec![];
     let (bx, by) = to_phys(cursor_px.0, cursor_px.1);
     for &h in handles {
         let Some(b) = bodies.get_mut(h) else { continue };
@@ -297,8 +308,10 @@ pub fn detonate(
             let mag = (strength * 4.0 / (dist * dist)).min(strength * 15.0);
             b.apply_impulse(vector![dx / dist * mag, dy / dist * mag], true);
             b.apply_torque_impulse((macroquad::rand::gen_range(-1.0f32, 1.0)) * mag * 0.05, true);
+            hits.push((h, mag / b.mass().max(1e-3)));
         }
     }
+    hits
 }
 
 #[cfg(test)]

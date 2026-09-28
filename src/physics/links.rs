@@ -11,16 +11,24 @@ pub enum LinkKind {
     Rope,
     Spring,
     Hinge,
+    /// A hinge that turns by itself.
+    Motor,
 }
 
 impl LinkKind {
-    pub const ALL: &'static [LinkKind] = &[LinkKind::Rope, LinkKind::Spring, LinkKind::Hinge];
+    pub const ALL: &'static [LinkKind] = &[LinkKind::Rope, LinkKind::Spring, LinkKind::Hinge, LinkKind::Motor];
+
+    /// Placed with a single click (at a point) rather than a drag.
+    pub fn is_pivot(self) -> bool {
+        matches!(self, LinkKind::Hinge | LinkKind::Motor)
+    }
 
     pub fn label(self) -> &'static str {
         match self {
             LinkKind::Rope => "Rope",
             LinkKind::Spring => "Spring",
             LinkKind::Hinge => "Hinge",
+            LinkKind::Motor => "Motor",
         }
     }
 
@@ -29,6 +37,7 @@ impl LinkKind {
         match self {
             LinkKind::Rope | LinkKind::Spring => ["Drag from one object to another,", "or to empty space to hang it"],
             LinkKind::Hinge => ["Click where two objects overlap,", "or on one to nail it in place"],
+            LinkKind::Motor => ["Click a wheel where it overlaps a body", "(or on its own) to make it spin"],
         }
     }
 
@@ -37,6 +46,7 @@ impl LinkKind {
             LinkKind::Rope => Color::from_rgba(226, 190, 140, 255),
             LinkKind::Spring => Color::from_rgba(120, 220, 255, 255),
             LinkKind::Hinge => Color::from_rgba(230, 230, 240, 255),
+            LinkKind::Motor => Color::from_rgba(255, 160, 70, 255),
         }
     }
 }
@@ -46,6 +56,21 @@ const SPRING_K: f32 = 60.0;
 const SPRING_C: f32 = 2.4;
 /// A spring's slack safety rope, relative to its rest length.
 const SPRING_MAX_STRETCH: f32 = 3.0;
+/// How hard motors chase their target speed.
+const MOTOR_GAIN: f32 = 4.0;
+
+/// Everything needed to (re)create a link.
+#[derive(Debug, Clone, Copy)]
+pub struct LinkSpec {
+    pub kind: LinkKind,
+    pub a: RigidBodyHandle,
+    pub b: Option<RigidBodyHandle>,
+    pub la: Point<f32>,
+    pub lb: Point<f32>,
+    pub length: f32,
+    /// Motor speed (rad/s, positive = clockwise on screen).
+    pub speed: f32,
+}
 
 pub struct Link {
     pub kind: LinkKind,
@@ -58,6 +83,8 @@ pub struct Link {
     pub lb: Point<f32>,
     /// Rope length / spring rest length (m).
     pub length: f32,
+    /// Motor speed (rad/s, positive = clockwise on screen).
+    pub speed: f32,
     pub joint: ImpulseJointHandle,
 }
 
@@ -70,6 +97,7 @@ impl Link {
         b: Option<RigidBodyHandle>,
         pa: Point<f32>,
         pb: Point<f32>,
+        speed: f32,
     ) -> Option<Self> {
         let la = world.bodies.get(a)?.position().inverse_transform_point(&pa);
         let lb = match b {
@@ -77,19 +105,18 @@ impl Link {
             None => pb,
         };
         let length = (pa - pb).norm().max(0.05);
-        Some(Self::restore(world, kind, a, b, la, lb, length))
+        Some(Self::restore(world, LinkSpec { kind, a, b, la, lb, length, speed }))
+    }
+
+    pub fn spec(&self) -> LinkSpec {
+        let (kind, a, b, la, lb, length, speed) =
+            (self.kind, self.a, self.b, self.la, self.lb, self.length, self.speed);
+        LinkSpec { kind, a, b, la, lb, length, speed }
     }
 
     /// Recreate a link from its local anchors (scenes, undo).
-    pub fn restore(
-        world: &mut PhysWorld,
-        kind: LinkKind,
-        a: RigidBodyHandle,
-        b: Option<RigidBodyHandle>,
-        la: Point<f32>,
-        lb: Point<f32>,
-        length: f32,
-    ) -> Self {
+    pub fn restore(world: &mut PhysWorld, spec: LinkSpec) -> Self {
+        let LinkSpec { kind, a, b, la, lb, length, speed } = spec;
         let data: GenericJoint = match kind {
             LinkKind::Rope => RopeJointBuilder::new(length).local_anchor1(la).local_anchor2(lb).build().into(),
             // Rapier's spring joint ignores its rest length, so springs are
@@ -103,9 +130,17 @@ impl Link {
             LinkKind::Hinge => {
                 RevoluteJointBuilder::new().local_anchor1(la).local_anchor2(lb).contacts_enabled(false).build().into()
             }
+            LinkKind::Motor => RevoluteJointBuilder::new()
+                .local_anchor1(la)
+                .local_anchor2(lb)
+                .contacts_enabled(false)
+                .motor_model(MotorModel::AccelerationBased)
+                .motor_velocity(speed, MOTOR_GAIN)
+                .build()
+                .into(),
         };
         let joint = world.impulse_joints.insert(a, b.unwrap_or(world.ground), data, true);
-        Link { kind, a, b, la, lb, length, joint }
+        Link { kind, a, b, la, lb, length, speed, joint }
     }
 
     /// Both anchors in world space.
@@ -174,9 +209,20 @@ impl Link {
                 }
             }
             LinkKind::Hinge => {}
+            LinkKind::Motor => {
+                // A ring with ticks that turn with the driven object.
+                let angle = world.bodies.get(self.a).map_or(0.0, |body| body.rotation().angle());
+                draw_circle(a.x, a.y + 1.0, 11.0, shade);
+                draw_circle_lines(a.x, a.y, 10.0, 2.5, c);
+                for i in 0..3 {
+                    let t = -angle + i as f32 * std::f32::consts::TAU / 3.0;
+                    let (s, co) = t.sin_cos();
+                    draw_line(a.x + co * 4.0, a.y + s * 4.0, a.x + co * 9.0, a.y + s * 9.0, 2.0, c);
+                }
+            }
         }
         for (p, attached_to_bg) in [(a, false), (b, self.b.is_none())] {
-            if self.kind == LinkKind::Hinge && p != a {
+            if self.kind.is_pivot() && p != a {
                 continue;
             }
             draw_circle(p.x, p.y + 1.0, 5.5, shade);
@@ -247,7 +293,7 @@ mod tests {
     #[test]
     fn rope_holds_an_object_below_its_anchor() {
         let (mut w, h) = world_with_ball(10.0);
-        let link = Link::new(&mut w, LinkKind::Rope, h, None, point![10.0, 10.0], point![10.0, 12.0]).unwrap();
+        let link = Link::new(&mut w, LinkKind::Rope, h, None, point![10.0, 10.0], point![10.0, 12.0], 0.0).unwrap();
         for _ in 0..240 {
             w.step_fixed();
         }
@@ -259,7 +305,8 @@ mod tests {
     #[test]
     fn spring_settles_near_its_rest_length() {
         let (mut w, h) = world_with_ball(10.0);
-        let links = vec![Link::new(&mut w, LinkKind::Spring, h, None, point![10.0, 10.0], point![10.0, 12.0]).unwrap()];
+        let links =
+            vec![Link::new(&mut w, LinkKind::Spring, h, None, point![10.0, 10.0], point![10.0, 12.0], 0.0).unwrap()];
         for _ in 0..1200 {
             w.reset_forces();
             apply_springs(&links, &mut w);
@@ -271,11 +318,32 @@ mod tests {
         assert!((y - expected).abs() < 0.15, "expected ≈{expected}, got {y}");
     }
 
+    /// Spin rate of a wheel driven by a motor of `speed` against the background.
+    fn motor_spin(speed: f32) -> f32 {
+        let mut w = PhysWorld::new(0.0, BorderMode::Portal, (1200.0, 1200.0));
+        let h = w.bodies.insert(RigidBodyBuilder::dynamic().translation(vector![10.0, 10.0]));
+        w.colliders.insert_with_parent(ColliderBuilder::ball(0.5), h, &mut w.bodies);
+        let at = point![10.0, 10.0];
+        Link::new(&mut w, LinkKind::Motor, h, None, at, at, speed).unwrap();
+        for _ in 0..120 {
+            w.step_fixed();
+        }
+        w.bodies[h].angvel()
+    }
+
+    #[test]
+    fn motors_reach_their_speed() {
+        // Clockwise on screen is a negative angle in the y-up physics frame.
+        let spin = motor_spin(3.0);
+        assert!((spin + 3.0).abs() < 0.3, "expected -3 rad/s (clockwise), got {spin}");
+        assert!(motor_spin(-3.0) * spin < 0.0, "negative speeds turn the other way");
+    }
+
     #[test]
     fn removing_a_body_prunes_its_links() {
         let (mut w, h) = world_with_ball(10.0);
         let mut links =
-            vec![Link::new(&mut w, LinkKind::Hinge, h, None, point![10.0, 10.0], point![10.0, 10.0]).unwrap()];
+            vec![Link::new(&mut w, LinkKind::Hinge, h, None, point![10.0, 10.0], point![10.0, 10.0], 0.0).unwrap()];
         w.remove_body(h);
         prune(&mut links, &w);
         assert!(links.is_empty());

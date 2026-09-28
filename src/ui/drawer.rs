@@ -29,6 +29,7 @@ enum ToggleId {
     Shake,
     Dance,
     Water,
+    Effects,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -68,6 +69,7 @@ const VIS_BUTTONS: &[(&str, Action)] = &[("Spawn visualizer  (Shift+V)", Action:
 const SCENE_BUTTONS_2: &[(&str, Action)] = &[("Screenshot", Action::Screenshot), ("Clear all", Action::ClearAll)];
 const EDIT_BUTTONS: &[(&str, Action)] = &[("Undo  (Ctrl+Z)", Action::Undo), ("Redo  (Ctrl+Y)", Action::Redo)];
 const GIF_BUTTONS: &[(&str, Action)] = &[("Record / stop a GIF  (F11)", Action::ToggleRecording)];
+const LIBRARY_BUTTONS: &[(&str, Action)] = &[("Examples & challenges  (E)", Action::OpenLibrary)];
 
 #[derive(Default)]
 pub struct Drawer {
@@ -158,7 +160,10 @@ impl Drawer {
             Row::Slider(SliderId::VisGain),
             Row::Toggle(ToggleId::Dance),
             Row::Buttons(VIS_BUTTONS),
+            Row::Header("EFFECTS"),
+            Row::Toggle(ToggleId::Effects),
             Row::Header("ADD OBJECTS"),
+            Row::Buttons(LIBRARY_BUTTONS),
             Row::Buttons(ADD_BUTTONS),
             Row::Buttons(WEB_BUTTONS),
             Row::Header("SCENE"),
@@ -239,6 +244,7 @@ impl Drawer {
                             ToggleId::Shake => s.window_shake = !s.window_shake,
                             ToggleId::Dance => s.vis_dance = !s.vis_dance,
                             ToggleId::Water => actions.push(Action::ToggleWater),
+                            ToggleId::Effects => actions.push(Action::ToggleEffects),
                         }
                     }
                 }
@@ -308,6 +314,7 @@ impl Drawer {
                         ToggleId::Shake => ("React to window moves  (W)", s.window_shake),
                         ToggleId::Dance => ("Objects jump on the beat", s.vis_dance),
                         ToggleId::Water => ("Water  (H)", s.water),
+                        ToggleId::Effects => ("Sparks, dust and splashes", s.effects),
                     };
                     draw_toggle_row(r, label, on, hov, f);
                 }

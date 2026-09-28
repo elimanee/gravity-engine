@@ -1,6 +1,6 @@
 //! Bottom-left card with the current tool's settings: radius and strength
-//! for area tools, thickness / colour / pinning for Draw, and the kind of
-//! link for Link.
+//! for area tools, thickness / colour / pinning for Draw, the kind of link
+//! (and motor speed) for Link, and the kind of zone for Zone.
 
 use super::spawner::spawn_color;
 use super::theme::*;
@@ -9,84 +9,174 @@ use super::{icons, Action, Input};
 use crate::config::{PPM, WALL_T};
 use crate::physics::links::LinkKind;
 use crate::physics::tools::Card;
-use crate::settings::{Settings, DRAW_THICKNESS_RANGE, RADIUS_RANGE, STRENGTH_RANGE};
+use crate::physics::zones::ZoneKind;
+use crate::settings::*;
 use crate::shapes::PALETTE;
 use crate::util::approach;
 use macroquad::prelude::*;
 
 const W: f32 = 268.0;
+/// Wind directions offered, in degrees.
+const DIRECTIONS: [f32; 4] = [180.0, 90.0, 270.0, 0.0];
+
+#[derive(Clone, Copy, PartialEq)]
+enum SliderId {
+    Radius,
+    Strength,
+    Thickness,
+    MotorSpeed,
+    ZoneStrength,
+}
 
 pub struct ToolCard {
     shown: f32,
     /// Card kept on screen while sliding out.
     card: Card,
-    radius: SliderState,
-    strength: SliderState,
-    thickness: SliderState,
+    sliders: [SliderState; 5],
 }
 
 impl Default for ToolCard {
     fn default() -> Self {
-        ToolCard {
-            shown: 0.0,
-            card: Card::None,
-            radius: SliderState::default(),
-            strength: SliderState::default(),
-            thickness: SliderState::default(),
-        }
+        ToolCard { shown: 0.0, card: Card::None, sliders: Default::default() }
     }
 }
 
+#[derive(Default)]
 struct Layout {
     panel: Rect,
     head: Rect,
-    /// Area: radius, strength. Draw: thickness.
-    sliders: Vec<Rect>,
+    sliders: Vec<(SliderId, Rect)>,
     swatches: Vec<Rect>,
     pin: Option<Rect>,
+    /// Kind buttons (link or zone kinds).
     kinds: Vec<Rect>,
+    directions: Vec<Rect>,
+    /// Two hint lines at the bottom.
+    hint: Option<[&'static str; 2]>,
 }
 
-fn height(card: Card) -> f32 {
-    match card {
-        Card::Area => 132.0,
-        Card::Draw => 176.0,
-        Card::Link => 150.0,
-        Card::None => 0.0,
-    }
+fn row_of(r: Rect, n: usize, gap: f32) -> Vec<Rect> {
+    let w = (r.w - (n as f32 - 1.0) * gap) / n as f32;
+    (0..n).map(|i| Rect::new(r.x + i as f32 * (w + gap), r.y, w, r.h)).collect()
 }
 
 impl ToolCard {
-    fn layout(&self) -> Layout {
+    fn layout(&self, s: &Settings) -> Layout {
         let sh = screen_height();
-        let h = height(self.card);
-        let x = 10.0 - (1.0 - self.shown) * (W + 20.0);
-        let panel = Rect::new(x, sh - WALL_T * PPM - 10.0 - h, W, h);
-        let head = Rect::new(panel.x + 12.0, panel.y + 10.0, panel.w - 24.0, 36.0);
-        let inner = |y: f32, h: f32| Rect::new(panel.x + 14.0, panel.y + y, panel.w - 28.0, h);
-        let mut l = Layout { panel, head, sliders: vec![], swatches: vec![], pin: None, kinds: vec![] };
+        let mut l = Layout::default();
+        // Rows are stacked from y = 48 down; the panel height follows.
+        let mut y = 48.0;
+        let mut rows: Vec<(f32, f32)> = vec![];
+        let mut add = |h: f32, gap: f32| {
+            y += gap;
+            rows.push((y, h));
+            y += h;
+        };
         match self.card {
             Card::Area => {
-                l.sliders.push(inner(48.0, SLIDER_ROW_H));
-                l.sliders.push(inner(48.0 + SLIDER_ROW_H + 2.0, SLIDER_ROW_H));
+                add(SLIDER_ROW_H, 0.0);
+                add(SLIDER_ROW_H, 2.0);
             }
             Card::Draw => {
-                l.sliders.push(inner(48.0, SLIDER_ROW_H));
-                let row = inner(92.0, 20.0);
-                let n = PALETTE.len() + 1;
-                let sw = (row.w - (n as f32 - 1.0) * 5.0) / n as f32;
-                l.swatches = (0..n).map(|i| Rect::new(row.x + i as f32 * (sw + 5.0), row.y, sw, row.h)).collect();
-                l.pin = Some(inner(122.0, 30.0));
+                add(SLIDER_ROW_H, 0.0);
+                add(20.0, 6.0);
+                add(30.0, 10.0);
             }
             Card::Link => {
-                let row = inner(54.0, 50.0);
-                let n = LinkKind::ALL.len();
-                let bw = (row.w - (n as f32 - 1.0) * 6.0) / n as f32;
-                l.kinds = (0..n).map(|i| Rect::new(row.x + i as f32 * (bw + 6.0), row.y, bw, row.h)).collect();
+                add(50.0, 6.0);
+                if s.link_kind == LinkKind::Motor {
+                    add(SLIDER_ROW_H, 8.0);
+                }
+                add(30.0, 6.0);
+            }
+            Card::Zone => {
+                add(50.0, 6.0);
+                match s.zone_kind {
+                    ZoneKind::Wind => {
+                        add(26.0, 10.0);
+                        add(SLIDER_ROW_H, 6.0);
+                    }
+                    ZoneKind::Float => add(SLIDER_ROW_H, 8.0),
+                    _ => {}
+                }
+                add(30.0, 6.0);
+            }
+            Card::None => {}
+        }
+        let h = y + 8.0;
+        let x = 10.0 - (1.0 - self.shown) * (W + 20.0);
+        l.panel = Rect::new(x, sh - WALL_T * PPM - 10.0 - h, W, h);
+        l.head = Rect::new(l.panel.x + 12.0, l.panel.y + 10.0, l.panel.w - 24.0, 36.0);
+        let inner = |(ry, rh): (f32, f32)| Rect::new(l.panel.x + 14.0, l.panel.y + ry, l.panel.w - 28.0, rh);
+        let mut rows = rows.into_iter().map(inner);
+        let mut next = || rows.next().unwrap_or_default();
+        match self.card {
+            Card::Area => {
+                l.sliders.push((SliderId::Radius, next()));
+                l.sliders.push((SliderId::Strength, next()));
+            }
+            Card::Draw => {
+                l.sliders.push((SliderId::Thickness, next()));
+                l.swatches = row_of(next(), PALETTE.len() + 1, 5.0);
+                l.pin = Some(next());
+            }
+            Card::Link => {
+                l.kinds = row_of(next(), LinkKind::ALL.len(), 5.0);
+                if s.link_kind == LinkKind::Motor {
+                    l.sliders.push((SliderId::MotorSpeed, next()));
+                }
+                next();
+                l.hint = Some(s.link_kind.hint());
+            }
+            Card::Zone => {
+                l.kinds = row_of(next(), ZoneKind::TOOL.len(), 6.0);
+                match s.zone_kind {
+                    ZoneKind::Wind => {
+                        l.directions = row_of(next(), DIRECTIONS.len(), 6.0);
+                        l.sliders.push((SliderId::ZoneStrength, next()));
+                    }
+                    ZoneKind::Float => l.sliders.push((SliderId::ZoneStrength, next())),
+                    _ => {}
+                }
+                next();
+                l.hint = Some(s.zone_kind.hint());
             }
             Card::None => {}
         }
         l
+    }
+
+    fn slider(id: SliderId, s: &mut Settings) -> (&mut f32, (f32, f32)) {
+        match id {
+            SliderId::Radius => (&mut s.tool_radius, RADIUS_RANGE),
+            SliderId::Strength => (&mut s.tool_strength, STRENGTH_RANGE),
+            SliderId::Thickness => (&mut s.draw_thickness, DRAW_THICKNESS_RANGE),
+            SliderId::MotorSpeed => (&mut s.motor_speed, MOTOR_SPEED_RANGE),
+            SliderId::ZoneStrength => (&mut s.zone_strength, ZONE_STRENGTH_RANGE),
+        }
+    }
+
+    fn spec(id: SliderId, s: &Settings, accent: Color) -> (SliderSpec<'static>, f32) {
+        let (label, value, text, range) = match id {
+            SliderId::Radius => ("Radius", s.tool_radius, format!("{} px", s.tool_radius as i32), RADIUS_RANGE),
+            SliderId::Strength => ("Strength", s.tool_strength, format!("{:.0}", s.tool_strength), STRENGTH_RANGE),
+            SliderId::Thickness => {
+                ("Thickness", s.draw_thickness, format!("{} px", s.draw_thickness as i32), DRAW_THICKNESS_RANGE)
+            }
+            SliderId::MotorSpeed => {
+                let dir = match s.motor_speed {
+                    v if v.abs() < 0.05 => "stopped",
+                    v if v > 0.0 => "clockwise",
+                    _ => "anticlockwise",
+                };
+                ("Speed", s.motor_speed, format!("{:.1} rad/s  {dir}", s.motor_speed.abs()), MOTOR_SPEED_RANGE)
+            }
+            SliderId::ZoneStrength => {
+                let label = if s.zone_kind == ZoneKind::Float { "Lift" } else { "Strength" };
+                (label, s.zone_strength, format!("{:.0}", s.zone_strength), ZONE_STRENGTH_RANGE)
+            }
+        };
+        (SliderSpec { label, value_text: text, min: range.0, max: range.1, accent }, value)
     }
 
     pub fn update(&mut self, dt: f32, s: &mut Settings, input: &mut Input, actions: &mut Vec<Action>) {
@@ -97,37 +187,39 @@ impl ToolCard {
         let show = want != Card::None && want == self.card;
         self.shown = approach(self.shown, if show { 1.0 } else { 0.0 }, 12.0, dt);
         if self.shown < 0.5 || !show {
-            self.radius.dragging = false;
-            self.strength.dragging = false;
-            self.thickness.dragging = false;
+            for st in &mut self.sliders {
+                st.dragging = false;
+            }
             return;
         }
-        let l = self.layout();
-        match self.card {
-            Card::Area => {
-                self.radius.update(l.sliders[0], &mut s.tool_radius, RADIUS_RANGE.0, RADIUS_RANGE.1, input);
-                self.strength.update(l.sliders[1], &mut s.tool_strength, STRENGTH_RANGE.0, STRENGTH_RANGE.1, input);
+        let l = self.layout(s);
+        for &(id, r) in &l.sliders {
+            let (value, (lo, hi)) = Self::slider(id, s);
+            self.sliders[id as usize].update(r, value, lo, hi, input);
+        }
+        if self.sliders[SliderId::MotorSpeed as usize].dragging && s.motor_speed.abs() < 0.3 {
+            s.motor_speed = 0.0;
+        }
+        for (i, r) in l.swatches.iter().enumerate() {
+            if button(*r, input) {
+                s.spawn_color = i;
             }
-            Card::Draw => {
-                let (lo, hi) = DRAW_THICKNESS_RANGE;
-                self.thickness.update(l.sliders[0], &mut s.draw_thickness, lo, hi, input);
-                for (i, r) in l.swatches.iter().enumerate() {
-                    if button(*r, input) {
-                        s.spawn_color = i;
-                    }
-                }
-                if l.pin.is_some_and(|r| toggle_row(r, input)) {
-                    s.draw_pinned = !s.draw_pinned;
-                }
-            }
-            Card::Link => {
-                for (i, r) in l.kinds.iter().enumerate() {
-                    if button(*r, input) {
-                        s.link_kind = LinkKind::ALL[i];
-                    }
+        }
+        if l.pin.is_some_and(|r| toggle_row(r, input)) {
+            s.draw_pinned = !s.draw_pinned;
+        }
+        for (i, r) in l.kinds.iter().enumerate() {
+            if button(*r, input) {
+                match self.card {
+                    Card::Link => s.link_kind = LinkKind::ALL[i],
+                    _ => s.zone_kind = ZoneKind::TOOL[i],
                 }
             }
-            Card::None => {}
+        }
+        for (i, r) in l.directions.iter().enumerate() {
+            if button(*r, input) {
+                s.zone_angle = DIRECTIONS[i];
+            }
         }
         if button(l.head, input) {
             actions.push(Action::OpenToolPicker);
@@ -136,7 +228,7 @@ impl ToolCard {
     }
 
     pub fn dragging(&self) -> bool {
-        self.radius.dragging || self.strength.dragging || self.thickness.dragging
+        self.sliders.iter().any(|s| s.dragging)
     }
 
     pub fn draw(&self, s: &Settings, mouse: Vec2) {
@@ -144,7 +236,7 @@ impl ToolCard {
             return;
         }
         let f = self.shown;
-        let l = self.layout();
+        let l = self.layout(s);
         panel(l.panel, f);
         let head = l.head;
         let accent = s.tool.accent();
@@ -160,80 +252,76 @@ impl ToolCard {
         text(s.tool.description(), head.x + 46.0, head.y + 31.0, 12.0, fade(TEXT_MUTED, f));
         keycap(head.x + head.w - 30.0, head.y + 11.0, "Tab", 10.0, f * 0.8);
 
-        match self.card {
-            Card::Area => {
-                let radius = SliderSpec {
-                    label: "Radius",
-                    value_text: format!("{} px", s.tool_radius as i32),
-                    min: RADIUS_RANGE.0,
-                    max: RADIUS_RANGE.1,
-                    accent,
-                };
-                let strength = SliderSpec {
-                    label: "Strength",
-                    value_text: format!("{:.0}", s.tool_strength),
-                    min: STRENGTH_RANGE.0,
-                    max: STRENGTH_RANGE.1,
-                    accent,
-                };
-                let (a, b) = (l.sliders[0], l.sliders[1]);
-                draw_slider(a, s.tool_radius, &radius, a.contains(mouse) || self.radius.dragging, f);
-                draw_slider(b, s.tool_strength, &strength, b.contains(mouse) || self.strength.dragging, f);
+        for &(id, r) in &l.sliders {
+            let (spec, value) = Self::spec(id, s, accent);
+            draw_slider(r, value, &spec, r.contains(mouse) || self.sliders[id as usize].dragging, f);
+        }
+        for (i, r) in l.swatches.iter().enumerate() {
+            rrect(*r, 5.0, fade(spawn_color(i, t), f));
+            if i == PALETTE.len() {
+                text_centered("?", r.x + r.w / 2.0, r.y + r.h / 2.0, 11.0, fade(Color::new(0.1, 0.1, 0.1, 0.8), f));
             }
-            Card::Draw => {
-                let thick = SliderSpec {
-                    label: "Thickness",
-                    value_text: format!("{} px", s.draw_thickness as i32),
-                    min: DRAW_THICKNESS_RANGE.0,
-                    max: DRAW_THICKNESS_RANGE.1,
-                    accent,
-                };
-                let a = l.sliders[0];
-                draw_slider(a, s.draw_thickness, &thick, a.contains(mouse) || self.thickness.dragging, f);
-                for (i, r) in l.swatches.iter().enumerate() {
-                    rrect(*r, 5.0, fade(spawn_color(i, t), f));
-                    if i == PALETTE.len() {
-                        text_centered(
-                            "?",
-                            r.x + r.w / 2.0,
-                            r.y + r.h / 2.0,
-                            11.0,
-                            fade(Color::new(0.1, 0.1, 0.1, 0.8), f),
-                        );
-                    }
-                    if i == s.spawn_color {
-                        rrect_lines(Rect::new(r.x - 2.5, r.y - 2.5, r.w + 5.0, r.h + 5.0), 7.0, 1.8, fade(TEXT, f));
-                    }
-                }
-                if let Some(r) = l.pin {
-                    draw_toggle_row(r, "Pin drawings  (Shift inverts)", s.draw_pinned, r.contains(mouse), f);
-                }
+            if i == s.spawn_color {
+                rrect_lines(Rect::new(r.x - 2.5, r.y - 2.5, r.w + 5.0, r.h + 5.0), 7.0, 1.8, fade(TEXT, f));
             }
-            Card::Link => {
-                for (i, r) in l.kinds.iter().enumerate() {
-                    let kind = LinkKind::ALL[i];
-                    let active = kind == s.link_kind;
-                    let hov = r.contains(mouse);
-                    let bg = if active {
-                        mix(SURFACE_2, kind.accent(), 0.2)
+        }
+        if let Some(r) = l.pin {
+            draw_toggle_row(r, "Pin drawings  (Shift inverts)", s.draw_pinned, r.contains(mouse), f);
+        }
+        for (i, r) in l.kinds.iter().enumerate() {
+            let (label, kind_accent, active) = match self.card {
+                Card::Link => (LinkKind::ALL[i].label(), LinkKind::ALL[i].accent(), LinkKind::ALL[i] == s.link_kind),
+                _ => (ZoneKind::TOOL[i].label(), ZoneKind::TOOL[i].accent(), ZoneKind::TOOL[i] == s.zone_kind),
+            };
+            let hov = r.contains(mouse);
+            let bg = if active {
+                mix(SURFACE_2, kind_accent, 0.2)
+            } else if hov {
+                SURFACE_HI
+            } else {
+                SURFACE_2
+            };
+            rrect(*r, 8.0, fade(bg, f));
+            rrect_lines(*r, 8.0, 1.0, fade(if active { kind_accent } else { BORDER }, f));
+            let col = fade(if active { kind_accent } else { TEXT_DIM }, f);
+            let c = vec2(r.x + r.w / 2.0, r.y + 18.0);
+            match self.card {
+                Card::Link => icons::link_kind(LinkKind::ALL[i], c, 24.0, col),
+                _ => icons::zone_kind(ZoneKind::TOOL[i], c, 24.0, col, t),
+            }
+            text_centered(label, r.x + r.w / 2.0, r.y + 39.0, 12.0, fade(TEXT, f));
+        }
+        for (i, r) in l.directions.iter().enumerate() {
+            let active = (s.zone_angle - DIRECTIONS[i]).abs() < 1.0;
+            let hov = r.contains(mouse);
+            rrect(
+                *r,
+                6.0,
+                fade(
+                    if active {
+                        alpha(accent, 0.3)
                     } else if hov {
                         SURFACE_HI
                     } else {
                         SURFACE_2
-                    };
-                    rrect(*r, 8.0, fade(bg, f));
-                    rrect_lines(*r, 8.0, 1.0, fade(if active { kind.accent() } else { BORDER }, f));
-                    let col = if active { kind.accent() } else { TEXT_DIM };
-                    icons::link_kind(kind, vec2(r.x + r.w / 2.0, r.y + 18.0), 24.0, fade(col, f));
-                    text_centered(kind.label(), r.x + r.w / 2.0, r.y + 39.0, 12.0, fade(TEXT, f));
-                }
-                let r = l.panel;
-                for (i, line) in s.link_kind.hint().iter().enumerate() {
-                    let y = r.y + r.h - 30.0 + i as f32 * 15.0;
-                    text_centered(line, r.x + r.w / 2.0, y, 11.0, fade(TEXT_MUTED, f));
-                }
+                    },
+                    f,
+                ),
+            );
+            let a = DIRECTIONS[i].to_radians();
+            let d = vec2(a.cos(), -a.sin());
+            let n = vec2(-d.y, d.x);
+            let c = vec2(r.x + r.w / 2.0, r.y + r.h / 2.0);
+            let col = fade(if active { TEXT } else { TEXT_DIM }, f);
+            draw_line(c.x - d.x * 8.0, c.y - d.y * 8.0, c.x + d.x * 6.0, c.y + d.y * 6.0, 2.0, col);
+            draw_triangle(c + d * 9.0, c + d * 3.0 + n * 5.0, c + d * 3.0 - n * 5.0, col);
+        }
+        if let Some(hint) = l.hint {
+            let r = l.panel;
+            for (i, line) in hint.iter().enumerate() {
+                let y = r.y + r.h - 30.0 + i as f32 * 15.0;
+                text_centered(line, r.x + r.w / 2.0, y, 11.0, fade(TEXT_MUTED, f));
             }
-            Card::None => {}
         }
     }
 }

@@ -153,18 +153,47 @@ pub struct Material {
     pub friction: f32,
     /// Multiplier of the world gravity (negative floats up).
     pub gravity: f32,
+    /// Shatters on a hard enough impact.
+    pub breakable: bool,
+    /// Speed change (m/s) of an impact that breaks the object.
+    pub strength: f32,
+    /// Magnet strength: positive attracts other magnets, negative repels them.
+    pub magnet: f32,
+    /// Conveyor surface speed (m/s); positive moves things clockwise around it.
+    pub conveyor: f32,
 }
 
 impl Default for Material {
     fn default() -> Self {
-        Material { bounce: BOUNCE, friction: FRICTION, gravity: 1.0 }
+        Material::DEFAULT
     }
 }
 
 impl Material {
-    pub const RUBBER: Material = Material { bounce: 0.92, friction: 0.9, gravity: 1.0 };
-    pub const ICE: Material = Material { bounce: 0.05, friction: 0.0, gravity: 1.0 };
-    pub const BALLOON: Material = Material { bounce: 0.6, friction: 0.4, gravity: -0.25 };
+    pub const DEFAULT: Material = Material {
+        bounce: BOUNCE,
+        friction: FRICTION,
+        gravity: 1.0,
+        breakable: false,
+        strength: 9.0,
+        magnet: 0.0,
+        conveyor: 0.0,
+    };
+    pub const RUBBER: Material = Material { bounce: 0.92, friction: 0.9, ..Material::DEFAULT };
+    pub const ICE: Material = Material { bounce: 0.05, friction: 0.0, ..Material::DEFAULT };
+    pub const BALLOON: Material = Material { bounce: 0.6, friction: 0.4, gravity: -0.25, ..Material::DEFAULT };
+    pub const GLASS: Material =
+        Material { bounce: 0.2, friction: 0.4, breakable: true, strength: 6.0, ..Material::DEFAULT };
+    pub const MAGNET: Material = Material { magnet: 1.0, friction: 0.8, ..Material::DEFAULT };
+}
+
+/// Impact reporting, conveyor behaviour and physical coefficients of a collider.
+fn configure(c: &mut Collider, m: &Material, mass: f32) {
+    c.set_restitution(m.bounce);
+    c.set_friction(m.friction);
+    c.set_active_events(ActiveEvents::CONTACT_FORCE_EVENTS);
+    c.set_contact_force_event_threshold(mass.max(1e-3) * super::events::IMPACT_ACCEL);
+    super::events::set_conveyor_speed(c, m.conveyor);
 }
 
 /// Initial placement of a new object.
@@ -254,17 +283,12 @@ impl Object {
             .ccd_enabled(true)
             .build();
         let body = world.bodies.insert(body);
-        let mut col = visual
-            .outline
-            .collider(w / 2.0 / PPM, h / 2.0 / PPM)
-            .density(DENSITY)
-            .friction(at.material.friction)
-            .restitution(at.material.bounce)
-            .build();
+        let mut col = visual.outline.collider(w / 2.0 / PPM, h / 2.0 / PPM).density(DENSITY).build();
         if let Some(m) = at.mass.filter(|m| m.is_finite() && *m > 0.0) {
             col.set_density(DENSITY * m / col.mass().max(1e-6));
         }
         let mass = col.mass();
+        configure(&mut col, &at.material, mass);
         let collider = world.colliders.insert_with_parent(col, body, &mut world.bodies);
 
         Object {
@@ -328,6 +352,11 @@ impl Object {
 
     pub fn is_animated(&self) -> bool {
         self.frames.len() > 1
+    }
+
+    /// Index of the animation frame currently shown.
+    pub fn frame(&self) -> usize {
+        self.frame_idx
     }
 
     pub fn texture(&self) -> &Texture2D {
@@ -445,15 +474,10 @@ impl Object {
         self.trail.clear();
 
         world.remove_collider(self.collider);
-        let mut col = self
-            .outline
-            .collider(new.x / 2.0 / PPM, new.y / 2.0 / PPM)
-            .density(1.0)
-            .friction(self.material.friction)
-            .restitution(self.material.bounce)
-            .build();
+        let mut col = self.outline.collider(new.x / 2.0 / PPM, new.y / 2.0 / PPM).density(1.0).build();
         let unit_mass = col.mass().max(1e-6);
         col.set_density(self.mass / unit_mass);
+        configure(&mut col, &self.material, self.mass);
         self.collider = world.colliders.insert_with_parent(col, self.body, &mut world.bodies);
         if let Some(b) = world.bodies.get_mut(self.body) {
             b.wake_up(true);
@@ -463,8 +487,7 @@ impl Object {
     pub fn set_material(&mut self, world: &mut PhysWorld, m: Material) {
         self.material = m;
         if let Some(c) = world.colliders.get_mut(self.collider) {
-            c.set_restitution(m.bounce);
-            c.set_friction(m.friction);
+            configure(c, &m, self.mass);
         }
         if let Some(b) = world.bodies.get_mut(self.body) {
             b.set_gravity_scale(m.gravity, true);
@@ -475,6 +498,7 @@ impl Object {
         let Some(c) = world.colliders.get_mut(self.collider) else { return };
         let unit = c.shape().mass_properties(1.0).mass().max(1e-6);
         c.set_density(mass / unit);
+        c.set_contact_force_event_threshold(mass.max(1e-3) * super::events::IMPACT_ACCEL);
         self.mass = mass;
         if let Some(b) = world.bodies.get_mut(self.body) {
             b.wake_up(true);

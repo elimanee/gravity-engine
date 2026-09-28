@@ -4,13 +4,29 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
-![Version](https://img.shields.io/badge/version-2.2-8b78ff)
+![Version](https://img.shields.io/badge/version-2.3-8b78ff)
 
 ![Title screen](docs/screenshots/title.png)
 
 | Sandbox | Settings drawer (Space) | Tool picker (Tab) |
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
+
+## What's new in 2.3
+
+| Challenges (E) | Breakable objects |
+|---|---|
+| ![Challenge](docs/screenshots/challenge.png) | ![Shattered glass tower](docs/screenshots/shatter.png) |
+
+- **Challenges** — five puzzles: draw lines (with limited ink) so the golden ball reaches the goal. `Space` to release it, `R` to retry.
+- **Example scenes** — Newton's cradle, domino run, a car, a wrecking ball, a pool party, magnets, a conveyor factory and a portal loop, all in the library (`E`).
+- **Breakable objects** — objects marked *Breakable* (or *Glass*) shatter into real pieces on hard impacts.
+- **Particle effects** — sparks, dust, splashes, debris and confetti.
+- **Motors** — spinning hinges for wheels, mills and cars (Link tool → Motor).
+- **Zone tool** (`Z`) — wind, float and portal areas.
+- **Magnets and conveyor surfaces** in the Properties panel.
+
+![Library](docs/screenshots/library.png)
 
 ## What's new in 2.2
 
@@ -43,7 +59,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Shape spawner** (`N`) — Circle, Box, Triangle, Pentagon, Hexagon, Star, Capsule; pick a colour (or random) and size, click or hold to spawn
 - **88×31 button fetcher** (`F`) — 20 random classic web buttons scraped from 8 galleries (animated GIFs supported)
 - **Game logo fetcher** (`L`) — 20 random logos from [SteamGridDB](https://www.steamgriddb.com/) (needs an API key, see below)
-- **11 tools** — `Tab`, `1`–`9`, `0` or `J`:
+- **12 tools** — `Tab`, `1`–`9`, `0`, `J` or `Z`:
 
   | # | Tool | Description |
   |---|------|-------------|
@@ -57,9 +73,10 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | 8 | Bomb | Click to detonate |
   | 9 | Swing | Hold by the clicked point: objects dangle and spin when thrown |
   | 0 | Draw | Draw shapes and planks (`Shift` pins / unpins them) |
-  | J | Link | Ropes, springs and hinges between objects, or to the background |
+  | J | Link | Ropes, springs, hinges and motors between objects, or to the background |
+  | Z | Zone | Wind, float and portal areas |
 
-  The tool card (bottom left) holds each tool's settings: radius / strength for area tools (mouse wheel: radius, `Shift`+wheel: strength), thickness, colour and pinning for Draw, and the kind of link for Link.
+  The tool card (bottom left) holds each tool's settings: radius / strength for area tools (mouse wheel: radius, `Shift`+wheel: strength), thickness, colour and pinning for Draw, the kind of link (and motor speed) for Link, and the kind of zone for Zone.
 - **7 border modes** — `B` to cycle (`Shift+B` backwards):
 
   | Mode | Description |
@@ -73,7 +90,8 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | Portal | No floor — every edge is a portal, animated rainbow borders |
 - **7 backgrounds** — `G` to cycle: Dark, Space, Grid, Sunset, Ocean, Aurora, Custom (`Shift+G` picks an image)
 - **Water** (`H`) — a pool with buoyancy and drag; level and density in the settings drawer, waves react to splashes and to the music
-- **Object properties** — bounce, friction, mass and gravity per object (right-click → *Properties…*, or `I`)
+- **Object properties** — bounce, friction, mass, gravity, breakable, magnet and conveyor per object (right-click → *Properties…*, or `I`)
+- **Library** (`E`) — example scenes and challenges
 - **Undo / redo** — `Ctrl+Z` / `Ctrl+Y` for every edit
 - **Gravity** — presets ZERO / MOON / MARS / EARTH / JUPITER / HEAVY / REVERSE in the HUD, or any value with the slider
 - **Window shake** (`W`) — moving the window pushes every body; KDE Wayland via KWin DBus, X11 otherwise
@@ -91,7 +109,9 @@ Press **F1** in the app for the full list.
 |-------------|--------|
 | Left-drag | Use the current tool |
 | Right-click | Object menu (Resize, Duplicate, Resize all, Properties, Pin, Detach links, Delete) |
-| `Tab` / `1`–`9`, `0`, `J` | Tool picker / select a tool |
+| `Tab` / `1`–`9`, `0`, `J`, `Z` | Tool picker / select a tool |
+| `E` | Examples & challenges |
+| `Space` / `R` / `Enter` (in a challenge) | Release the ball / retry / next challenge |
 | Wheel / `Shift`+Wheel | Tool radius / strength (Draw: thickness; spawn size when the spawner is open) |
 | `I` | Properties of the object under the cursor |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
@@ -156,19 +176,21 @@ Screenshots and GIFs go to `~/Pictures/gravity_engine/` (or `~/.config/gravity_e
 ```
 src/
 ├── main.rs            entry point, window config, CLI
-├── app.rs             app state and frame loop (input → UI → actions → simulation → render)
+├── app/               app state and frame loop (input → UI → actions → simulation → render),
+│                      building tools, impacts and shattering, challenge mode
 ├── config.rs          constants and paths          settings.rs   persisted preferences
 ├── assets.rs          image / GIF / SVG decoding   shapes.rs     procedural shapes
 ├── scene.rs           .gscene save / load          background.rs animated backgrounds
 ├── drawing.rs         Draw-tool strokes → shapes   history.rs    undo / redo
 ├── recorder.rs        GIF recording                net.rs        web fetchers
+├── effects.rs         particles                    library/      example scenes and challenges
 ├── window_tracker.rs  window shake
 ├── audio/             tracker modules, streams, playlists and the visualizer's analyzer
-├── physics/           world, objects, tools, links, water, border modes
+├── physics/           world, objects, tools, links, zones, water, magnets, fracture, border modes
 └── ui/                theme, widgets, HUD, drawer, tool card, menus, properties panel, overlays, title screen
 ```
 
-`cargo test` runs the unit tests (decoding, shapes, drawings, links, water, scenes, undo, GIF encoding, settings, playlist parsing, scraping…).
+`cargo test` runs the unit tests (decoding, shapes, drawings, links, motors, conveyors, magnets, zones, water, fracture, particles, scenes, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
 
 ## Usage of AI
 this project is mainly developed by ai (totally not with claude )BUT the project will be rewritten at some point in future (if i don't get too lazy)
