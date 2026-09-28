@@ -88,7 +88,15 @@ impl Water {
     }
 
     /// Buoyancy and drag on every dynamic object; splashes on entry.
-    pub fn apply(&mut self, world: &mut PhysWorld, objects: &[Object], rest: f32, density: f32, dt: f32) {
+    /// Returns the splashes as (x, surface y, strength) in metres.
+    pub fn apply(
+        &mut self,
+        world: &mut PhysWorld,
+        objects: &[Object],
+        rest: f32,
+        density: f32,
+        dt: f32,
+    ) -> Vec<(f32, f32, f32)> {
         let width = world.arena.0;
         let gravity = world.gravity;
         let mut submerged = HashMap::with_capacity(objects.len());
@@ -124,9 +132,13 @@ impl Water {
             b.set_angvel(w * (-ANGULAR_DRAG * frac * dt).exp(), true);
         }
         self.submerged = submerged;
-        for (x, imp) in splashes {
-            self.splash(x, width, imp);
-        }
+        splashes
+            .into_iter()
+            .map(|(x, imp)| {
+                self.splash(x, width, imp);
+                (x, self.surface(x, width, rest), imp.abs())
+            })
+            .collect()
     }
 
     pub fn draw(&self, world: &PhysWorld, rest: f32, sw: f32, sh: f32) {

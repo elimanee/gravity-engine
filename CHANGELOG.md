@@ -4,6 +4,26 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [2.3.0]
+
+### Added
+- **Challenges** (`E` → Challenges): five puzzles where you draw lines to get the golden ball into the goal, with a limited amount of ink. `Space` releases the ball, `R` retries, `Enter` goes to the next one. Solved challenges are remembered
+- **Example scenes** (`E` → Examples): Newton's cradle, domino run, hill-climbing car, wrecking ball, pool party, magnet field, parcel factory and portal loop
+- **Breakable objects**: tick *Breakable* in the Properties panel (or use the *Glass* preset) and the object shatters into real pieces when hit hard enough — by a fall, a collision or a bomb
+- **Particle effects**: sparks and dust on hard impacts, splashes in the water, debris when something shatters, confetti when you solve a challenge (can be turned off in the settings)
+- **Motors** (Link tool → Motor): a hinge that turns by itself, with an adjustable speed — click a wheel on a body to build cars, mills and conveyors. Hinges and motors snap to the centre of round objects
+- **Zone tool** (`Z`): drag rectangles of **wind** (four directions, adjustable strength), **float** (objects lose their weight) or **portals** (draw an entrance then an exit; objects jump between the two)
+- **Magnets**: a Magnet strength in the Properties panel; magnets attract each other, negative ones repel
+- **Conveyor surfaces**: a Conveyor speed in the Properties panel makes an object's surface carry what touches it
+
+### Changed
+- The Properties panel has *Breakable*, *Magnet* and *Conveyor* settings and two more presets (*Glass*, *Magnet*)
+- Scenes (format version 3) save motors and zones; older scenes still open
+
+### Downloads
+- `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
+- `gravity_engine-windows-x86_64.zip` — Windows build: unzip and run `gravity_engine.exe` (keep the DLLs next to it)
+
 ## [2.2.0]
 
 ### Added

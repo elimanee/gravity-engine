@@ -1,5 +1,6 @@
 //! Object properties panel (right-click → Properties, or `I`): bounce,
-//! friction, mass and gravity of one object, with a few presets.
+//! friction, mass, gravity, breakability, magnetism and conveyor speed of
+//! one object, with a few presets.
 
 use super::theme::*;
 use super::widgets::*;
@@ -9,13 +10,18 @@ use crate::util::ellipsize;
 use macroquad::prelude::*;
 use rapier2d::prelude::RigidBodyHandle;
 
-const W: f32 = 264.0;
-const H: f32 = 292.0;
+const W: f32 = 268.0;
 const PAD: f32 = 14.0;
+const ROW: f32 = SLIDER_ROW_H + 2.0;
+/// Tallest the panel gets (used to keep it on screen).
+const MAX_H: f32 = 470.0;
 
 pub const BOUNCE_RANGE: (f32, f32) = (0.0, 1.2);
 pub const FRICTION_RANGE: (f32, f32) = (0.0, 2.0);
 pub const GRAVITY_RANGE: (f32, f32) = (-1.0, 2.0);
+pub const STRENGTH_RANGE: (f32, f32) = (2.0, 30.0);
+pub const MAGNET_RANGE: (f32, f32) = (-2.0, 2.0);
+pub const CONVEYOR_RANGE: (f32, f32) = (-8.0, 8.0);
 /// Mass slider range, as log10(kg).
 const LOG_MASS_RANGE: (f32, f32) = (-1.3, 2.7);
 
@@ -28,14 +34,25 @@ pub struct Props {
     pub default_mass: f32,
 }
 
-const PRESETS: &[&str] = &["Rubber", "Ice", "Heavy", "Balloon"];
+const PRESETS: &[&str] = &["Rubber", "Ice", "Heavy", "Balloon", "Glass", "Magnet"];
+
+#[derive(Clone, Copy, PartialEq)]
+enum SliderId {
+    Bounce,
+    Friction,
+    Mass,
+    Gravity,
+    Strength,
+    Magnet,
+    Conveyor,
+}
 
 pub struct Inspector {
     pub fader: Fader,
     pub target: Option<RigidBodyHandle>,
     title: String,
     pos: Vec2,
-    sliders: [SliderState; 4],
+    sliders: [SliderState; 7],
     log_mass: f32,
 }
 
@@ -56,15 +73,23 @@ struct Layout {
     panel: Rect,
     close: Rect,
     reset: Rect,
-    sliders: [Rect; 4],
+    sliders: Vec<(SliderId, Rect)>,
+    breakable: Rect,
     presets: Vec<Rect>,
+}
+
+fn snap(v: &mut f32, targets: &[f32], within: f32) {
+    if let Some(t) = targets.iter().find(|t| (*v - **t).abs() < within) {
+        *v = *t;
+    }
 }
 
 impl Inspector {
     pub fn open(&mut self, target: RigidBodyHandle, title: String, near: Vec2) {
         let (sw, sh) = (screen_width(), screen_height());
         let x = if near.x + 40.0 + W < sw { near.x + 40.0 } else { near.x - 40.0 - W };
-        self.pos = vec2(x.clamp(8.0, (sw - W - 8.0).max(8.0)), (near.y - H / 2.0).clamp(8.0, (sh - H - 8.0).max(8.0)));
+        self.pos =
+            vec2(x.clamp(8.0, (sw - W - 8.0).max(8.0)), (near.y - MAX_H / 2.0).clamp(8.0, (sh - MAX_H - 8.0).max(8.0)));
         self.target = Some(target);
         self.title = ellipsize(&title, 22);
         self.fader.open = true;
@@ -78,19 +103,35 @@ impl Inspector {
         }
     }
 
-    fn layout(&self) -> Layout {
+    fn layout(&self, m: &Material) -> Layout {
         let f = self.fader.value();
-        let panel = Rect::new(self.pos.x, self.pos.y + (1.0 - f) * 10.0, W, H);
+        let (x, mut y) = (self.pos.x + PAD, self.pos.y + (1.0 - f) * 10.0 + 46.0);
+        let mut sliders = vec![];
+        let mut slider = |id, y: &mut f32| {
+            sliders.push((id, Rect::new(x, *y, W - PAD * 2.0, SLIDER_ROW_H)));
+            *y += ROW;
+        };
+        for id in [SliderId::Bounce, SliderId::Friction, SliderId::Mass, SliderId::Gravity] {
+            slider(id, &mut y);
+        }
+        let breakable = Rect::new(x, y + 2.0, W - PAD * 2.0, 28.0);
+        y += 34.0;
+        if m.breakable {
+            slider(SliderId::Strength, &mut y);
+        }
+        slider(SliderId::Magnet, &mut y);
+        slider(SliderId::Conveyor, &mut y);
+        y += 20.0;
+        let bw = (W - PAD * 2.0 - 12.0) / 3.0;
+        let presets = (0..PRESETS.len())
+            .map(|i| Rect::new(x + (i % 3) as f32 * (bw + 6.0), y + (i / 3) as f32 * 34.0, bw, 28.0))
+            .collect();
+        y += 68.0 + 8.0;
+        let top = self.pos.y + (1.0 - f) * 10.0;
+        let panel = Rect::new(self.pos.x, top, W, y - top);
         let close = Rect::new(panel.x + panel.w - 34.0, panel.y + 10.0, 24.0, 24.0);
         let reset = Rect::new(close.x - 62.0, panel.y + 10.0, 56.0, 24.0);
-        let row = |i: usize| {
-            Rect::new(panel.x + PAD, panel.y + 46.0 + i as f32 * (SLIDER_ROW_H + 4.0), W - PAD * 2.0, SLIDER_ROW_H)
-        };
-        let py = panel.y + 46.0 + 4.0 * (SLIDER_ROW_H + 4.0) + 20.0;
-        let n = PRESETS.len();
-        let bw = (W - PAD * 2.0 - (n as f32 - 1.0) * 6.0) / n as f32;
-        let presets = (0..n).map(|i| Rect::new(panel.x + PAD + i as f32 * (bw + 6.0), py, bw, 28.0)).collect();
-        Layout { panel, close, reset, sliders: [row(0), row(1), row(2), row(3)], presets }
+        Layout { panel, close, reset, sliders, breakable, presets }
     }
 
     pub fn dragging(&self) -> bool {
@@ -107,22 +148,34 @@ impl Inspector {
             return false;
         };
         let before = *p;
-        let l = self.layout();
-        if !self.sliders[2].dragging {
+        let l = self.layout(&p.material);
+        if !self.sliders[SliderId::Mass as usize].dragging {
             self.log_mass = p.mass.max(1e-3).log10();
         }
-        let m = &mut p.material;
-        self.sliders[0].update(l.sliders[0], &mut m.bounce, BOUNCE_RANGE.0, BOUNCE_RANGE.1, input);
-        self.sliders[1].update(l.sliders[1], &mut m.friction, FRICTION_RANGE.0, FRICTION_RANGE.1, input);
-        if self.sliders[2].update(l.sliders[2], &mut self.log_mass, LOG_MASS_RANGE.0, LOG_MASS_RANGE.1, input) {
-            p.mass = 10f32.powf(self.log_mass);
+        for &(id, r) in &l.sliders {
+            let st = &mut self.sliders[id as usize];
+            let m = &mut p.material;
+            let (value, range) = match id {
+                SliderId::Bounce => (&mut m.bounce, BOUNCE_RANGE),
+                SliderId::Friction => (&mut m.friction, FRICTION_RANGE),
+                SliderId::Mass => (&mut self.log_mass, LOG_MASS_RANGE),
+                SliderId::Gravity => (&mut m.gravity, GRAVITY_RANGE),
+                SliderId::Strength => (&mut m.strength, STRENGTH_RANGE),
+                SliderId::Magnet => (&mut m.magnet, MAGNET_RANGE),
+                SliderId::Conveyor => (&mut m.conveyor, CONVEYOR_RANGE),
+            };
+            if st.update(r, value, range.0, range.1, input) {
+                match id {
+                    SliderId::Mass => p.mass = 10f32.powf(self.log_mass),
+                    SliderId::Gravity => snap(&mut p.material.gravity, &[0.0, 1.0], 0.06),
+                    SliderId::Magnet => snap(&mut p.material.magnet, &[0.0], 0.12),
+                    SliderId::Conveyor => snap(&mut p.material.conveyor, &[0.0], 0.4),
+                    _ => {}
+                }
+            }
         }
-        self.sliders[3].update(l.sliders[3], &mut p.material.gravity, GRAVITY_RANGE.0, GRAVITY_RANGE.1, input);
-        if self.sliders[3].dragging && p.material.gravity.abs() < 0.06 {
-            p.material.gravity = 0.0;
-        }
-        if self.sliders[3].dragging && (p.material.gravity - 1.0).abs() < 0.06 {
-            p.material.gravity = 1.0;
+        if toggle_row(l.breakable, input) {
+            p.material.breakable = !p.material.breakable;
         }
         for (i, r) in l.presets.iter().enumerate() {
             if button(*r, input) {
@@ -130,13 +183,15 @@ impl Inspector {
                     0 => p.material = Material::RUBBER,
                     1 => p.material = Material::ICE,
                     2 => {
-                        p.material = Material { bounce: 0.1, friction: 0.8, gravity: 1.0 };
+                        p.material = Material { bounce: 0.1, friction: 0.8, ..Material::DEFAULT };
                         p.mass = p.default_mass * 6.0;
                     }
-                    _ => {
+                    3 => {
                         p.material = Material::BALLOON;
                         p.mass = p.default_mass * 0.2;
                     }
+                    4 => p.material = Material::GLASS,
+                    _ => p.material = Material::MAGNET,
                 }
             }
         }
@@ -154,7 +209,7 @@ impl Inspector {
     pub fn draw(&self, props: Option<&Props>, mouse: Vec2) {
         let Some(p) = props.filter(|_| self.fader.visible()) else { return };
         let f = self.fader.value();
-        let l = self.layout();
+        let l = self.layout(&p.material);
         panel(l.panel, f);
         text_bold("Properties", l.panel.x + PAD, l.panel.y + 22.0, 15.0, fade(TEXT, f));
         text(&self.title, l.panel.x + PAD, l.panel.y + 37.0, 11.0, fade(TEXT_MUTED, f));
@@ -169,23 +224,47 @@ impl Inspector {
         draw_line(cx + 5.0, cy - 5.0, cx - 5.0, cy + 5.0, 1.6, c);
 
         let m = p.material;
-        let mass_text = if p.mass >= 100.0 { format!("{:.0} kg", p.mass) } else { format!("{:.2} kg", p.mass) };
-        let gravity_text = match m.gravity {
-            0.0 => "weightless".to_string(),
-            g if g < 0.0 => format!("×{g:.2} · floats up"),
-            g => format!("×{g:.2}"),
-        };
-        let specs = [
-            ("Bounce", format!("{:.0}%", m.bounce * 100.0), BOUNCE_RANGE, m.bounce, SUCCESS),
-            ("Friction", format!("{:.2}", m.friction), FRICTION_RANGE, m.friction, WARNING),
-            ("Mass", mass_text, LOG_MASS_RANGE, p.mass.max(1e-3).log10(), ACCENT),
-            ("Gravity", gravity_text, GRAVITY_RANGE, m.gravity, Color::new(0.4, 0.8, 1.0, 1.0)),
-        ];
-        for (i, (label, value_text, (min, max), v, accent)) in specs.into_iter().enumerate() {
-            let r = l.sliders[i];
+        for &(id, r) in &l.sliders {
+            let (label, value_text, (min, max), v, accent) = match id {
+                SliderId::Bounce => ("Bounce", format!("{:.0}%", m.bounce * 100.0), BOUNCE_RANGE, m.bounce, SUCCESS),
+                SliderId::Friction => ("Friction", format!("{:.2}", m.friction), FRICTION_RANGE, m.friction, WARNING),
+                SliderId::Mass => {
+                    let text = if p.mass >= 100.0 { format!("{:.0} kg", p.mass) } else { format!("{:.2} kg", p.mass) };
+                    ("Mass", text, LOG_MASS_RANGE, p.mass.max(1e-3).log10(), ACCENT)
+                }
+                SliderId::Gravity => {
+                    let text = match m.gravity {
+                        0.0 => "weightless".to_string(),
+                        g if g < 0.0 => format!("×{g:.2} · floats up"),
+                        g => format!("×{g:.2}"),
+                    };
+                    ("Gravity", text, GRAVITY_RANGE, m.gravity, Color::new(0.4, 0.8, 1.0, 1.0))
+                }
+                SliderId::Strength => {
+                    let text = format!("breaks above {:.0} m/s", m.strength);
+                    ("Toughness", text, STRENGTH_RANGE, m.strength, Color::new(0.75, 0.9, 1.0, 1.0))
+                }
+                SliderId::Magnet => {
+                    let text = match m.magnet {
+                        0.0 => "off".to_string(),
+                        q if q > 0.0 => format!("{q:.1} · attracts"),
+                        q => format!("{:.1} · repels", -q),
+                    };
+                    ("Magnet", text, MAGNET_RANGE, m.magnet, Color::new(1.0, 0.4, 0.45, 1.0))
+                }
+                SliderId::Conveyor => {
+                    let text = match m.conveyor {
+                        0.0 => "off".to_string(),
+                        v if v > 0.0 => format!("{v:.1} m/s clockwise"),
+                        v => format!("{:.1} m/s anticlockwise", -v),
+                    };
+                    ("Conveyor", text, CONVEYOR_RANGE, m.conveyor, Color::new(1.0, 0.85, 0.3, 1.0))
+                }
+            };
             let spec = SliderSpec { label, value_text, min, max, accent };
-            draw_slider(r, v, &spec, r.contains(mouse) || self.sliders[i].dragging, f);
+            draw_slider(r, v, &spec, r.contains(mouse) || self.sliders[id as usize].dragging, f);
         }
+        draw_toggle_row(l.breakable, "Breakable (shatters)", m.breakable, l.breakable.contains(mouse), f);
         let py = l.presets[0].y;
         text("Presets", l.panel.x + PAD, py - 7.0, 11.0, fade(TEXT_MUTED, f));
         for (i, r) in l.presets.iter().enumerate() {

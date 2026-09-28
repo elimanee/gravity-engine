@@ -154,6 +154,23 @@ pub fn tool(tool: Tool, c: Vec2, size: f32, color: Color, t: f32) {
             draw_triangle(cone - n, back - n, back + n, color);
             draw_circle(tip.x, tip.y, 1.6 * s, Color::new(0.1, 0.1, 0.12, color.a));
         }
+        Tool::Zone => {
+            // A dashed frame with wind streaks blowing through it.
+            let r = Rect::new(c.x - 17.0 * s, c.y - 13.0 * s, 34.0 * s, 26.0 * s);
+            let corners = [vec2(r.x, r.y), vec2(r.x + r.w, r.y), vec2(r.x + r.w, r.y + r.h), vec2(r.x, r.y + r.h)];
+            for i in 0..4 {
+                let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                for k in (0..6).step_by(2) {
+                    let (p0, p1) = (a.lerp(b, k as f32 / 6.0), a.lerp(b, (k + 1) as f32 / 6.0));
+                    draw_line(p0.x, p0.y, p1.x, p1.y, th * 0.8, soft);
+                }
+            }
+            for k in 0..3 {
+                let y = c.y + (k as f32 - 1.0) * 7.0 * s;
+                let x = c.x - 12.0 * s + ((t * 1.5 + k as f32 * 0.3) % 1.0) * 10.0 * s;
+                draw_line(x, y, x + 12.0 * s, y, th, color);
+            }
+        }
         Tool::Link => {
             // Two blocks joined by a swaying rope.
             let a = vec2(c.x - 14.0 * s, c.y - 8.0 * s);
@@ -209,6 +226,17 @@ pub fn link_kind(kind: crate::physics::links::LinkKind, c: Vec2, size: f32, colo
                 draw_line(prev.x, prev.y, p.x, p.y, 1.6 * s, color);
                 prev = p;
             }
+        }
+        LinkKind::Motor => {
+            draw_circle_lines(c.x, c.y, 8.0 * s, 2.0 * s, color);
+            // Arrow head on the ring shows the turning direction.
+            let (p, q) = (c + vec2(8.0 * s, 0.0), c + vec2(8.0 * s, 5.0 * s));
+            draw_triangle(p + vec2(-3.5 * s, 0.0), p + vec2(3.5 * s, 0.0), q, color);
+            for i in 0..3 {
+                let a = i as f32 * std::f32::consts::TAU / 3.0 + 0.4;
+                draw_line(c.x, c.y, c.x + a.cos() * 6.0 * s, c.y + a.sin() * 6.0 * s, 1.6 * s, color);
+            }
+            return;
         }
         LinkKind::Hinge => {
             draw_rectangle_ex(
@@ -337,4 +365,78 @@ pub fn logo(c: Vec2, scale: f32, t: f32, alpha: f32) {
     draw_circle(c.x, c.y, 11.0 * scale, Color::new(0.75, 0.67, 1.0, a(0.95)));
     draw_circle(c.x, c.y, 7.0 * scale, Color::new(0.88, 0.84, 1.0, a(1.0)));
     draw_circle(c.x, c.y, 3.5 * scale, Color::new(1.0, 0.99, 1.0, a(1.0)));
+}
+
+/// Small glyph for a zone kind.
+pub fn zone_kind(kind: crate::physics::zones::ZoneKind, c: Vec2, size: f32, color: Color, t: f32) {
+    use crate::physics::zones::ZoneKind;
+    let s = size / 24.0;
+    match kind {
+        ZoneKind::Wind => {
+            for k in 0..3 {
+                let y = c.y + (k as f32 - 1.0) * 5.0 * s;
+                let len = if k == 1 { 16.0 } else { 11.0 } * s;
+                draw_line(c.x - 8.0 * s, y, c.x - 8.0 * s + len, y, 1.8 * s, color);
+                draw_circle_lines(c.x - 8.0 * s + len, y - 2.0 * s, 2.0 * s, 1.2 * s, color);
+            }
+        }
+        ZoneKind::Float => {
+            for k in 0..3 {
+                let phase = (t * 0.6 + k as f32 / 3.0) % 1.0;
+                let x = c.x + (k as f32 - 1.0) * 6.0 * s;
+                let y = c.y + 8.0 * s - phase * 16.0 * s;
+                draw_circle_lines(
+                    x,
+                    y,
+                    (1.5 + k as f32) * s,
+                    1.2 * s,
+                    Color { a: color.a * (1.0 - phase * 0.6), ..color },
+                );
+            }
+        }
+        ZoneKind::Portal => {
+            let exit = Color { a: color.a, ..Color::new(1.0, 0.62, 0.25, 1.0) };
+            draw_circle_lines(c.x - 6.0 * s, c.y, 5.5 * s, 2.0 * s, color);
+            draw_circle_lines(c.x + 6.0 * s, c.y, 5.5 * s, 2.0 * s, exit);
+        }
+        ZoneKind::Goal => {
+            draw_line(c.x - 4.0 * s, c.y - 9.0 * s, c.x - 4.0 * s, c.y + 9.0 * s, 1.8 * s, color);
+            draw_triangle(
+                vec2(c.x - 4.0 * s, c.y - 9.0 * s),
+                vec2(c.x - 4.0 * s, c.y - 1.0 * s),
+                vec2(c.x + 8.0 * s, c.y - 5.0 * s),
+                color,
+            );
+        }
+    }
+}
+
+/// Horseshoe magnet glyph (red and blue poles).
+pub fn magnet(c: Vec2, size: f32, alpha: f32, repel: bool) {
+    let s = size / 16.0;
+    let body = if repel { Color::new(0.55, 0.6, 0.7, alpha) } else { Color::new(0.85, 0.25, 0.3, alpha) };
+    let steps = 10;
+    let r = 5.0 * s;
+    let mut prev = c + vec2(-r, 0.0);
+    for i in 1..=steps {
+        let a = std::f32::consts::PI + i as f32 / steps as f32 * std::f32::consts::PI;
+        let p = c + vec2(a.cos() * r, -a.sin() * r);
+        draw_line(prev.x, prev.y, p.x, p.y, 3.0 * s, body);
+        prev = p;
+    }
+    for (x, col) in [(-r, Color::new(0.9, 0.9, 0.95, alpha)), (r, Color::new(0.35, 0.55, 1.0, alpha))] {
+        draw_line(c.x + x, c.y, c.x + x, c.y - 5.0 * s, 3.0 * s, col);
+    }
+}
+
+/// Chevrons showing which way a conveyor surface moves.
+pub fn conveyor(c: Vec2, size: f32, speed: f32, t: f32, alpha: f32) {
+    let s = size / 16.0;
+    let dir = if speed >= 0.0 { 1.0 } else { -1.0 };
+    let col = Color::new(1.0, 0.85, 0.3, alpha);
+    for k in 0..3 {
+        let x = c.x + (k as f32 - 1.0) * 5.0 * s + ((t * speed.abs() * 2.0) % 1.0) * 5.0 * s * dir;
+        draw_line(x - 2.0 * s * dir, c.y - 3.5 * s, x + 2.0 * s * dir, c.y, 1.8 * s, col);
+        draw_line(x + 2.0 * s * dir, c.y, x - 2.0 * s * dir, c.y + 3.5 * s, 1.8 * s, col);
+    }
 }

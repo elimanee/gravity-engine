@@ -4,6 +4,7 @@ use crate::background::BgMode;
 use crate::physics::borders::BorderMode;
 use crate::physics::links::LinkKind;
 use crate::physics::tools::Tool;
+use crate::physics::zones::ZoneKind;
 use crate::shapes::Shape;
 use crate::ui::visualizer::VisStyle;
 use serde::{Deserialize, Serialize};
@@ -49,6 +50,19 @@ pub struct Settings {
     /// Drawings are pinned in place (Shift inverts).
     pub draw_pinned: bool,
     pub link_kind: LinkKind,
+    /// Motor speed (rad/s, positive = clockwise).
+    pub motor_speed: f32,
+
+    pub zone_kind: ZoneKind,
+    /// Wind direction in degrees (0 = right, 90 = up).
+    pub zone_angle: f32,
+    /// Wind / lift strength (m/s²).
+    pub zone_strength: f32,
+
+    /// Particle effects (sparks, dust, splashes, debris).
+    pub effects: bool,
+    /// Ids of the challenges already solved.
+    pub challenges_done: Vec<String>,
 
     pub water: bool,
     /// Water surface height, 0 (floor) ‥ 1 (ceiling).
@@ -86,6 +100,12 @@ impl Default for Settings {
             draw_thickness: 14.0,
             draw_pinned: false,
             link_kind: LinkKind::Rope,
+            motor_speed: 4.0,
+            zone_kind: ZoneKind::Wind,
+            zone_angle: 0.0,
+            zone_strength: 14.0,
+            effects: true,
+            challenges_done: vec![],
             water: false,
             water_level: 0.3,
             water_density: 1.6,
@@ -106,6 +126,8 @@ pub const VIS_GAIN_RANGE: (f32, f32) = (0.3, 5.0);
 pub const DRAW_THICKNESS_RANGE: (f32, f32) = (4.0, 48.0);
 pub const WATER_LEVEL_RANGE: (f32, f32) = (0.05, 0.9);
 pub const WATER_DENSITY_RANGE: (f32, f32) = (0.3, 4.0);
+pub const MOTOR_SPEED_RANGE: (f32, f32) = (-12.0, 12.0);
+pub const ZONE_STRENGTH_RANGE: (f32, f32) = (2.0, 40.0);
 
 impl Settings {
     fn path() -> Option<std::path::PathBuf> {
@@ -150,6 +172,13 @@ impl Settings {
         self.draw_thickness = clamp(self.draw_thickness, DRAW_THICKNESS_RANGE, d.draw_thickness);
         self.water_level = clamp(self.water_level, WATER_LEVEL_RANGE, d.water_level);
         self.water_density = clamp(self.water_density, WATER_DENSITY_RANGE, d.water_density);
+        self.motor_speed = clamp(self.motor_speed, MOTOR_SPEED_RANGE, d.motor_speed);
+        self.zone_strength = clamp(self.zone_strength, ZONE_STRENGTH_RANGE, d.zone_strength);
+        self.zone_angle =
+            if self.zone_angle.is_finite() { (self.zone_angle / 90.0).round().rem_euclid(4.0) * 90.0 } else { 0.0 };
+        if self.zone_kind == ZoneKind::Goal {
+            self.zone_kind = ZoneKind::Wind;
+        }
         self
     }
 }

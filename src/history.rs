@@ -3,8 +3,9 @@
 //! back to it. Snapshots share textures with the live objects, so they are
 //! cheap to take and restore without decoding anything again.
 
-use crate::physics::links::{Link, LinkKind};
+use crate::physics::links::{Link, LinkSpec};
 use crate::physics::object::{Object, Placement, Source, Visual};
+use crate::physics::zones::Zone;
 use crate::physics::PhysWorld;
 use rapier2d::prelude::*;
 use std::collections::HashMap;
@@ -19,21 +20,27 @@ struct ObjectState {
 }
 
 struct LinkState {
-    kind: LinkKind,
+    /// Body handles in `spec` are stale; `a` and `b` index the objects.
+    spec: LinkSpec,
     a: usize,
     b: Option<usize>,
-    la: Point<f32>,
-    lb: Point<f32>,
-    length: f32,
 }
 
 pub struct Snapshot {
     objects: Vec<ObjectState>,
     links: Vec<LinkState>,
+    zones: Vec<Zone>,
+}
+
+/// What a snapshot brings back.
+pub struct Restored {
+    pub objects: Vec<Object>,
+    pub links: Vec<Link>,
+    pub zones: Vec<Zone>,
 }
 
 impl Snapshot {
-    pub fn capture(world: &PhysWorld, objects: &[Object], links: &[Link]) -> Self {
+    pub fn capture(world: &PhysWorld, objects: &[Object], links: &[Link], zones: &[Zone]) -> Self {
         let index: HashMap<RigidBodyHandle, usize> = objects.iter().enumerate().map(|(i, o)| (o.body, i)).collect();
         Snapshot {
             objects: objects
@@ -44,23 +51,21 @@ impl Snapshot {
                 .iter()
                 .filter_map(|l| {
                     Some(LinkState {
-                        kind: l.kind,
+                        spec: l.spec(),
                         a: *index.get(&l.a)?,
                         b: match l.b {
                             Some(b) => Some(*index.get(&b)?),
                             None => None,
                         },
-                        la: l.la,
-                        lb: l.lb,
-                        length: l.length,
                     })
                 })
                 .collect(),
+            zones: zones.to_vec(),
         }
     }
 
     /// Spawn the snapshot's objects and links into `world` (which should be empty of objects).
-    pub fn restore(&self, world: &mut PhysWorld) -> (Vec<Object>, Vec<Link>) {
+    pub fn restore(&self, world: &mut PhysWorld) -> Restored {
         let objects: Vec<Object> = self
             .objects
             .iter()
@@ -70,11 +75,11 @@ impl Snapshot {
             .links
             .iter()
             .map(|l| {
-                let b = l.b.map(|i| objects[i].body);
-                Link::restore(world, l.kind, objects[l.a].body, b, l.la, l.lb, l.length)
+                let spec = LinkSpec { a: objects[l.a].body, b: l.b.map(|i| objects[i].body), ..l.spec };
+                Link::restore(world, spec)
             })
             .collect();
-        (objects, links)
+        Restored { objects, links, zones: self.zones.clone() }
     }
 }
 

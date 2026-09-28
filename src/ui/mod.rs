@@ -2,6 +2,7 @@
 //! consume pointer input first (top-most first) and emit `Action`s that the
 //! app applies.
 
+pub mod challenge_bar;
 pub mod context_menu;
 pub mod cursor;
 pub mod debug;
@@ -10,6 +11,7 @@ pub mod help;
 pub mod hud;
 pub mod icons;
 pub mod inspector;
+pub mod library;
 pub mod now_playing;
 pub mod spawner;
 pub mod theme;
@@ -110,6 +112,14 @@ pub enum Action {
     Undo,
     Redo,
     ToggleRecording,
+    ToggleEffects,
+    OpenLibrary,
+    LoadExample(usize),
+    StartChallenge(usize),
+    ChallengeGo,
+    ChallengeRetry,
+    ChallengeNext,
+    ChallengeExit,
     Object(ObjectCmd, RigidBodyHandle),
 }
 

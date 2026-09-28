@@ -6,23 +6,28 @@ use crate::background::{Background, BgMode};
 use crate::config::{self, ext_of, file_name_of, IMAGE_EXT, SCENE_EXT};
 use crate::config::{DENSITY, PPM, WALL_T};
 use crate::drawing;
+use crate::effects::Effects;
 use crate::history::{History, Snapshot};
 use crate::net::{FetchEvent, FetchJob, FetchKind};
 use crate::physics::links::{self, Link, LinkKind};
-use crate::physics::object::{object_at, objects_at, Object, Placement, Source, Visual};
+use crate::physics::magnets;
+use crate::physics::object::{object_at, objects_at, Material, Object, Placement, Source, Visual};
 use crate::physics::tools::{self, Grab, Tool};
 use crate::physics::water::{self, Water};
+use crate::physics::zones::{self, PortalState, Zone};
 use crate::physics::{to_phys, PhysWorld};
 use crate::recorder::{self, Finishing, Recording};
 use crate::scene;
 use crate::settings::{Settings, DRAW_THICKNESS_RANGE, RADIUS_RANGE, SPAWN_SIZE_RANGE, STRENGTH_RANGE};
 use crate::shapes::{self, Shape};
+use crate::ui::challenge_bar::ChallengeBar;
 use crate::ui::context_menu::ContextMenu;
 use crate::ui::cursor::{self, Blast};
 use crate::ui::drawer::Drawer;
 use crate::ui::help::Help;
 use crate::ui::hud::{Hud, HudState};
 use crate::ui::inspector::{Inspector, Props};
+use crate::ui::library::Library;
 use crate::ui::now_playing::NowPlayingPill;
 use crate::ui::spawner::{spawn_color, Spawner};
 use crate::ui::title::{self, PixelOut};
@@ -37,6 +42,10 @@ use rapier2d::prelude::{Point, RigidBodyHandle};
 use rfd::FileDialog;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+mod build;
+mod impacts;
+mod library;
 
 const TIME_STEPS: &[f32] = &[0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
 const SPAWN_REPEAT: f32 = 0.11;
@@ -69,8 +78,11 @@ pub struct App {
     world: PhysWorld,
     objects: Vec<Object>,
     links: Vec<Link>,
+    zones: Vec<Zone>,
+    portals: PortalState,
     history: History<Snapshot>,
     water: Water,
+    effects: Effects,
     bg: Background,
     audio: Audio,
     shaker: WindowTracker,
@@ -85,6 +97,10 @@ pub struct App {
     spawn_cache: HashMap<SpawnKey, Visual>,
     stroke: Option<Stroke>,
     link_drag: Option<LinkDrag>,
+    /// Corner where a Zone-tool drag started.
+    zone_drag: Option<Vec2>,
+    /// Pieces of recently shattered objects, with the time they appeared.
+    fresh: HashMap<RigidBodyHandle, f64>,
     recording: Option<Recording>,
     finishing: Option<Finishing>,
     /// An undo step was already recorded for the open properties panel.
@@ -97,6 +113,9 @@ pub struct App {
     spawner: Spawner,
     menu: ContextMenu,
     inspector: Inspector,
+    library: Library,
+    challenge_bar: ChallengeBar,
+    challenge: Option<library::ChallengeRun>,
     help: Help,
     toasts: Toasts,
     now_playing: NowPlayingPill,
@@ -134,8 +153,11 @@ impl App {
             world,
             objects: vec![],
             links: vec![],
+            zones: vec![],
+            portals: PortalState::default(),
             history: History::default(),
             water: Water::default(),
+            effects: Effects::default(),
             bg,
             shaker,
             jobs: vec![],
@@ -148,6 +170,8 @@ impl App {
             spawn_cache: HashMap::new(),
             stroke: None,
             link_drag: None,
+            zone_drag: None,
+            fresh: HashMap::new(),
             recording: None,
             finishing: None,
             inspector_recorded: false,
@@ -158,6 +182,9 @@ impl App {
             spawner: Spawner::default(),
             menu: ContextMenu::default(),
             inspector: Inspector::default(),
+            library: Library::default(),
+            challenge_bar: ChallengeBar,
+            challenge: None,
             help: Help::default(),
             toasts,
             now_playing: NowPlayingPill::default(),
@@ -230,6 +257,7 @@ impl App {
         self.audio.tick();
         self.audio.analyze(dt, self.s.vis_gain);
         self.simulate(dt, input.mouse);
+        self.update_challenge(dt);
 
         self.draw(dt, &input);
 
@@ -257,6 +285,8 @@ impl App {
                 self.link_drag = None;
             } else if self.help.fader.open {
                 self.help.fader.open = false;
+            } else if self.library.fader.open {
+                self.library.fader.open = false;
             } else if self.picker.fader.open {
                 self.picker.fader.open = false;
             } else if self.menu.fader.open {
@@ -267,6 +297,8 @@ impl App {
                 self.spawner.fader.open = false;
             } else if self.paused {
                 self.paused = false;
+            } else if self.challenge.is_some() {
+                actions.push(Action::ChallengeExit);
             } else {
                 self.quit = true;
             }
@@ -293,8 +325,18 @@ impl App {
         if pressed(KeyCode::Q) {
             self.quit = true;
         }
+        let challenge = self.challenge.as_ref().map(|r| (r.started, r.won));
         if pressed(KeyCode::Space) {
-            actions.push(Action::TogglePause);
+            actions.push(match challenge {
+                Some((false, _)) => Action::ChallengeGo,
+                _ => Action::TogglePause,
+            });
+        }
+        if pressed(KeyCode::Enter) && matches!(challenge, Some((_, true))) {
+            actions.push(Action::ChallengeNext);
+        }
+        if pressed(KeyCode::E) {
+            actions.push(Action::OpenLibrary);
         }
         if pressed(KeyCode::Tab) {
             actions.push(Action::OpenToolPicker);
@@ -311,6 +353,7 @@ impl App {
             KeyCode::Key9,
             KeyCode::Key0,
             KeyCode::J,
+            KeyCode::Z,
         ];
         for (i, k) in digits.iter().enumerate() {
             if pressed(*k) {
@@ -370,7 +413,7 @@ impl App {
             actions.push(Action::FetchLogos);
         }
         if pressed(KeyCode::R) {
-            actions.push(Action::ClearAll);
+            actions.push(if challenge.is_some() { Action::ChallengeRetry } else { Action::ClearAll });
         }
         if pressed(KeyCode::F12) {
             actions.push(Action::Screenshot);
@@ -379,6 +422,8 @@ impl App {
             if let Some(i) = object_at(&self.objects, &self.world, input.mouse.x, input.mouse.y) {
                 let h = self.objects[i].body;
                 actions.push(Action::Object(ObjectCmd::Delete, h));
+            } else {
+                self.remove_zone_at(input.mouse);
             }
         }
         if pressed(KeyCode::LeftBracket) || pressed(KeyCode::RightBracket) {
@@ -400,6 +445,7 @@ impl App {
     fn update_ui(&mut self, dt: f32, input: &mut Input, actions: &mut Vec<Action>) {
         // Top-most first, so overlays swallow clicks meant for them.
         self.help.update(dt, input);
+        self.library.update(dt, input, actions);
         self.picker.update(dt, input, actions);
         self.menu.update(dt, input, actions);
         self.update_inspector(dt, input);
@@ -408,7 +454,13 @@ impl App {
         let top = self.hud.bottom();
         self.drawer.update(dt, &mut self.s, top, input, actions);
         self.spawner.update(dt, &mut self.s, input);
-        self.card.update(dt, &mut self.s, input, actions);
+        // The tool is fixed during challenges, and the card would hide the level.
+        if self.challenge.is_none() {
+            self.card.update(dt, &mut self.s, input, actions);
+        }
+        if let Some(v) = self.challenge_view() {
+            self.challenge_bar.update(&v, top, input, actions);
+        }
         let np = self.audio.now_playing();
         self.now_playing.update(dt, np.as_ref(), self.paused, input, actions);
         let hud_state = self.hud_state();
@@ -493,17 +545,33 @@ impl App {
                 self.spawn_timer = SPAWN_REPEAT * 2.0;
             } else {
                 let tool = self.s.tool;
-                if tool == Tool::Draw {
+                if tool == Tool::Draw && self.challenge.as_ref().is_some_and(|r| r.ink_left < 4.0 || r.started) {
+                    let why = if self.challenge.as_ref().is_some_and(|r| r.started) {
+                        "Retry (R) to draw again"
+                    } else {
+                        "Out of ink  ·  Retry (R) to start over"
+                    };
+                    self.toasts.status("ink", why);
+                } else if tool == Tool::Draw {
                     let c = spawn_color(self.s.spawn_color, rand::gen_range(0.0, 400.0));
                     let rgb = [(c.r * 255.0) as u8, (c.g * 255.0) as u8, (c.b * 255.0) as u8];
                     self.stroke = Some(Stroke { points: vec![(m.x, m.y)], rgb });
                 } else if tool == Tool::Link {
                     self.start_link(m);
+                } else if tool == Tool::Zone {
+                    self.zone_drag = Some(m);
                 } else if tool.is_field() {
                     self.field_active = true;
                 } else if tool == Tool::Bomb {
                     let handles: Vec<RigidBodyHandle> = self.objects.iter().map(|o| o.body).collect();
-                    tools::detonate(&mut self.world.bodies, &handles, pos, self.s.tool_radius, self.s.tool_strength);
+                    let hits = tools::detonate(
+                        &mut self.world.bodies,
+                        &handles,
+                        pos,
+                        self.s.tool_radius,
+                        self.s.tool_strength,
+                    );
+                    self.bomb_hits(m, hits);
                     self.blasts.push(Blast::new(m, self.s.tool_radius));
                 } else if tool.grabs() {
                     if let Some(i) = object_at(&self.objects, &self.world, m.x, m.y) {
@@ -525,10 +593,12 @@ impl App {
             self.spawn_timer = -2.0; // press started on UI: no hold-spawn
         }
 
-        if let Some(stroke) = &mut self.stroke {
-            let last = *stroke.points.last().expect("strokes start with a point");
-            if (m.x - last.0).hypot(m.y - last.1) >= drawing::SAMPLE_SPACING {
-                stroke.points.push((m.x, m.y));
+        if let Some(last) = self.stroke.as_ref().and_then(|s| s.points.last().copied()) {
+            let step = (m.x - last.0).hypot(m.y - last.1);
+            if step >= drawing::SAMPLE_SPACING && self.spend_ink(step) {
+                if let Some(stroke) = &mut self.stroke {
+                    stroke.points.push((m.x, m.y));
+                }
             }
         }
 
@@ -543,6 +613,9 @@ impl App {
             if self.link_drag.is_some() {
                 self.finish_link(m);
             }
+            if self.zone_drag.is_some() {
+                self.finish_zone(m);
+            }
         }
 
         if input.right_pressed && !input.consumed && !input.over_ui {
@@ -554,7 +627,9 @@ impl App {
                         .min_by(|a, b| a.1.total_cmp(&b.1))
                 })
                 .flatten();
-            if let Some((i, _)) = near_link {
+            let on_zone = self.s.tool == Tool::Zone && object_at(&self.objects, &self.world, m.x, m.y).is_none();
+            if on_zone && self.remove_zone_at(m) {
+            } else if let Some((i, _)) = near_link {
                 self.record("Remove link");
                 let l = self.links.remove(i);
                 l.remove(&mut self.world);
@@ -592,6 +667,9 @@ impl App {
     fn apply(&mut self, action: Action, mouse: Vec2) {
         match action {
             Action::SetGravity(g) => self.s.gravity = g,
+            Action::SetTool(t) if self.challenge.is_some() && t != Tool::Draw => {
+                self.toasts.status("tool", "Challenges are solved by drawing  ·  Esc to leave the challenge");
+            }
             Action::SetTool(t) => {
                 if self.s.tool != t {
                     self.s.tool = t;
@@ -723,9 +801,31 @@ impl App {
                     if self.s.water { "Water on  ·  level and density in settings" } else { "Water off" },
                 );
             }
+            Action::Undo | Action::Redo if self.challenge.is_some() => {
+                self.toasts.status("undo", "No undo in challenges  ·  press R to start over");
+            }
             Action::Undo => self.undo(false),
             Action::Redo => self.undo(true),
             Action::ToggleRecording => self.toggle_recording(),
+            Action::ToggleEffects => {
+                self.s.effects = !self.s.effects;
+                if !self.s.effects {
+                    self.effects.clear();
+                }
+            }
+            Action::OpenLibrary => {
+                let open = !self.library.fader.open;
+                if open {
+                    self.library.open(self.challenge.is_some());
+                } else {
+                    self.library.fader.open = false;
+                }
+            }
+            Action::LoadExample(i) => self.open_example(i),
+            Action::StartChallenge(i) => self.start_challenge(i),
+            Action::ChallengeGo | Action::ChallengeRetry | Action::ChallengeNext | Action::ChallengeExit => {
+                self.challenge_action(action)
+            }
             Action::Object(cmd, handle) => self.object_cmd(cmd, handle, mouse),
         }
     }
@@ -870,6 +970,9 @@ impl App {
         self.link_drag = None;
         self.menu.close();
         self.inspector.close();
+        self.zone_drag = None;
+        self.zones.clear();
+        self.effects.clear();
         for l in self.links.drain(..) {
             l.remove(&mut self.world);
         }
@@ -883,12 +986,12 @@ impl App {
     // ═══════════════════════════════════════════════════════════
     /// Remember the scene before an edit, so it can be undone.
     fn record(&mut self, label: &str) {
-        let snap = Snapshot::capture(&self.world, &self.objects, &self.links);
+        let snap = Snapshot::capture(&self.world, &self.objects, &self.links, &self.zones);
         self.history.record(label, snap);
     }
 
     fn undo(&mut self, redo: bool) {
-        let current = Snapshot::capture(&self.world, &self.objects, &self.links);
+        let current = Snapshot::capture(&self.world, &self.objects, &self.links, &self.zones);
         let step = if redo { self.history.redo(current) } else { self.history.undo(current) };
         let Some((label, snap)) = step else {
             self.toasts.status("undo", if redo { "Nothing to redo" } else { "Nothing to undo" });
@@ -896,87 +999,11 @@ impl App {
         };
         self.clear_objects();
         self.stroke = None;
-        let (objects, links) = snap.restore(&mut self.world);
-        self.objects = objects;
-        self.links = links;
+        let restored = snap.restore(&mut self.world);
+        self.objects = restored.objects;
+        self.links = restored.links;
+        self.zones = restored.zones;
         self.toasts.status("undo", format!("{}: {label}", if redo { "Redo" } else { "Undo" }));
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    // Draw and Link tools
-    // ═══════════════════════════════════════════════════════════
-    fn finish_stroke(&mut self, stroke: Stroke, shift: bool) {
-        let Some(placed) = drawing::from_stroke(&stroke.points, self.s.draw_thickness, stroke.rgb) else { return };
-        let pinned = self.s.draw_pinned != shift;
-        let placement = Placement { pos_px: placed.center, size_px: Some(placed.size), pinned, ..Default::default() };
-        self.record("Draw");
-        match Object::load(&mut self.world, Source::Drawing(Arc::new(placed.drawing)), placement) {
-            Some(o) => self.objects.push(o),
-            None => self.toasts.error("Could not create the drawing"),
-        }
-    }
-
-    fn start_link(&mut self, m: Vec2) {
-        let p = to_phys(m.x, m.y);
-        let at = Point::new(p.0, p.1);
-        let under = objects_at(&self.objects, &self.world, m.x, m.y);
-        if self.s.link_kind == LinkKind::Hinge {
-            let (a, b) = match under.as_slice() {
-                [] => {
-                    self.toasts.status("link", "Click on an object to nail it, or where two objects overlap");
-                    return;
-                }
-                [i] => (self.objects[*i].body, None),
-                [i, j, ..] => (self.objects[*i].body, Some(self.objects[*j].body)),
-            };
-            self.add_link(LinkKind::Hinge, a, b, at, at);
-        } else {
-            let from = under.first().map(|&i| {
-                let body = self.objects[i].body;
-                (body, self.world.bodies[body].position().inverse_transform_point(&at))
-            });
-            self.link_drag = Some(LinkDrag { from, start: at, start_px: m });
-        }
-    }
-
-    fn finish_link(&mut self, m: Vec2) {
-        let Some(drag) = self.link_drag.take() else { return };
-        if m.distance(drag.start_px) < 10.0 {
-            self.toasts.status("link", "Drag from one object to another (or to the background)");
-            return;
-        }
-        let p = to_phys(m.x, m.y);
-        let end = Point::new(p.0, p.1);
-        let from_body = drag.from.map(|(b, _)| b);
-        let target = objects_at(&self.objects, &self.world, m.x, m.y)
-            .into_iter()
-            .map(|i| self.objects[i].body)
-            .find(|&b| Some(b) != from_body);
-        let kind = self.s.link_kind;
-        match (drag.from, target) {
-            (Some((a, local)), b) => {
-                let pa = self.world.bodies.get(a).map_or(drag.start, |body| body.position() * local);
-                self.add_link(kind, a, b, pa, end)
-            }
-            (None, Some(b)) => self.add_link(kind, b, None, end, drag.start),
-            (None, None) => self.toasts.status("link", "Start or end the link on an object"),
-        }
-    }
-
-    fn add_link(
-        &mut self,
-        kind: LinkKind,
-        a: RigidBodyHandle,
-        b: Option<RigidBodyHandle>,
-        pa: Point<f32>,
-        pb: Point<f32>,
-    ) {
-        self.record(kind.label());
-        if let Some(l) = Link::new(&mut self.world, kind, a, b, pa, pb) {
-            self.links.push(l);
-            let hint = if b.is_none() { " to the background" } else { "" };
-            self.toasts.status("link", format!("{} added{hint}  ·  right-click it to remove", kind.label()));
-        }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1122,7 +1149,7 @@ impl App {
         }
         let water =
             self.s.water.then_some(scene::SceneWater { level: self.s.water_level, density: self.s.water_density });
-        let scene = scene::capture(&self.world, &self.objects, &self.links, water);
+        let scene = scene::capture(&self.world, &self.objects, &self.links, &self.zones, water);
         match scene::write(&path, &scene) {
             Ok(()) => self.toasts.success(format!(
                 "Saved {} objects to {}",
@@ -1137,23 +1164,8 @@ impl App {
         match scene::read(path) {
             Ok(sc) => {
                 self.record("Open scene");
-                self.clear_objects();
-                self.s.gravity = sc.gravity.clamp(crate::settings::GRAVITY_RANGE.0, crate::settings::GRAVITY_RANGE.1);
-                self.s.border = sc.border;
-                self.world.set_border(sc.border);
-                self.world.set_gravity(self.s.gravity);
-                if sc.version >= 2 {
-                    self.s.water = sc.water.is_some();
-                }
-                if let Some(w) = sc.water {
-                    self.s.water_level = w.level;
-                    self.s.water_density = w.density;
-                    self.s = self.s.clone().sanitized();
-                }
-                let (objs, links, failed) = scene::instantiate(&sc, &mut self.world);
-                let n = objs.len();
-                self.objects = objs;
-                self.links = links;
+                self.challenge = None;
+                let (n, failed) = self.apply_scene(sc);
                 if failed > 0 {
                     self.toasts.warn(format!("Loaded {n} objects ({failed} missing)"));
                 } else {
@@ -1180,6 +1192,7 @@ impl App {
 
     fn simulate(&mut self, dt: f32, mouse: Vec2) {
         let running = !self.paused || self.step_once;
+        let step = if self.step_once { crate::config::PHYSICS_DT } else { dt * self.s.time_scale };
         if running {
             let pos = (mouse.x, mouse.y);
             self.world.reset_forces();
@@ -1199,11 +1212,23 @@ impl App {
             }
             self.world.border.apply_forces(&mut self.world, &self.objects);
             links::apply_springs(&self.links, &mut self.world);
+            magnets::apply(&mut self.world, &self.objects);
+            let teleports = zones::apply(&self.zones, &mut self.portals, &mut self.world, &self.objects);
+            if self.s.effects {
+                for t in teleports {
+                    self.effects.splash(crate::physics::to_screen(t.from.x, t.from.y), 0.6);
+                    self.effects.splash(crate::physics::to_screen(t.to.x, t.to.y), 0.6);
+                }
+            }
             if self.s.water {
                 let rest = water::rest_level(&self.world, self.s.water_level);
-                let step = if self.step_once { crate::config::PHYSICS_DT } else { dt * self.s.time_scale };
-                self.water.apply(&mut self.world, &self.objects, rest, self.s.water_density, step);
+                let splashes = self.water.apply(&mut self.world, &self.objects, rest, self.s.water_density, step);
                 self.water.step(step, self.audio.analyzer.bass, self.audio.analyzer.beat_now);
+                if self.s.effects {
+                    for (x, y, strength) in splashes.into_iter().filter(|s| s.2 > 0.25) {
+                        self.effects.splash(crate::physics::to_screen(x, y), strength);
+                    }
+                }
             }
             if self.s.vis_dance && self.audio.analyzer.beat_now {
                 self.dance();
@@ -1224,6 +1249,7 @@ impl App {
                     self.remove_object(i);
                 }
             }
+            self.process_impacts();
             links::prune(&mut self.links, &self.world);
 
             let (len, fade) = (self.s.trail_length as usize, self.s.trail_fade);
@@ -1240,6 +1266,9 @@ impl App {
             o.update_anim(dt_ms);
         }
         self.blasts.retain(Blast::alive);
+        let floor = if self.world.border.walls().floor { screen_height() - WALL_T * PPM } else { f32::MAX };
+        let gravity = -self.world.gravity.y * PPM;
+        self.effects.update(if running { step } else { 0.0 }, gravity, floor);
     }
 
     /// Make resting objects hop on a beat, harder with more bass.
@@ -1266,6 +1295,7 @@ impl App {
         let floor = if self.world.border.walls().floor { WALL_T * PPM } else { 0.0 };
         visualizer::draw_background(self.s.vis_background, &self.audio.analyzer, sw, sh, floor);
         self.world.border.draw(sw, sh);
+        zones::draw(&self.zones);
 
         if self.s.trails {
             for o in self.objects.iter().filter(|o| !o.is_visualizer()) {
@@ -1283,15 +1313,35 @@ impl App {
         for l in &self.links {
             l.draw(&self.world);
         }
-        for o in self.objects.iter().filter(|o| o.pinned) {
+        let t = get_time() as f32;
+        for o in &self.objects {
             let (p, _) = o.screen_pos(&self.world);
-            draw_circle(p.x, p.y, 9.0, theme::alpha(BLACK, 0.35));
-            icons::pin(p, 14.0, theme::WARNING);
+            let mut badges = vec![];
+            if o.pinned {
+                badges.push(0);
+            }
+            if o.material.magnet != 0.0 {
+                badges.push(1);
+            }
+            if o.material.conveyor != 0.0 {
+                badges.push(2);
+            }
+            let n = badges.len() as f32;
+            for (k, badge) in badges.into_iter().enumerate() {
+                let c = p + vec2((k as f32 - (n - 1.0) / 2.0) * 20.0, 0.0);
+                draw_circle(c.x, c.y, 9.0, theme::alpha(BLACK, 0.35));
+                match badge {
+                    0 => icons::pin(c, 14.0, theme::WARNING),
+                    1 => icons::magnet(c + vec2(0.0, 2.0), 14.0, 1.0, o.material.magnet < 0.0),
+                    _ => icons::conveyor(c, 14.0, o.material.conveyor, t, 1.0),
+                }
+            }
         }
         if self.s.water {
             let rest = water::rest_level(&self.world, self.s.water_level);
             self.water.draw(&self.world, rest, sw, sh);
         }
+        self.effects.draw();
         for target in [self.menu.target, self.inspector.target].into_iter().flatten() {
             if let Some(o) = self.objects.iter().find(|o| o.body == target) {
                 let c = o.corners(&self.world);
@@ -1313,6 +1363,13 @@ impl App {
         }
         for b in &self.blasts {
             b.draw();
+        }
+        if let Some(start) = self.zone_drag {
+            let zone = Zone::from_screen(self.s.zone_kind, start, m, 0.0, 0.0);
+            let r = zone.rect();
+            let c = self.s.zone_kind.accent();
+            draw_rectangle(r.x, r.y, r.w, r.h, theme::alpha(c, 0.12));
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, theme::alpha(c, 0.9));
         }
         if let Some(st) = &self.stroke {
             let c = Color::from_rgba(st.rgb[0], st.rgb[1], st.rgb[2], 255);
@@ -1337,6 +1394,11 @@ impl App {
                         cursor::draw_pen_cursor(m, self.s.draw_thickness, c);
                     }
                     Tool::Link if self.link_drag.is_none() => cursor::draw_link_cursor(m, self.s.link_kind),
+                    Tool::Zone if self.zone_drag.is_none() => {
+                        draw_line(m.x - 8.0, m.y, m.x + 8.0, m.y, 1.2, self.s.zone_kind.accent());
+                        draw_line(m.x, m.y - 8.0, m.x, m.y + 8.0, 1.2, self.s.zone_kind.accent());
+                        icons::zone_kind(self.s.zone_kind, m + vec2(20.0, -16.0), 22.0, self.s.zone_kind.accent(), t);
+                    }
                     _ => cursor::draw_tool_cursor(self.s.tool, m, self.s.tool_radius, self.field_active),
                 }
             }
@@ -1353,7 +1415,9 @@ impl App {
             );
         }
 
-        self.card.draw(&self.s, m);
+        if self.challenge.is_none() {
+            self.card.draw(&self.s, m);
+        }
         let np = self.audio.now_playing();
         self.now_playing.draw(np.as_ref(), m);
         self.spawner.draw(&self.s, m);
@@ -1363,6 +1427,10 @@ impl App {
         self.inspector.draw(self.inspected().as_ref(), m);
         self.menu.draw(m);
         self.picker.draw(self.s.tool, m);
+        if let Some(v) = self.challenge_view() {
+            self.challenge_bar.draw(&v, top, m);
+        }
+        self.library.draw(&self.s.challenges_done, m);
         self.help.draw();
         self.draw_rec_indicator(top);
     }
@@ -1410,6 +1478,18 @@ impl App {
             Err(e) => self.toasts.error(format!("Screenshot failed: {e}")),
         }
     }
+}
+
+/// Drop broken portal pairs from zones read from a file.
+fn sanitize_zones(mut zones: Vec<Zone>) -> Vec<Zone> {
+    let n = zones.len();
+    let pairs: Vec<Option<usize>> = zones.iter().map(|z| z.pair).collect();
+    for (i, z) in zones.iter_mut().enumerate() {
+        z.pair = z.pair.filter(|&j| j < n && j != i && pairs[j] == Some(i));
+        z.strength = if z.strength.is_finite() { z.strength.clamp(0.0, 100.0) } else { 0.0 };
+    }
+    zones.retain(|z| z.min.iter().chain(&z.max).all(|v| v.is_finite()));
+    zones
 }
 
 /// Milliseconds since the epoch, for unique file names.

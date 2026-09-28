@@ -5,8 +5,9 @@
 
 use crate::drawing::Drawing;
 use crate::physics::borders::BorderMode;
-use crate::physics::links::{Link, LinkKind};
+use crate::physics::links::{Link, LinkKind, LinkSpec};
 use crate::physics::object::{Material, Object, Placement, Source};
+use crate::physics::zones::Zone;
 use crate::physics::{to_phys, to_screen, PhysWorld};
 use crate::shapes::Shape;
 use base64::Engine;
@@ -15,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// 2: drawings, links, object properties and water.
-const VERSION: u32 = 2;
+/// 2: drawings, links, object properties and water. 3: motors and zones.
+const VERSION: u32 = 3;
 const EMBED_LIMIT: u64 = 4 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -30,6 +31,8 @@ pub struct SceneFile {
     /// `None`: no water.
     #[serde(default)]
     pub water: Option<SceneWater>,
+    #[serde(default)]
+    pub zones: Vec<Zone>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
@@ -49,6 +52,9 @@ pub struct SceneLink {
     pub la: [f32; 2],
     pub lb: [f32; 2],
     pub length: f32,
+    /// Motor speed (rad/s).
+    #[serde(default)]
+    pub speed: f32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -120,7 +126,13 @@ impl SceneSource {
     }
 }
 
-pub fn capture(world: &PhysWorld, objects: &[Object], links: &[Link], water: Option<SceneWater>) -> SceneFile {
+pub fn capture(
+    world: &PhysWorld,
+    objects: &[Object],
+    links: &[Link],
+    zones: &[Zone],
+    water: Option<SceneWater>,
+) -> SceneFile {
     let index: HashMap<_, _> = objects.iter().enumerate().map(|(i, o)| (o.body, i)).collect();
     let links = links
         .iter()
@@ -135,6 +147,7 @@ pub fn capture(world: &PhysWorld, objects: &[Object], links: &[Link], water: Opt
                 la: [l.la.x, l.la.y],
                 lb: [l.lb.x, l.lb.y],
                 length: l.length,
+                speed: l.speed,
             })
         })
         .collect();
@@ -159,7 +172,15 @@ pub fn capture(world: &PhysWorld, objects: &[Object], links: &[Link], water: Opt
             }
         })
         .collect();
-    SceneFile { version: VERSION, gravity: world.gravity.y, border: world.border, objects, links, water }
+    SceneFile {
+        version: VERSION,
+        gravity: world.gravity.y,
+        border: world.border,
+        objects,
+        links,
+        water,
+        zones: zones.to_vec(),
+    }
 }
 
 pub fn write(path: &std::path::Path, scene: &SceneFile) -> Result<(), String> {
@@ -215,7 +236,9 @@ pub fn instantiate(scene: &SceneFile, world: &mut PhysWorld) -> (Vec<Object>, Ve
                 None => None,
             };
             let length = if l.length.is_finite() { l.length.max(0.05) } else { 1.0 };
-            Some(Link::restore(world, l.kind, a, b, Point::new(l.la[0], l.la[1]), Point::new(l.lb[0], l.lb[1]), length))
+            let speed = if l.speed.is_finite() { l.speed.clamp(-50.0, 50.0) } else { 0.0 };
+            let (la, lb) = (Point::new(l.la[0], l.la[1]), Point::new(l.lb[0], l.lb[1]));
+            Some(Link::restore(world, LinkSpec { kind: l.kind, a, b, la, lb, length, speed }))
         })
         .collect();
     (out, links, failed)
@@ -246,21 +269,31 @@ mod tests {
                 mass: Some(3.0),
             }],
             links: vec![SceneLink {
-                kind: LinkKind::Spring,
+                kind: LinkKind::Motor,
                 a: 0,
                 b: None,
                 la: [0.0, 0.0],
                 lb: [1.0, 5.0],
                 length: 2.0,
+                speed: 3.0,
             }],
             water: Some(SceneWater { level: 0.4, density: 2.0 }),
+            zones: vec![Zone {
+                kind: crate::physics::zones::ZoneKind::Wind,
+                min: [0.0, 0.0],
+                max: [2.0, 1.0],
+                angle: 1.0,
+                strength: 12.0,
+                pair: None,
+            }],
         };
         let json = serde_json::to_string(&scene).unwrap();
         assert!(json.contains("\"type\":\"embedded\""));
         let back: SceneFile = serde_json::from_str(&json).unwrap();
         assert_eq!(back.border, BorderMode::Portal);
         assert_eq!(back.objects[0].material, Material::ICE);
-        assert_eq!(back.links[0].kind, LinkKind::Spring);
+        assert_eq!((back.links[0].kind, back.links[0].speed), (LinkKind::Motor, 3.0));
+        assert_eq!(back.zones[0].strength, 12.0);
         assert_eq!(back.water, Some(SceneWater { level: 0.4, density: 2.0 }));
         match back.objects[0].source.to_source() {
             Some(Source::Memory { data, .. }) => assert_eq!(*data, vec![1, 2, 3]),
