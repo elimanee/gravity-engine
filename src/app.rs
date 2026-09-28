@@ -4,19 +4,25 @@
 use crate::audio::Audio;
 use crate::background::{Background, BgMode};
 use crate::config::{self, ext_of, file_name_of, IMAGE_EXT, SCENE_EXT};
-use crate::config::{PPM, WALL_T};
+use crate::config::{DENSITY, PPM, WALL_T};
+use crate::drawing;
+use crate::history::{History, Snapshot};
 use crate::net::{FetchEvent, FetchJob, FetchKind};
-use crate::physics::object::{object_at, Object, Placement, Source, Visual};
+use crate::physics::links::{self, Link, LinkKind};
+use crate::physics::object::{object_at, objects_at, Object, Placement, Source, Visual};
 use crate::physics::tools::{self, Grab, Tool};
+use crate::physics::water::{self, Water};
 use crate::physics::{to_phys, PhysWorld};
+use crate::recorder::{self, Finishing, Recording};
 use crate::scene;
-use crate::settings::{Settings, RADIUS_RANGE, SPAWN_SIZE_RANGE, STRENGTH_RANGE};
+use crate::settings::{Settings, DRAW_THICKNESS_RANGE, RADIUS_RANGE, SPAWN_SIZE_RANGE, STRENGTH_RANGE};
 use crate::shapes::{self, Shape};
 use crate::ui::context_menu::ContextMenu;
 use crate::ui::cursor::{self, Blast};
 use crate::ui::drawer::Drawer;
 use crate::ui::help::Help;
 use crate::ui::hud::{Hud, HudState};
+use crate::ui::inspector::{Inspector, Props};
 use crate::ui::now_playing::NowPlayingPill;
 use crate::ui::spawner::{spawn_color, Spawner};
 use crate::ui::title::{self, PixelOut};
@@ -27,7 +33,7 @@ use crate::ui::visualizer::{self, VisStyle};
 use crate::ui::{debug, icons, theme, Action, Input, ObjectCmd};
 use crate::window_tracker::WindowTracker;
 use macroquad::prelude::*;
-use rapier2d::prelude::RigidBodyHandle;
+use rapier2d::prelude::{Point, RigidBodyHandle};
 use rfd::FileDialog;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -36,6 +42,22 @@ const TIME_STEPS: &[f32] = &[0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
 const SPAWN_REPEAT: f32 = 0.11;
 
 type SpawnKey = (Shape, u32, (u8, u8, u8));
+
+/// A Draw-tool stroke in progress.
+struct Stroke {
+    points: Vec<(f32, f32)>,
+    rgb: [u8; 3],
+}
+
+/// A Link-tool drag in progress.
+struct LinkDrag {
+    /// Object where the drag started (`None` for the background), with the
+    /// grabbed point in its local frame so it follows the object.
+    from: Option<(RigidBodyHandle, Point<f32>)>,
+    /// World point where the drag started.
+    start: Point<f32>,
+    start_px: Vec2,
+}
 
 enum Title {
     Showing,
@@ -46,6 +68,9 @@ pub struct App {
     s: Settings,
     world: PhysWorld,
     objects: Vec<Object>,
+    links: Vec<Link>,
+    history: History<Snapshot>,
+    water: Water,
     bg: Background,
     audio: Audio,
     shaker: WindowTracker,
@@ -58,6 +83,12 @@ pub struct App {
     blasts: Vec<Blast>,
     spawn_timer: f32,
     spawn_cache: HashMap<SpawnKey, Visual>,
+    stroke: Option<Stroke>,
+    link_drag: Option<LinkDrag>,
+    recording: Option<Recording>,
+    finishing: Option<Finishing>,
+    /// An undo step was already recorded for the open properties panel.
+    inspector_recorded: bool,
 
     hud: Hud,
     drawer: Drawer,
@@ -65,6 +96,7 @@ pub struct App {
     picker: ToolPicker,
     spawner: Spawner,
     menu: ContextMenu,
+    inspector: Inspector,
     help: Help,
     toasts: Toasts,
     now_playing: NowPlayingPill,
@@ -101,6 +133,9 @@ impl App {
             s,
             world,
             objects: vec![],
+            links: vec![],
+            history: History::default(),
+            water: Water::default(),
             bg,
             shaker,
             jobs: vec![],
@@ -111,12 +146,18 @@ impl App {
             blasts: vec![],
             spawn_timer: 0.0,
             spawn_cache: HashMap::new(),
+            stroke: None,
+            link_drag: None,
+            recording: None,
+            finishing: None,
+            inspector_recorded: false,
             hud: Hud::default(),
             drawer: Drawer::default(),
             card: ToolCard::default(),
             picker: ToolPicker::default(),
             spawner: Spawner::default(),
             menu: ContextMenu::default(),
+            inspector: Inspector::default(),
             help: Help::default(),
             toasts,
             now_playing: NowPlayingPill::default(),
@@ -130,6 +171,7 @@ impl App {
             let x = screen_width() / 2.0 + (i as f32 - n as f32 / 2.0) * 40.0;
             app.open_path(&path, vec2(x, 120.0));
         }
+        app.history.clear();
         app
     }
 
@@ -184,6 +226,7 @@ impl App {
         }
         self.sync_settings();
         self.poll_jobs();
+        self.poll_recording();
         self.audio.tick();
         self.audio.analyze(dt, self.s.vis_gain);
         self.simulate(dt, input.mouse);
@@ -209,12 +252,17 @@ impl App {
             actions.push(Action::ToggleHelp);
         }
         if pressed(KeyCode::Escape) {
-            if self.help.fader.open {
+            if self.stroke.is_some() || self.link_drag.is_some() {
+                self.stroke = None;
+                self.link_drag = None;
+            } else if self.help.fader.open {
                 self.help.fader.open = false;
             } else if self.picker.fader.open {
                 self.picker.fader.open = false;
             } else if self.menu.fader.open {
                 self.menu.close();
+            } else if self.inspector.fader.open {
+                self.inspector.close();
             } else if self.spawner.fader.open {
                 self.spawner.fader.open = false;
             } else if self.paused {
@@ -233,6 +281,12 @@ impl App {
             }
             if pressed(KeyCode::Q) {
                 self.quit = true;
+            }
+            if pressed(KeyCode::Z) {
+                actions.push(if shift { Action::Redo } else { Action::Undo });
+            }
+            if pressed(KeyCode::Y) {
+                actions.push(Action::Redo);
             }
             return;
         }
@@ -255,11 +309,25 @@ impl App {
             KeyCode::Key7,
             KeyCode::Key8,
             KeyCode::Key9,
+            KeyCode::Key0,
+            KeyCode::J,
         ];
         for (i, k) in digits.iter().enumerate() {
             if pressed(*k) {
                 actions.push(Action::SetTool(Tool::ALL[i]));
                 self.picker.fader.open = false;
+            }
+        }
+        if pressed(KeyCode::H) {
+            actions.push(Action::ToggleWater);
+        }
+        if pressed(KeyCode::F11) {
+            actions.push(Action::ToggleRecording);
+        }
+        if pressed(KeyCode::I) {
+            if let Some(i) = object_at(&self.objects, &self.world, input.mouse.x, input.mouse.y) {
+                let h = self.objects[i].body;
+                actions.push(Action::Object(ObjectCmd::Properties, h));
             }
         }
         let dir = if shift { -1 } else { 1 };
@@ -334,6 +402,7 @@ impl App {
         self.help.update(dt, input);
         self.picker.update(dt, input, actions);
         self.menu.update(dt, input, actions);
+        self.update_inspector(dt, input);
         self.toasts.update(dt);
         self.drawer.fader.open = self.paused;
         let top = self.hud.bottom();
@@ -343,10 +412,41 @@ impl App {
         let np = self.audio.now_playing();
         self.now_playing.update(dt, np.as_ref(), self.paused, input, actions);
         let hud_state = self.hud_state();
-        let grabbing = self.grab.is_some() || self.field_active || self.card.dragging();
+        let grabbing = self.grab.is_some()
+            || self.field_active
+            || self.card.dragging()
+            || self.inspector.dragging()
+            || self.stroke.is_some()
+            || self.link_drag.is_some();
         let mut hud_actions = vec![];
         self.hud.update(dt, &hud_state, input, grabbing, &mut hud_actions);
         actions.extend(hud_actions);
+    }
+
+    /// Values shown in the properties panel for its target object.
+    fn inspected(&self) -> Option<Props> {
+        let o = self.objects.iter().find(|o| Some(o.body) == self.inspector.target)?;
+        Some(Props { material: o.material, mass: o.mass, default_mass: o.area(&self.world) * DENSITY })
+    }
+
+    fn update_inspector(&mut self, dt: f32, input: &mut Input) {
+        let mut props = self.inspected();
+        if !self.inspector.update(dt, input, props.as_mut()) {
+            return;
+        }
+        let Some(p) = props else { return };
+        if !self.inspector_recorded {
+            self.record("Edit properties");
+            self.inspector_recorded = true;
+        }
+        if let Some(o) = self.objects.iter_mut().find(|o| Some(o.body) == self.inspector.target) {
+            if o.material != p.material {
+                o.set_material(&mut self.world, p.material);
+            }
+            if (o.mass - p.mass).abs() > 1e-6 {
+                o.set_mass(&mut self.world, p.mass);
+            }
+        }
     }
 
     fn hud_state(&self) -> HudState<'static> {
@@ -372,6 +472,9 @@ impl App {
             if self.spawner.is_open() {
                 self.s.spawn_size =
                     (self.s.spawn_size + input.wheel * 8.0).clamp(SPAWN_SIZE_RANGE.0, SPAWN_SIZE_RANGE.1);
+            } else if self.s.tool == Tool::Draw {
+                self.s.draw_thickness =
+                    (self.s.draw_thickness + input.wheel * 2.0).clamp(DRAW_THICKNESS_RANGE.0, DRAW_THICKNESS_RANGE.1);
             } else if self.s.tool.has_settings() {
                 if input.shift {
                     self.s.tool_strength =
@@ -385,11 +488,18 @@ impl App {
 
         if input.left_pressed && !input.consumed {
             if self.spawner.is_open() {
+                self.record("Spawn shapes");
                 self.spawn_shape_at(m);
                 self.spawn_timer = SPAWN_REPEAT * 2.0;
             } else {
                 let tool = self.s.tool;
-                if tool.is_field() {
+                if tool == Tool::Draw {
+                    let c = spawn_color(self.s.spawn_color, rand::gen_range(0.0, 400.0));
+                    let rgb = [(c.r * 255.0) as u8, (c.g * 255.0) as u8, (c.b * 255.0) as u8];
+                    self.stroke = Some(Stroke { points: vec![(m.x, m.y)], rgb });
+                } else if tool == Tool::Link {
+                    self.start_link(m);
+                } else if tool.is_field() {
                     self.field_active = true;
                 } else if tool == Tool::Bomb {
                     let handles: Vec<RigidBodyHandle> = self.objects.iter().map(|o| o.body).collect();
@@ -415,17 +525,44 @@ impl App {
             self.spawn_timer = -2.0; // press started on UI: no hold-spawn
         }
 
+        if let Some(stroke) = &mut self.stroke {
+            let last = *stroke.points.last().expect("strokes start with a point");
+            if (m.x - last.0).hypot(m.y - last.1) >= drawing::SAMPLE_SPACING {
+                stroke.points.push((m.x, m.y));
+            }
+        }
+
         if input.left_released || !input.left_down {
             if let Some(g) = self.grab.take() {
                 g.release(&mut self.world.bodies, to_phys(m.x, m.y));
             }
             self.field_active = false;
+            if let Some(stroke) = self.stroke.take() {
+                self.finish_stroke(stroke, input.shift);
+            }
+            if self.link_drag.is_some() {
+                self.finish_link(m);
+            }
         }
 
         if input.right_pressed && !input.consumed && !input.over_ui {
-            if let Some(i) = object_at(&self.objects, &self.world, m.x, m.y) {
+            let near_link = (self.s.tool == Tool::Link)
+                .then(|| {
+                    (0..self.links.len())
+                        .map(|i| (i, self.links[i].distance_px(&self.world, m)))
+                        .filter(|&(_, d)| d < 8.0)
+                        .min_by(|a, b| a.1.total_cmp(&b.1))
+                })
+                .flatten();
+            if let Some((i, _)) = near_link {
+                self.record("Remove link");
+                let l = self.links.remove(i);
+                l.remove(&mut self.world);
+                self.toasts.status("link", format!("{} removed", l.kind.label()));
+            } else if let Some(i) = object_at(&self.objects, &self.world, m.x, m.y) {
                 let o = &self.objects[i];
-                self.menu.open(m, o.body, o.name(), o.pinned);
+                let linked = self.links.iter().any(|l| l.involves(o.body));
+                self.menu.open(m, o.body, o.name(), o.pinned, linked);
             }
         }
     }
@@ -433,6 +570,9 @@ impl App {
     fn handle_drops(&mut self, mouse: Vec2) {
         let files = get_dropped_files();
         let n = files.len();
+        if n > 0 {
+            self.record("Drop files");
+        }
         for (i, f) in files.into_iter().enumerate() {
             let at = mouse + vec2((i as f32 - n as f32 / 2.0) * 30.0, -(i as f32) * 10.0);
             match (f.path, f.bytes) {
@@ -457,6 +597,8 @@ impl App {
                     self.s.tool = t;
                     self.grab = None;
                     self.field_active = false;
+                    self.stroke = None;
+                    self.link_drag = None;
                     self.spawner.fader.open = false;
                 }
             }
@@ -488,6 +630,7 @@ impl App {
                 if let Some(paths) =
                     FileDialog::new().add_filter("Images", IMAGE_EXT).add_filter("All files", &["*"]).pick_files()
                 {
+                    self.record("Add images");
                     let n = paths.len();
                     for (i, p) in paths.into_iter().enumerate() {
                         let x =
@@ -523,6 +666,9 @@ impl App {
             Action::FetchLogos => self.start_job(FetchKind::Logos),
             Action::ClearAll => {
                 let n = self.objects.len();
+                if n > 0 {
+                    self.record("Clear all");
+                }
                 self.clear_objects();
                 if n > 0 {
                     self.toasts.info(format!("Cleared {n} objects"));
@@ -567,8 +713,19 @@ impl App {
             Action::SpawnVisualizer => {
                 // From the keyboard it appears under the cursor, from the drawer near the top.
                 let at = if self.paused { vec2(screen_width() / 2.0, self.spawn_y()) } else { mouse };
+                self.record("Add visualizer");
                 self.spawn_visualizer(at);
             }
+            Action::ToggleWater => {
+                self.s.water = !self.s.water;
+                self.toasts.status(
+                    "water",
+                    if self.s.water { "Water on  ·  level and density in settings" } else { "Water off" },
+                );
+            }
+            Action::Undo => self.undo(false),
+            Action::Redo => self.undo(true),
+            Action::ToggleRecording => self.toggle_recording(),
             Action::Object(cmd, handle) => self.object_cmd(cmd, handle, mouse),
         }
     }
@@ -585,8 +742,36 @@ impl App {
 
     fn object_cmd(&mut self, cmd: ObjectCmd, handle: RigidBodyHandle, _mouse: Vec2) {
         let Some(i) = self.objects.iter().position(|o| o.body == handle) else { return };
+        let label = match cmd {
+            ObjectCmd::Delete => Some("Delete"),
+            ObjectCmd::Duplicate => Some("Duplicate"),
+            ObjectCmd::Resize(_) => Some("Resize"),
+            ObjectCmd::SizeAll(_) => Some("Resize all"),
+            ObjectCmd::TogglePin => Some("Pin"),
+            ObjectCmd::Unlink => Some("Detach links"),
+            ObjectCmd::Properties => None,
+        };
+        if let Some(label) = label {
+            self.record(label);
+        }
         match cmd {
             ObjectCmd::Delete => self.remove_object(i),
+            ObjectCmd::Properties => {
+                let o = &self.objects[i];
+                let (p, _) = o.screen_pos(&self.world);
+                self.inspector.open(o.body, o.name(), p);
+                self.inspector_recorded = false;
+                self.menu.close();
+            }
+            ObjectCmd::Unlink => {
+                let (gone, keep): (Vec<Link>, Vec<Link>) =
+                    std::mem::take(&mut self.links).into_iter().partition(|l| l.involves(handle));
+                for l in &gone {
+                    l.remove(&mut self.world);
+                }
+                self.links = keep;
+                self.toasts.info(format!("Detached {} link{}", gone.len(), if gone.len() == 1 { "" } else { "s" }));
+            }
             ObjectCmd::Duplicate => {
                 let mut at = self.objects[i].placement(&self.world);
                 let off = rand::gen_range(24.0, 48.0);
@@ -670,14 +855,175 @@ impl App {
         if self.menu.target == Some(o.body) {
             self.menu.close();
         }
+        if self.inspector.target == Some(o.body) {
+            self.inspector.close();
+        }
+        if self.link_drag.as_ref().is_some_and(|d| d.from.is_some_and(|(b, _)| b == o.body)) {
+            self.link_drag = None;
+        }
         o.destroy(&mut self.world);
+        links::prune(&mut self.links, &self.world);
     }
 
     fn clear_objects(&mut self) {
         self.grab = None;
+        self.link_drag = None;
         self.menu.close();
+        self.inspector.close();
+        for l in self.links.drain(..) {
+            l.remove(&mut self.world);
+        }
         for o in self.objects.drain(..) {
             o.destroy(&mut self.world);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // Undo / redo
+    // ═══════════════════════════════════════════════════════════
+    /// Remember the scene before an edit, so it can be undone.
+    fn record(&mut self, label: &str) {
+        let snap = Snapshot::capture(&self.world, &self.objects, &self.links);
+        self.history.record(label, snap);
+    }
+
+    fn undo(&mut self, redo: bool) {
+        let current = Snapshot::capture(&self.world, &self.objects, &self.links);
+        let step = if redo { self.history.redo(current) } else { self.history.undo(current) };
+        let Some((label, snap)) = step else {
+            self.toasts.status("undo", if redo { "Nothing to redo" } else { "Nothing to undo" });
+            return;
+        };
+        self.clear_objects();
+        self.stroke = None;
+        let (objects, links) = snap.restore(&mut self.world);
+        self.objects = objects;
+        self.links = links;
+        self.toasts.status("undo", format!("{}: {label}", if redo { "Redo" } else { "Undo" }));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // Draw and Link tools
+    // ═══════════════════════════════════════════════════════════
+    fn finish_stroke(&mut self, stroke: Stroke, shift: bool) {
+        let Some(placed) = drawing::from_stroke(&stroke.points, self.s.draw_thickness, stroke.rgb) else { return };
+        let pinned = self.s.draw_pinned != shift;
+        let placement = Placement { pos_px: placed.center, size_px: Some(placed.size), pinned, ..Default::default() };
+        self.record("Draw");
+        match Object::load(&mut self.world, Source::Drawing(Arc::new(placed.drawing)), placement) {
+            Some(o) => self.objects.push(o),
+            None => self.toasts.error("Could not create the drawing"),
+        }
+    }
+
+    fn start_link(&mut self, m: Vec2) {
+        let p = to_phys(m.x, m.y);
+        let at = Point::new(p.0, p.1);
+        let under = objects_at(&self.objects, &self.world, m.x, m.y);
+        if self.s.link_kind == LinkKind::Hinge {
+            let (a, b) = match under.as_slice() {
+                [] => {
+                    self.toasts.status("link", "Click on an object to nail it, or where two objects overlap");
+                    return;
+                }
+                [i] => (self.objects[*i].body, None),
+                [i, j, ..] => (self.objects[*i].body, Some(self.objects[*j].body)),
+            };
+            self.add_link(LinkKind::Hinge, a, b, at, at);
+        } else {
+            let from = under.first().map(|&i| {
+                let body = self.objects[i].body;
+                (body, self.world.bodies[body].position().inverse_transform_point(&at))
+            });
+            self.link_drag = Some(LinkDrag { from, start: at, start_px: m });
+        }
+    }
+
+    fn finish_link(&mut self, m: Vec2) {
+        let Some(drag) = self.link_drag.take() else { return };
+        if m.distance(drag.start_px) < 10.0 {
+            self.toasts.status("link", "Drag from one object to another (or to the background)");
+            return;
+        }
+        let p = to_phys(m.x, m.y);
+        let end = Point::new(p.0, p.1);
+        let from_body = drag.from.map(|(b, _)| b);
+        let target = objects_at(&self.objects, &self.world, m.x, m.y)
+            .into_iter()
+            .map(|i| self.objects[i].body)
+            .find(|&b| Some(b) != from_body);
+        let kind = self.s.link_kind;
+        match (drag.from, target) {
+            (Some((a, local)), b) => {
+                let pa = self.world.bodies.get(a).map_or(drag.start, |body| body.position() * local);
+                self.add_link(kind, a, b, pa, end)
+            }
+            (None, Some(b)) => self.add_link(kind, b, None, end, drag.start),
+            (None, None) => self.toasts.status("link", "Start or end the link on an object"),
+        }
+    }
+
+    fn add_link(
+        &mut self,
+        kind: LinkKind,
+        a: RigidBodyHandle,
+        b: Option<RigidBodyHandle>,
+        pa: Point<f32>,
+        pb: Point<f32>,
+    ) {
+        self.record(kind.label());
+        if let Some(l) = Link::new(&mut self.world, kind, a, b, pa, pb) {
+            self.links.push(l);
+            let hint = if b.is_none() { " to the background" } else { "" };
+            self.toasts.status("link", format!("{} added{hint}  ·  right-click it to remove", kind.label()));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // GIF recording
+    // ═══════════════════════════════════════════════════════════
+    fn toggle_recording(&mut self) {
+        if let Some(rec) = self.recording.take() {
+            self.finishing = Some(rec.stop());
+            self.toasts.status("gif", "Saving GIF…");
+            return;
+        }
+        if self.finishing.is_some() {
+            self.toasts.info("Still saving the previous GIF");
+            return;
+        }
+        let Some(dir) = config::screenshot_dir() else {
+            self.toasts.error("GIF: no home directory");
+            return;
+        };
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            self.toasts.error(format!("GIF: {e}"));
+            return;
+        }
+        let path = dir.join(format!("gravity-{}.gif", stamp()));
+        self.recording = Some(Recording::start(path, get_time()));
+        self.toasts.status("gif", format!("Recording GIF  ·  F11 to stop (max {} s)", recorder::MAX_SECS as u32));
+    }
+
+    fn poll_recording(&mut self) {
+        let Some(result) = self.finishing.as_mut().and_then(Finishing::poll) else { return };
+        self.finishing = None;
+        match result {
+            Ok((path, frames)) => self.toasts.success(format!("GIF saved: {} ({frames} frames)", tilde(&path))),
+            Err(e) => self.toasts.error(format!("GIF failed: {e}")),
+        }
+    }
+
+    /// Grab a frame for the GIF (called after the scene is drawn, before the UI).
+    fn capture_frame(&mut self) {
+        let now = get_time();
+        let Some(rec) = &mut self.recording else { return };
+        if rec.due(now) {
+            let img = get_screen_data();
+            rec.push(img.bytes, img.width as u32, img.height as u32, now);
+        }
+        if rec.elapsed(now) >= recorder::MAX_SECS {
+            self.toggle_recording();
         }
     }
 
@@ -726,6 +1072,10 @@ impl App {
             self.toasts.info(format!("Already fetching {}", kind.label()));
             return;
         }
+        self.record(match kind {
+            FetchKind::Buttons => "Fetch buttons",
+            FetchKind::Logos => "Fetch logos",
+        });
         self.jobs.push(match kind {
             FetchKind::Buttons => FetchJob::buttons(20),
             FetchKind::Logos => FetchJob::logos(20),
@@ -770,7 +1120,9 @@ impl App {
         if path.extension().is_none() {
             path.set_extension(SCENE_EXT);
         }
-        let scene = scene::capture(&self.world, &self.objects);
+        let water =
+            self.s.water.then_some(scene::SceneWater { level: self.s.water_level, density: self.s.water_density });
+        let scene = scene::capture(&self.world, &self.objects, &self.links, water);
         match scene::write(&path, &scene) {
             Ok(()) => self.toasts.success(format!(
                 "Saved {} objects to {}",
@@ -784,14 +1136,24 @@ impl App {
     fn load_scene(&mut self, path: &std::path::Path) {
         match scene::read(path) {
             Ok(sc) => {
+                self.record("Open scene");
                 self.clear_objects();
                 self.s.gravity = sc.gravity.clamp(crate::settings::GRAVITY_RANGE.0, crate::settings::GRAVITY_RANGE.1);
                 self.s.border = sc.border;
                 self.world.set_border(sc.border);
                 self.world.set_gravity(self.s.gravity);
-                let (objs, failed) = scene::instantiate(&sc, &mut self.world);
+                if sc.version >= 2 {
+                    self.s.water = sc.water.is_some();
+                }
+                if let Some(w) = sc.water {
+                    self.s.water_level = w.level;
+                    self.s.water_density = w.density;
+                    self.s = self.s.clone().sanitized();
+                }
+                let (objs, links, failed) = scene::instantiate(&sc, &mut self.world);
                 let n = objs.len();
                 self.objects = objs;
+                self.links = links;
                 if failed > 0 {
                     self.toasts.warn(format!("Loaded {n} objects ({failed} missing)"));
                 } else {
@@ -836,6 +1198,13 @@ impl App {
                 );
             }
             self.world.border.apply_forces(&mut self.world, &self.objects);
+            links::apply_springs(&self.links, &mut self.world);
+            if self.s.water {
+                let rest = water::rest_level(&self.world, self.s.water_level);
+                let step = if self.step_once { crate::config::PHYSICS_DT } else { dt * self.s.time_scale };
+                self.water.apply(&mut self.world, &self.objects, rest, self.s.water_density, step);
+                self.water.step(step, self.audio.analyzer.bass, self.audio.analyzer.beat_now);
+            }
             if self.s.vis_dance && self.audio.analyzer.beat_now {
                 self.dance();
             }
@@ -855,6 +1224,7 @@ impl App {
                     self.remove_object(i);
                 }
             }
+            links::prune(&mut self.links, &self.world);
 
             let (len, fade) = (self.s.trail_length as usize, self.s.trail_fade);
             for o in &mut self.objects {
@@ -910,12 +1280,19 @@ impl App {
                 o.draw(&self.world);
             }
         }
+        for l in &self.links {
+            l.draw(&self.world);
+        }
         for o in self.objects.iter().filter(|o| o.pinned) {
             let (p, _) = o.screen_pos(&self.world);
             draw_circle(p.x, p.y, 9.0, theme::alpha(BLACK, 0.35));
             icons::pin(p, 14.0, theme::WARNING);
         }
-        if let Some(target) = self.menu.target {
+        if self.s.water {
+            let rest = water::rest_level(&self.world, self.s.water_level);
+            self.water.draw(&self.world, rest, sw, sh);
+        }
+        for target in [self.menu.target, self.inspector.target].into_iter().flatten() {
             if let Some(o) = self.objects.iter().find(|o| o.body == target) {
                 let c = o.corners(&self.world);
                 for i in 0..4 {
@@ -929,6 +1306,7 @@ impl App {
             self.screenshot = false;
             self.take_screenshot();
         }
+        self.capture_frame();
 
         if let Some(g) = &self.grab {
             cursor::draw_grab(g, &self.world, m);
@@ -936,11 +1314,31 @@ impl App {
         for b in &self.blasts {
             b.draw();
         }
+        if let Some(st) = &self.stroke {
+            let c = Color::from_rgba(st.rgb[0], st.rgb[1], st.rgb[2], 255);
+            cursor::draw_stroke(&st.points, self.s.draw_thickness, c);
+        }
+        if let Some(d) = &self.link_drag {
+            let from = d.from.and_then(|(b, local)| self.world.bodies.get(b).map(|body| body.position() * local));
+            let start = from.map_or(d.start_px, |p| crate::physics::to_screen(p.x, p.y));
+            let target = objects_at(&self.objects, &self.world, m.x, m.y)
+                .into_iter()
+                .find(|&i| d.from.is_none_or(|(b, _)| b != self.objects[i].body))
+                .map(|i| self.objects[i].corners(&self.world));
+            cursor::draw_link_drag(start, m, self.s.link_kind, target);
+        }
         if !input.over_ui && self.title.is_none() {
             if self.spawner.is_open() {
                 self.spawner.draw_ghost(&self.s, m);
-            } else if self.grab.is_none() {
-                cursor::draw_tool_cursor(self.s.tool, m, self.s.tool_radius, self.field_active);
+            } else if self.grab.is_none() && self.stroke.is_none() {
+                match self.s.tool {
+                    Tool::Draw => {
+                        let c = spawn_color(self.s.spawn_color, get_time() as f32);
+                        cursor::draw_pen_cursor(m, self.s.draw_thickness, c);
+                    }
+                    Tool::Link if self.link_drag.is_none() => cursor::draw_link_cursor(m, self.s.link_kind),
+                    _ => cursor::draw_tool_cursor(self.s.tool, m, self.s.tool_radius, self.field_active),
+                }
             }
         }
 
@@ -962,9 +1360,30 @@ impl App {
         self.drawer.draw(&self.s, top, m, np.is_some());
         self.hud.draw(&self.hud_state(), m);
         self.toasts.draw(top, &self.jobs, dt);
+        self.inspector.draw(self.inspected().as_ref(), m);
         self.menu.draw(m);
         self.picker.draw(self.s.tool, m);
         self.help.draw();
+        self.draw_rec_indicator(top);
+    }
+
+    fn draw_rec_indicator(&self, top: f32) {
+        let now = get_time();
+        let label = match (&self.recording, &self.finishing) {
+            (Some(r), _) => {
+                let secs = r.elapsed(now) as u32;
+                format!("REC  {}:{:02}", secs / 60, secs % 60)
+            }
+            (None, Some(_)) => "Saving GIF…".to_string(),
+            _ => return,
+        };
+        let w = theme::measure_bold(&label, 13.0) + 40.0;
+        let r = Rect::new((screen_width() - w) / 2.0, top.max(10.0) + 6.0, w, 28.0);
+        theme::rrect(r, 14.0, theme::alpha(Color::new(0.12, 0.03, 0.05, 1.0), 0.88));
+        theme::rrect_lines(r, 14.0, 1.0, theme::alpha(theme::DANGER, 0.6));
+        let blink = if self.recording.is_some() { 0.55 + 0.45 * (now * 4.0).sin().abs() as f32 } else { 0.4 };
+        draw_circle(r.x + 16.0, r.y + 14.0, 5.0, theme::alpha(theme::DANGER, blink));
+        theme::text_bold(&label, r.x + 28.0, theme::baseline(r.y + 14.0, 13.0), 13.0, theme::TEXT);
     }
 
     fn take_screenshot(&mut self) {
@@ -981,11 +1400,7 @@ impl App {
         let result = (|| -> Result<std::path::PathBuf, String> {
             let dir = config::screenshot_dir().ok_or("no home directory")?;
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            let stamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis())
-                .unwrap_or_default();
-            let path = dir.join(format!("gravity-{stamp}.png"));
+            let path = dir.join(format!("gravity-{}.png", stamp()));
             image::save_buffer(&path, &flipped, w as u32, h as u32, image::ExtendedColorType::Rgba8)
                 .map_err(|e| e.to_string())?;
             Ok(path)
@@ -995,6 +1410,11 @@ impl App {
             Err(e) => self.toasts.error(format!("Screenshot failed: {e}")),
         }
     }
+}
+
+/// Milliseconds since the epoch, for unique file names.
+fn stamp() -> u128 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or_default()
 }
 
 /// Display a path with the home directory abbreviated to `~`.
@@ -1008,5 +1428,12 @@ fn tilde(p: &std::path::Path) -> String {
 impl Drop for App {
     fn drop(&mut self) {
         self.save_settings();
+        // Finish a GIF that is still being recorded or written.
+        let mut finishing = self.recording.take().map(Recording::stop).or(self.finishing.take());
+        if let Some(f) = &mut finishing {
+            while f.poll().is_none() {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
     }
 }

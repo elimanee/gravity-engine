@@ -133,6 +133,113 @@ pub fn tool(tool: Tool, c: Vec2, size: f32, color: Color, t: f32) {
                 draw_line(p0.x, p0.y, p1.x, p1.y, th * 0.7, Color { a: color.a * (0.6 - i as f32 * 0.15), ..color });
             }
         }
+        Tool::Draw => {
+            // A pencil tracing a wavy line that grows over time.
+            let grow = 0.35 + 0.65 * ((t * 0.8) % 1.0);
+            let wave = |u: f32| vec2(c.x - 19.0 * s + u * 30.0 * s, c.y + 12.0 * s - (u * 7.0).sin() * 5.0 * s);
+            let steps = 16;
+            let mut prev = wave(0.0);
+            for i in 1..=steps {
+                let p = wave(i as f32 / steps as f32 * grow);
+                draw_line(prev.x, prev.y, p.x, p.y, th * 1.3, soft);
+                prev = p;
+            }
+            let tip = prev;
+            let dir = vec2(0.55, -0.83);
+            let back = tip + dir * 26.0 * s;
+            let n = vec2(-dir.y, dir.x) * 4.5 * s;
+            let cone = tip + dir * 8.0 * s;
+            draw_triangle(tip, cone + n, cone - n, color);
+            draw_triangle(cone + n, cone - n, back + n, color);
+            draw_triangle(cone - n, back - n, back + n, color);
+            draw_circle(tip.x, tip.y, 1.6 * s, Color::new(0.1, 0.1, 0.12, color.a));
+        }
+        Tool::Link => {
+            // Two blocks joined by a swaying rope.
+            let a = vec2(c.x - 14.0 * s, c.y - 8.0 * s);
+            let sway = (t * 2.2).sin() * 4.0 * s;
+            let b = vec2(c.x + 12.0 * s + sway * 0.3, c.y + 10.0 * s);
+            draw_rectangle(a.x - 7.0 * s, a.y - 7.0 * s, 12.0 * s, 12.0 * s, color);
+            draw_rectangle(b.x - 5.0 * s, b.y - 4.0 * s, 12.0 * s, 12.0 * s, color);
+            let mid = (a + b) / 2.0 + vec2(-sway, 7.0 * s);
+            let mut prev = a;
+            for i in 1..=10 {
+                let u = i as f32 / 10.0;
+                let p = a.lerp(mid, u).lerp(mid.lerp(b, u), u);
+                draw_line(prev.x, prev.y, p.x, p.y, th, color);
+                prev = p;
+            }
+            for p in [a, b] {
+                draw_circle(p.x, p.y, 2.2 * s, Color::new(0.1, 0.1, 0.14, color.a));
+            }
+        }
+    }
+}
+
+/// Small glyph for a link kind.
+pub fn link_kind(kind: crate::physics::links::LinkKind, c: Vec2, size: f32, color: Color) {
+    use crate::physics::links::LinkKind;
+    let s = size / 24.0;
+    let (a, b) = (vec2(c.x - 9.0 * s, c.y - 6.0 * s), vec2(c.x + 9.0 * s, c.y + 6.0 * s));
+    match kind {
+        LinkKind::Rope => {
+            let mid = (a + b) / 2.0 + vec2(-3.0 * s, 6.0 * s);
+            let mut prev = a;
+            for i in 1..=8 {
+                let u = i as f32 / 8.0;
+                let p = a.lerp(mid, u).lerp(mid.lerp(b, u), u);
+                draw_line(prev.x, prev.y, p.x, p.y, 1.8 * s, color);
+                prev = p;
+            }
+        }
+        LinkKind::Spring => {
+            let d = b - a;
+            let n = vec2(-d.y, d.x).normalize() * 3.5 * s;
+            let mut prev = a;
+            for i in 1..=9 {
+                let u = i as f32 / 9.0;
+                let side = if i == 9 {
+                    0.0
+                } else if i % 2 == 1 {
+                    1.0
+                } else {
+                    -1.0
+                };
+                let p = a + d * u + n * side;
+                draw_line(prev.x, prev.y, p.x, p.y, 1.6 * s, color);
+                prev = p;
+            }
+        }
+        LinkKind::Hinge => {
+            draw_rectangle_ex(
+                c.x,
+                c.y,
+                18.0 * s,
+                6.0 * s,
+                DrawRectangleParams {
+                    offset: vec2(0.1, 0.5),
+                    rotation: -0.5,
+                    color: Color { a: color.a * 0.5, ..color },
+                },
+            );
+            draw_rectangle_ex(
+                c.x,
+                c.y,
+                18.0 * s,
+                6.0 * s,
+                DrawRectangleParams {
+                    offset: vec2(0.1, 0.5),
+                    rotation: 0.4,
+                    color: Color { a: color.a * 0.8, ..color },
+                },
+            );
+            draw_circle(c.x, c.y, 3.5 * s, color);
+            draw_circle(c.x, c.y, 1.4 * s, Color::new(0.1, 0.1, 0.14, color.a));
+            return;
+        }
+    }
+    for p in [a, b] {
+        draw_circle(p.x, p.y, 2.4 * s, color);
     }
 }
 

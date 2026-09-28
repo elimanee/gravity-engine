@@ -19,11 +19,11 @@ enum Item {
     Resize,
     Duplicate,
     SizeAll,
+    Properties,
     Pin,
+    Unlink,
     Delete,
 }
-
-const ITEMS: &[Item] = &[Item::Resize, Item::Duplicate, Item::SizeAll, Item::Pin, Item::Delete];
 
 impl Item {
     fn label(self, pinned: bool) -> &'static str {
@@ -31,6 +31,8 @@ impl Item {
             Item::Resize => "Resize",
             Item::Duplicate => "Duplicate",
             Item::SizeAll => "Resize all",
+            Item::Properties => "Properties…   (I)",
+            Item::Unlink => "Detach links",
             Item::Pin if pinned => "Unpin",
             Item::Pin => "Pin in place",
             Item::Delete => "Delete",
@@ -47,6 +49,7 @@ pub struct ContextMenu {
     pub target: Option<RigidBodyHandle>,
     title: String,
     pinned: bool,
+    items: Vec<Item>,
     sub: Option<usize>,
 }
 
@@ -58,14 +61,20 @@ impl Default for ContextMenu {
             target: None,
             title: String::new(),
             pinned: false,
+            items: vec![],
             sub: None,
         }
     }
 }
 
 impl ContextMenu {
-    pub fn open(&mut self, at: Vec2, target: RigidBodyHandle, title: String, pinned: bool) {
-        let h = Self::height();
+    pub fn open(&mut self, at: Vec2, target: RigidBodyHandle, title: String, pinned: bool, linked: bool) {
+        self.items = vec![Item::Resize, Item::Duplicate, Item::SizeAll, Item::Properties, Item::Pin];
+        if linked {
+            self.items.push(Item::Unlink);
+        }
+        self.items.push(Item::Delete);
+        let h = self.height();
         self.pos =
             vec2(at.x.min(screen_width() - W * 2.0 - 8.0).max(4.0), at.y.min(screen_height() - h - 4.0).max(4.0));
         self.target = Some(target);
@@ -81,16 +90,16 @@ impl ContextMenu {
         self.sub = None;
     }
 
-    fn height() -> f32 {
-        HEAD_H + ITEMS.len() as f32 * ITEM_H + PAD * 2.0 + 9.0
+    fn height(&self) -> f32 {
+        HEAD_H + self.items.len() as f32 * ITEM_H + PAD * 2.0 + 9.0
     }
 
     fn panel(&self) -> Rect {
-        Rect::new(self.pos.x, self.pos.y, W, Self::height())
+        Rect::new(self.pos.x, self.pos.y, W, self.height())
     }
 
     fn item_rect(&self, i: usize) -> Rect {
-        let sep = if ITEMS[i] == Item::Delete { 9.0 } else { 0.0 };
+        let sep = if self.items[i] == Item::Delete { 9.0 } else { 0.0 };
         Rect::new(self.pos.x + PAD, self.pos.y + HEAD_H + PAD + i as f32 * ITEM_H + sep, W - PAD * 2.0, ITEM_H)
     }
 
@@ -117,8 +126,8 @@ impl ContextMenu {
             sp.contains(m) || bridge.contains(m)
         });
         if !over_sub {
-            if let Some(i) = (0..ITEMS.len()).find(|&i| self.item_rect(i).contains(m)) {
-                self.sub = ITEMS[i].has_sub().then_some(i);
+            if let Some(i) = (0..self.items.len()).find(|&i| self.item_rect(i).contains(m)) {
+                self.sub = self.items[i].has_sub().then_some(i);
             } else if self.panel().contains(m) {
                 self.sub = None;
             }
@@ -135,18 +144,23 @@ impl ContextMenu {
                 if let Some(i) = self.sub {
                     for (j, (_, k)) in SCALES.iter().enumerate() {
                         if self.sub_rect(i, j).contains(m) {
-                            let cmd =
-                                if ITEMS[i] == Item::Resize { ObjectCmd::Resize(*k) } else { ObjectCmd::SizeAll(*k) };
+                            let cmd = if self.items[i] == Item::Resize {
+                                ObjectCmd::Resize(*k)
+                            } else {
+                                ObjectCmd::SizeAll(*k)
+                            };
                             actions.push(Action::Object(cmd, target));
                             self.close();
                             return;
                         }
                     }
                 }
-                if let Some(i) = (0..ITEMS.len()).find(|&i| self.item_rect(i).contains(m)) {
-                    let cmd = match ITEMS[i] {
+                if let Some(i) = (0..self.items.len()).find(|&i| self.item_rect(i).contains(m)) {
+                    let cmd = match self.items[i] {
                         Item::Duplicate => Some(ObjectCmd::Duplicate),
                         Item::Pin => Some(ObjectCmd::TogglePin),
+                        Item::Properties => Some(ObjectCmd::Properties),
+                        Item::Unlink => Some(ObjectCmd::Unlink),
                         Item::Delete => Some(ObjectCmd::Delete),
                         _ => None,
                     };
@@ -176,7 +190,7 @@ impl ContextMenu {
         text_bold(&self.title, p.x + 12.0, baseline(p.y + HEAD_H / 2.0 + 4.0, 12.0), 12.0, fade(TEXT_MUTED, f));
         draw_line(p.x + 8.0, p.y + HEAD_H + 2.0, p.x + p.w - 8.0, p.y + HEAD_H + 2.0, 1.0, fade(BORDER, f));
 
-        for (i, &item) in ITEMS.iter().enumerate() {
+        for (i, &item) in self.items.iter().enumerate() {
             let r = self.item_rect(i);
             let hov = r.contains(mouse) || self.sub == Some(i);
             if item == Item::Delete {

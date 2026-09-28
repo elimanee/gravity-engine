@@ -17,6 +17,20 @@ pub enum Tool {
     Orbit,
     Bomb,
     Swing,
+    Draw,
+    Link,
+}
+
+/// What the bottom-left tool card shows for a tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Card {
+    None,
+    /// Radius and strength.
+    Area,
+    /// Thickness, colour and pinning.
+    Draw,
+    /// Rope / spring / hinge.
+    Link,
 }
 
 /// Field forces are expressed as accelerations for an object of this mass, so
@@ -34,7 +48,26 @@ impl Tool {
         Tool::Orbit,
         Tool::Bomb,
         Tool::Swing,
+        Tool::Draw,
+        Tool::Link,
     ];
+
+    /// Keyboard shortcut.
+    pub fn key(self) -> &'static str {
+        match self {
+            Tool::Spring => "1",
+            Tool::Slingshot => "2",
+            Tool::Pull => "3",
+            Tool::Push => "4",
+            Tool::Vortex => "5",
+            Tool::Freeze => "6",
+            Tool::Orbit => "7",
+            Tool::Bomb => "8",
+            Tool::Swing => "9",
+            Tool::Draw => "0",
+            Tool::Link => "J",
+        }
+    }
 
     pub fn label(self) -> &'static str {
         match self {
@@ -47,6 +80,8 @@ impl Tool {
             Tool::Orbit => "Orbit",
             Tool::Bomb => "Bomb",
             Tool::Swing => "Swing",
+            Tool::Draw => "Draw",
+            Tool::Link => "Link",
         }
     }
 
@@ -61,6 +96,8 @@ impl Tool {
             Tool::Orbit => "Make objects circle the cursor",
             Tool::Bomb => "Click to detonate",
             Tool::Swing => "Hold by a point, throw it spinning",
+            Tool::Draw => "Draw shapes and planks",
+            Tool::Link => "Ropes, springs and hinges",
         }
     }
 
@@ -75,6 +112,8 @@ impl Tool {
             Tool::Orbit => (255, 190, 90),
             Tool::Bomb => (255, 96, 48),
             Tool::Swing => (170, 236, 90),
+            Tool::Draw => (255, 140, 190),
+            Tool::Link => (226, 190, 140),
         };
         Color::from_rgba(r, g, b, 255)
     }
@@ -87,6 +126,15 @@ impl Tool {
     /// Tools that expose radius / strength settings.
     pub fn has_settings(self) -> bool {
         self.is_field() || self == Tool::Bomb
+    }
+
+    pub fn card(self) -> Card {
+        match self {
+            _ if self.has_settings() => Card::Area,
+            Tool::Draw => Card::Draw,
+            Tool::Link => Card::Link,
+            _ => Card::None,
+        }
     }
 }
 

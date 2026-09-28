@@ -45,14 +45,16 @@ pub const PLAYLIST_EXT: &[&str] = &["pls"];
 pub const SCENE_EXT: &str = "gscene";
 
 fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from)
 }
 
-/// `$XDG_CONFIG_HOME/gravity_engine` (falls back to `~/.config/gravity_engine`).
+/// `$XDG_CONFIG_HOME/gravity_engine` (falls back to `~/.config/gravity_engine`,
+/// or `%APPDATA%\gravity_engine` on Windows).
 pub fn config_dir() -> Option<PathBuf> {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
+    let env_dir = |var: &str| std::env::var_os(var).map(PathBuf::from).filter(|p| p.is_absolute());
+    let platform = if cfg!(windows) { env_dir("APPDATA") } else { None };
+    env_dir("XDG_CONFIG_HOME")
+        .or(platform)
         .or_else(|| home().map(|h| h.join(".config")))
         .map(|p| p.join("gravity_engine"))
 }

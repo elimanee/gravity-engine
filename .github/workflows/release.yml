@@ -1,7 +1,7 @@
 name: Release
 
-# Publishes a GitHub release with a Linux binary. Either push a tag
-# (`git tag v2.0.0 && git push origin v2.0.0`) or run this workflow manually
+# Publishes a GitHub release with Linux and Windows builds. Either push a tag
+# (`git tag v2.2.0 && git push origin v2.2.0`) or run this workflow manually
 # from the Actions tab with the tag to create. The release description is the
 # matching section of CHANGELOG.md.
 
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release, e.g. v2.0.0 (created on the selected branch if missing)"
+        description: "Tag to release, e.g. v2.2.0 (created on the selected branch if missing)"
         required: true
 
 permissions:
@@ -19,12 +19,11 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
 
 jobs:
-  release:
+  linux:
     runs-on: ubuntu-latest
-    env:
-      TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -33,18 +32,6 @@ jobs:
           version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)
           if [ "v$version" != "$TAG" ]; then
             echo "::error::Tag $TAG does not match Cargo.toml version $version"
-            exit 1
-          fi
-
-      - name: Extract release notes
-        run: |
-          version="${TAG#v}"
-          awk -v v="$version" '
-            /^## \[/ { if (found) exit; if (index($0, "## [" v "]") == 1) { found = 1; next } }
-            found { print }
-          ' CHANGELOG.md > notes.md
-          if [ ! -s notes.md ]; then
-            echo "::error::No section for $version in CHANGELOG.md"
             exit 1
           fi
 
@@ -62,13 +49,81 @@ jobs:
         run: cargo test --locked
 
       - name: Build
+        run: |
+          cargo build --release --locked
+          mkdir dist
+          cp target/release/gravity_engine dist/gravity_engine-linux-x86_64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-libopenmpt-x64-windows-v1
+
+      - name: Install libopenmpt
+        shell: pwsh
+        run: .github/scripts/openmpt-windows.ps1
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build
         run: cargo build --release --locked
 
       - name: Package
+        shell: pwsh
         run: |
-          mkdir dist
-          cp target/release/gravity_engine dist/gravity_engine-linux-x86_64
-          cd dist && sha256sum gravity_engine-linux-x86_64 > SHA256SUMS
+          $pkg = "gravity_engine-windows-x86_64"
+          New-Item -ItemType Directory -Force -Path $pkg, dist | Out-Null
+          Copy-Item target\release\gravity_engine.exe $pkg\
+          Copy-Item "$env:OPENMPT_BIN_DIR\*.dll" $pkg\
+          Copy-Item README.md, CHANGELOG.md $pkg\
+          Compress-Archive -Path $pkg -DestinationPath "dist\$pkg.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+
+  publish:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract release notes
+        run: |
+          version="${TAG#v}"
+          awk -v v="$version" '
+            /^## \[/ { if (found) exit; if (index($0, "## [" v "]") == 1) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::No section for $version in CHANGELOG.md"
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
 
       - name: Publish release
         env:

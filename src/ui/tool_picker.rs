@@ -1,12 +1,12 @@
-//! Modal grid for choosing the interaction tool (Tab, or keys 1–9).
+//! Modal grid for choosing the interaction tool (Tab, or keys 1–9, 0, J).
 
 use super::theme::*;
 use super::{icons, Action, Fader, Input};
 use crate::physics::tools::Tool;
 use macroquad::prelude::*;
 
-const COLS: usize = 3;
-const CELL_W: f32 = 172.0;
+const COLS: usize = 4;
+const CELL_W: f32 = 178.0;
 const CELL_H: f32 = 118.0;
 const GAP: f32 = 10.0;
 const PAD: f32 = 18.0;
@@ -67,7 +67,7 @@ impl ToolPicker {
         let p = Rect::new(p.x, p.y + lift, p.w, p.h);
         panel(p, f);
         text_bold("Choose a tool", p.x + PAD, p.y + PAD + 12.0, 17.0, fade(TEXT, f));
-        let hint = "1–9 to pick · Tab to close";
+        let hint = "1–9, 0, J to pick · Tab to close";
         text(hint, p.x + p.w - PAD - measure(hint, 12.0), p.y + PAD + 12.0, 12.0, fade(TEXT_MUTED, f));
 
         let t = get_time() as f32;
@@ -104,7 +104,7 @@ impl ToolPicker {
             icons::tool(tool, vec2(r.x + r.w / 2.0, r.y + 36.0), 40.0, fade(accent, f), icon_t);
             text_bold_centered(tool.label(), r.x + r.w / 2.0, r.y + 76.0, 15.0, fade(TEXT, f));
             text_centered(tool.description(), r.x + r.w / 2.0, r.y + 97.0, 11.0, fade(TEXT_MUTED, f));
-            keycap(r.x + 8.0, r.y + 16.0, &(i + 1).to_string(), 10.0, f * 0.9);
+            keycap(r.x + 8.0, r.y + 16.0, tool.key(), 10.0, f * 0.9);
         }
     }
 }

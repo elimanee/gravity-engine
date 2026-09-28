@@ -2,6 +2,7 @@
 
 use crate::background::BgMode;
 use crate::physics::borders::BorderMode;
+use crate::physics::links::LinkKind;
 use crate::physics::tools::Tool;
 use crate::shapes::Shape;
 use crate::ui::visualizer::VisStyle;
@@ -43,6 +44,18 @@ pub struct Settings {
     pub spawn_color: usize,
     pub spawn_size: f32,
 
+    /// Draw tool stroke thickness (px).
+    pub draw_thickness: f32,
+    /// Drawings are pinned in place (Shift inverts).
+    pub draw_pinned: bool,
+    pub link_kind: LinkKind,
+
+    pub water: bool,
+    /// Water surface height, 0 (floor) ‥ 1 (ceiling).
+    pub water_level: f32,
+    /// Water density relative to the default object density.
+    pub water_density: f32,
+
     pub show_title: bool,
 }
 
@@ -70,6 +83,12 @@ impl Default for Settings {
             spawn_shape: Shape::Circle,
             spawn_color: 0,
             spawn_size: 80.0,
+            draw_thickness: 14.0,
+            draw_pinned: false,
+            link_kind: LinkKind::Rope,
+            water: false,
+            water_level: 0.3,
+            water_density: 1.6,
             show_title: true,
         }
     }
@@ -84,6 +103,9 @@ pub const GRAVITY_RANGE: (f32, f32) = (-40.0, 20.0);
 pub const TIME_SCALE_RANGE: (f32, f32) = (0.1, 2.0);
 pub const SPAWN_SIZE_RANGE: (f32, f32) = (24.0, 200.0);
 pub const VIS_GAIN_RANGE: (f32, f32) = (0.3, 5.0);
+pub const DRAW_THICKNESS_RANGE: (f32, f32) = (4.0, 48.0);
+pub const WATER_LEVEL_RANGE: (f32, f32) = (0.05, 0.9);
+pub const WATER_DENSITY_RANGE: (f32, f32) = (0.3, 4.0);
 
 impl Settings {
     fn path() -> Option<std::path::PathBuf> {
@@ -125,6 +147,9 @@ impl Settings {
         }
         self.spawn_size = clamp(self.spawn_size, SPAWN_SIZE_RANGE, d.spawn_size);
         self.spawn_color = self.spawn_color.min(crate::shapes::PALETTE.len());
+        self.draw_thickness = clamp(self.draw_thickness, DRAW_THICKNESS_RANGE, d.draw_thickness);
+        self.water_level = clamp(self.water_level, WATER_LEVEL_RANGE, d.water_level);
+        self.water_density = clamp(self.water_density, WATER_DENSITY_RANGE, d.water_density);
         self
     }
 }
