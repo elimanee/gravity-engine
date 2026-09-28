@@ -9,6 +9,7 @@ use rapier2d::prelude::*;
 pub struct DebugStats {
     pub paused: bool,
     pub time_scale: f32,
+    pub zoom: f32,
 }
 
 fn draw_shape(shape: &dyn Shape, iso: &Isometry<f32>, color: Color) {
@@ -47,8 +48,8 @@ fn draw_shape(shape: &dyn Shape, iso: &Isometry<f32>, color: Color) {
     }
 }
 
-pub fn draw(world: &PhysWorld, objects: &[Object], stats: &DebugStats, mouse: Vec2, top: f32) {
-    // Collider outlines + centre of mass.
+/// Collider outlines, centres of mass and velocities (in world pixels).
+pub fn draw_world(world: &PhysWorld, objects: &[Object]) {
     for o in objects {
         let (Some(col), Some(body)) = (world.colliders.get(o.collider), world.bodies.get(o.body)) else { continue };
         let color = if !body.is_dynamic() {
@@ -66,13 +67,21 @@ pub fn draw(world: &PhysWorld, objects: &[Object], stats: &DebugStats, mouse: Ve
         let tip = to_screen(com.x + v.x * 0.15, com.y + v.y * 0.15);
         draw_line(c.x, c.y, tip.x, tip.y, 1.0, alpha(ACCENT_HI, 0.7));
     }
+}
 
+/// Stats panel; `mouse` is in world pixels.
+pub fn draw_panel(world: &PhysWorld, objects: &[Object], stats: &DebugStats, mouse: Vec2, top: f32) {
     let sleeping = objects.iter().filter(|o| world.bodies.get(o.body).is_some_and(|b| b.is_sleeping())).count();
     let mut lines = vec![
         format!("FPS {}   frame {:.1} ms", get_fps(), get_frame_time() * 1000.0),
         format!("objects {}   sleeping {}", objects.len(), sleeping),
         format!("bodies {}   colliders {}", world.bodies.len(), world.colliders.len()),
-        format!("gravity {:+.2} m/s²   time ×{:.2}", world.gravity.y, stats.time_scale),
+        format!(
+            "gravity {:+.2} m/s²   time ×{:.2}   zoom {:.0}%",
+            world.gravity.y,
+            stats.time_scale,
+            stats.zoom * 100.0
+        ),
         format!("border {}   {}", world.border.label(), if stats.paused { "PAUSED" } else { "running" }),
     ];
     if let Some(i) = object_at(objects, world, mouse.x, mouse.y) {

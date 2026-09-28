@@ -63,12 +63,26 @@ pub struct Settings {
     pub effects: bool,
     /// Ids of the challenges already solved.
     pub challenges_done: Vec<String>,
+    /// Best stars (1‥3) per challenge id.
+    pub challenge_stars: std::collections::BTreeMap<String, u8>,
 
     pub water: bool,
     /// Water surface height, 0 (floor) ‥ 1 (ceiling).
     pub water_level: f32,
     /// Water density relative to the default object density.
     pub water_density: f32,
+
+    /// World size as a multiple of the window (1‥3).
+    pub world_size: u8,
+
+    /// What the Pour tool pours.
+    pub grain_kind: crate::physics::grains::GrainKind,
+
+    /// Procedural sound effects (hits, breaking glass, explosions…).
+    pub sfx: bool,
+    pub sfx_volume: f32,
+    /// Time slows down for a moment on big impacts and explosions.
+    pub slow_motion: bool,
 
     pub show_title: bool,
 }
@@ -106,9 +120,15 @@ impl Default for Settings {
             zone_strength: 14.0,
             effects: true,
             challenges_done: vec![],
+            challenge_stars: Default::default(),
             water: false,
             water_level: 0.3,
             water_density: 1.6,
+            world_size: 1,
+            grain_kind: Default::default(),
+            sfx: true,
+            sfx_volume: 0.6,
+            slow_motion: true,
             show_title: true,
         }
     }
@@ -163,6 +183,7 @@ impl Settings {
         self.trail_fade = clamp(self.trail_fade, TRAIL_FADE_RANGE, d.trail_fade);
         self.shake_force = clamp(self.shake_force, SHAKE_RANGE, d.shake_force);
         self.volume = clamp(self.volume, (0.0, 1.0), d.volume);
+        self.sfx_volume = clamp(self.sfx_volume, (0.0, 1.0), d.sfx_volume);
         self.vis_gain = clamp(self.vis_gain, VIS_GAIN_RANGE, d.vis_gain);
         if self.vis_object == VisStyle::Off {
             self.vis_object = VisStyle::Bars;
@@ -173,6 +194,7 @@ impl Settings {
         self.water_level = clamp(self.water_level, WATER_LEVEL_RANGE, d.water_level);
         self.water_density = clamp(self.water_density, WATER_DENSITY_RANGE, d.water_density);
         self.motor_speed = clamp(self.motor_speed, MOTOR_SPEED_RANGE, d.motor_speed);
+        self.world_size = self.world_size.clamp(1, 3);
         self.zone_strength = clamp(self.zone_strength, ZONE_STRENGTH_RANGE, d.zone_strength);
         self.zone_angle =
             if self.zone_angle.is_finite() { (self.zone_angle / 90.0).round().rem_euclid(4.0) * 90.0 } else { 0.0 };

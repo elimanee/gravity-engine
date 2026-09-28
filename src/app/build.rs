@@ -91,6 +91,8 @@ impl App {
         let speed = if kind == LinkKind::Motor { self.s.motor_speed } else { 0.0 };
         if let Some(l) = Link::new(&mut self.world, kind, a, b, pa, pb, speed) {
             self.links.push(l);
+            let p = crate::physics::to_screen(pa.x, pa.y);
+            self.sound(crate::audio::sfx::Sound::Snap, p, 0.6);
             let hint = if b.is_none() { " to the background" } else { "" };
             self.toasts.status("link", format!("{} added{hint}  ·  right-click it to remove", kind.label()));
         }

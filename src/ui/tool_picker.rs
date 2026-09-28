@@ -1,4 +1,4 @@
-//! Modal grid for choosing the interaction tool (Tab, or keys 1–9, 0, J, Z).
+//! Modal grid for choosing the interaction tool (Tab, or keys 1–9, 0, J, Z, S, K).
 
 use super::theme::*;
 use super::{icons, Action, Fader, Input};
@@ -67,7 +67,7 @@ impl ToolPicker {
         let p = Rect::new(p.x, p.y + lift, p.w, p.h);
         panel(p, f);
         text_bold("Choose a tool", p.x + PAD, p.y + PAD + 12.0, 17.0, fade(TEXT, f));
-        let hint = "1–9, 0, J, Z to pick · Tab to close";
+        let hint = "1–9, 0, J, Z, S, K to pick · Tab to close";
         text(hint, p.x + p.w - PAD - measure(hint, 12.0), p.y + PAD + 12.0, 12.0, fade(TEXT_MUTED, f));
 
         let t = get_time() as f32;

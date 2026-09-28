@@ -43,6 +43,7 @@ pub const TRACKER_EXT: &[&str] = &["mod", "xm", "it", "s3m", "mptm", "mo3", "okt
 pub const AUDIO_EXT: &[&str] = &["mp3", "flac", "wav", "ogg", "opus", "aac", "m4a"];
 pub const PLAYLIST_EXT: &[&str] = &["pls"];
 pub const SCENE_EXT: &str = "gscene";
+pub const CHALLENGE_EXT: &str = "gchallenge";
 
 fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from)
@@ -71,6 +72,11 @@ pub fn screenshot_dir() -> Option<PathBuf> {
 /// Default folder for scene files.
 pub fn scene_dir() -> Option<PathBuf> {
     config_dir().map(|c| c.join("scenes"))
+}
+
+/// Folder for challenges made in the editor.
+pub fn challenge_dir() -> Option<PathBuf> {
+    config_dir().map(|c| c.join("challenges"))
 }
 
 /// Lower-case extension of a path-like string.

@@ -3,10 +3,12 @@
 //! back to it. Snapshots share textures with the live objects, so they are
 //! cheap to take and restore without decoding anything again.
 
+use crate::config::PPM;
 use crate::physics::links::{Link, LinkSpec};
 use crate::physics::object::{Object, Placement, Source, Visual};
 use crate::physics::zones::Zone;
 use crate::physics::PhysWorld;
+use macroquad::prelude::Vec2;
 use rapier2d::prelude::*;
 use std::collections::HashMap;
 
@@ -41,6 +43,18 @@ pub struct Restored {
 
 impl Snapshot {
     pub fn capture(world: &PhysWorld, objects: &[Object], links: &[Link], zones: &[Zone]) -> Self {
+        let all: Vec<&Object> = objects.iter().collect();
+        Self::capture_refs(world, &all, links, zones)
+    }
+
+    /// Only the objects at `pick` and the links between them (or to the
+    /// background), e.g. for copy and paste.
+    pub fn capture_some(world: &PhysWorld, objects: &[Object], pick: &[usize], links: &[Link]) -> Self {
+        let some: Vec<&Object> = pick.iter().filter_map(|&i| objects.get(i)).collect();
+        Self::capture_refs(world, &some, links, &[])
+    }
+
+    fn capture_refs(world: &PhysWorld, objects: &[&Object], links: &[Link], zones: &[Zone]) -> Self {
         let index: HashMap<RigidBodyHandle, usize> = objects.iter().enumerate().map(|(i, o)| (o.body, i)).collect();
         Snapshot {
             objects: objects
@@ -66,17 +80,40 @@ impl Snapshot {
 
     /// Spawn the snapshot's objects and links into `world` (which should be empty of objects).
     pub fn restore(&self, world: &mut PhysWorld) -> Restored {
+        self.restore_offset(world, Vec2::ZERO)
+    }
+
+    /// Mean position of the objects (world px).
+    pub fn centre(&self) -> Vec2 {
+        let n = self.objects.len().max(1) as f32;
+        self.objects.iter().map(|o| Vec2::from(o.placement.pos_px)).sum::<Vec2>() / n
+    }
+
+    /// Spawn the snapshot moved by `offset` (world px), at rest.
+    pub fn restore_offset(&self, world: &mut PhysWorld, offset: Vec2) -> Restored {
+        let moved = offset != Vec2::ZERO;
         let objects: Vec<Object> = self
             .objects
             .iter()
-            .map(|s| Object::spawn(world, s.source.clone(), s.visual.clone(), s.placement))
+            .map(|s| {
+                let mut at = s.placement;
+                if moved {
+                    at.pos_px = (at.pos_px.0 + offset.x, at.pos_px.1 + offset.y);
+                    at.linvel = (0.0, 0.0);
+                    at.angvel = 0.0;
+                }
+                Object::spawn(world, s.source.clone(), s.visual.clone(), at)
+            })
             .collect();
+        let shift = vector![offset.x / PPM, -offset.y / PPM];
         let links = self
             .links
             .iter()
             .map(|l| {
-                let spec = LinkSpec { a: objects[l.a].body, b: l.b.map(|i| objects[i].body), ..l.spec };
-                Link::restore(world, spec)
+                let b = l.b.map(|i| objects[i].body);
+                // Background anchors are world points: move them along.
+                let lb = if b.is_none() { l.spec.lb + shift } else { l.spec.lb };
+                Link::restore(world, LinkSpec { a: objects[l.a].body, b, lb, ..l.spec })
             })
             .collect();
         Restored { objects, links, zones: self.zones.clone() }

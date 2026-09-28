@@ -20,6 +20,8 @@ pub enum Tool {
     Draw,
     Link,
     Zone,
+    Select,
+    Pour,
 }
 
 /// What the bottom-left tool card shows for a tool.
@@ -34,6 +36,10 @@ pub enum Card {
     Link,
     /// Wind / float / portal.
     Zone,
+    /// Selection count and actions.
+    Select,
+    /// Sand / liquid / beads.
+    Pour,
 }
 
 /// Field forces are expressed as accelerations for an object of this mass, so
@@ -54,6 +60,8 @@ impl Tool {
         Tool::Draw,
         Tool::Link,
         Tool::Zone,
+        Tool::Select,
+        Tool::Pour,
     ];
 
     /// Keyboard shortcut.
@@ -71,6 +79,8 @@ impl Tool {
             Tool::Draw => "0",
             Tool::Link => "J",
             Tool::Zone => "Z",
+            Tool::Select => "S",
+            Tool::Pour => "K",
         }
     }
 
@@ -88,6 +98,8 @@ impl Tool {
             Tool::Draw => "Draw",
             Tool::Link => "Link",
             Tool::Zone => "Zone",
+            Tool::Select => "Select",
+            Tool::Pour => "Pour",
         }
     }
 
@@ -103,8 +115,10 @@ impl Tool {
             Tool::Bomb => "Click to detonate",
             Tool::Swing => "Hold by a point, throw it spinning",
             Tool::Draw => "Draw shapes and planks",
-            Tool::Link => "Ropes, springs, hinges, motors",
+            Tool::Link => "Ropes, springs, motors, glue",
             Tool::Zone => "Wind, float and portal areas",
+            Tool::Select => "Select, move, copy and glue",
+            Tool::Pour => "Pour sand, liquid and beads",
         }
     }
 
@@ -122,6 +136,8 @@ impl Tool {
             Tool::Draw => (255, 140, 190),
             Tool::Link => (226, 190, 140),
             Tool::Zone => (120, 210, 255),
+            Tool::Select => (235, 235, 245),
+            Tool::Pour => (232, 196, 120),
         };
         Color::from_rgba(r, g, b, 255)
     }
@@ -142,6 +158,8 @@ impl Tool {
             Tool::Draw => Card::Draw,
             Tool::Link => Card::Link,
             Tool::Zone => Card::Zone,
+            Tool::Select => Card::Select,
+            Tool::Pour => Card::Pour,
             _ => Card::None,
         }
     }

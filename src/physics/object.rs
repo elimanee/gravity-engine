@@ -190,6 +190,10 @@ impl Material {
 /// Impact reporting, conveyor behaviour and physical coefficients of a collider.
 fn configure(c: &mut Collider, m: &Material, mass: f32) {
     c.set_restitution(m.bounce);
+    // Rubber and bouncier: the bouncy side wins, so a trampoline bounces
+    // whatever lands on it (the default averages both sides).
+    let rule = if m.bounce >= 0.9 { CoefficientCombineRule::Max } else { CoefficientCombineRule::Average };
+    c.set_restitution_combine_rule(rule);
     c.set_friction(m.friction);
     c.set_active_events(ActiveEvents::CONTACT_FORCE_EVENTS);
     c.set_contact_force_event_threshold(mass.max(1e-3) * super::events::IMPACT_ACCEL);

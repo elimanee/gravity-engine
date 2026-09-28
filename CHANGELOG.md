@@ -4,6 +4,28 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [2.4.0]
+
+### Added
+- **Challenge editor** (`Shift+E`, or Library → *My challenges* → *New challenge*): turn any scene into a level. Place the golden ball and the goal, set the ink, build the course with every tool, then *Test* it — a level can only be saved once you have solved it. Saved levels are `.gchallenge` files in `~/.config/gravity_engine/challenges/`; share them, drop them on the window or open them with `Ctrl+O`
+- **Ten new challenges** (fifteen in all): Funnel, Bouncer, Tailwind, Lift, Smash, Keyhole, Wrong way, Splash, Wormhole and Stop sign
+- **Stars**: ★★★ for solving a challenge with half the ink or less, ★★ up to 80 %, ★ otherwise. Your best score is shown in the library
+- **Sound effects**, synthesised on the fly: hits that depend on size and bounciness, breaking glass, explosions, pops, snaps and a fanfare when you win. Volume and on/off in the settings (*Audio*)
+- **Slow motion** for a moment when something shatters, a bomb goes off or two objects hit very hard (can be turned off in *Effects*)
+- **Camera**: zoom with `Ctrl`+wheel (at the pointer) or `+` / `-`, `Home` to fit, pan with the middle mouse button. *World size* in the settings makes the arena up to three times the window
+- **Select tool** (`S`): click, `Shift`+click or drag a box to select objects, then move them together, duplicate (`Ctrl+D`), copy and paste (`Ctrl+C` / `Ctrl+V`, at the pointer), pin, delete, or **glue** them into one rigid group (`Ctrl+G`). `Ctrl+A` selects everything
+- **Glue** links (Link tool → Glue) weld two objects together
+- **Pour tool** (`K`): hold to pour **sand** that piles up, a **liquid** that flows and levels out, or bouncy **beads** — up to 1600 grains, pushed by the tools, wind, float zones and portals. Right-drag erases, the tool card clears them all
+
+### Changed
+- Bouncy materials (*Rubber*, bounce ≥ 0.9) now make whatever hits them bounce, like a trampoline
+- 14 tools; the tool picker is a 4 × 4 grid
+- `Ctrl+O` opens scenes and challenges
+
+### Downloads
+- `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
+- `gravity_engine-windows-x86_64.zip` — Windows build: unzip and run `gravity_engine.exe` (keep the DLLs next to it)
+
 ## [2.3.0]
 
 ### Added

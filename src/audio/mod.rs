@@ -2,6 +2,7 @@
 //! playlists.
 
 pub mod analyzer;
+pub mod sfx;
 mod stream;
 mod tracker;
 
@@ -25,6 +26,8 @@ pub struct Audio {
     stream: Option<StreamPlayer>,
     volume: f32,
     tap: Arc<Tap>,
+    /// Sound effects, on their own output stream (None without a device).
+    sfx: Option<sfx::Sfx>,
     /// Live analysis of what is playing, for the visualizer.
     pub analyzer: Analyzer,
 }
@@ -37,6 +40,7 @@ impl Audio {
             stream: StreamPlayer::new(tap.clone()),
             volume: -1.0,
             tap,
+            sfx: sfx::Sfx::new(),
             analyzer: Analyzer::default(),
         };
         a.set_volume(volume);
@@ -100,6 +104,13 @@ impl Audio {
         self.tracker.set_volume(v);
         if let Some(s) = self.stream.as_mut() {
             s.set_volume(v);
+        }
+    }
+
+    /// Play a sound effect (see [`sfx::Sfx::play`]).
+    pub fn play_sfx(&mut self, now: f64, sound: sfx::Sound, volume: f32, pan: f32, pitch: f32) {
+        if let Some(s) = self.sfx.as_mut() {
+            s.play(now, sound, volume, pan, pitch);
         }
     }
 
