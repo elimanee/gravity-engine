@@ -14,6 +14,7 @@ pub mod icons;
 pub mod inspector;
 pub mod library;
 pub mod now_playing;
+pub mod skin_player;
 pub mod spawner;
 pub mod theme;
 pub mod title;
@@ -132,6 +133,13 @@ pub enum Action {
     StartCustom(usize),
     CycleWorldSize(i32),
     Selection(SelectionCmd),
+    /// Show / hide the classic player window.
+    TogglePlayer,
+    Player(PlayerCmd),
+    /// Next / previous installed skin (the built-in look included).
+    CycleSkin(i32),
+    /// Pick a .wsz skin file.
+    LoadSkin,
     OpenLibrary,
     LoadExample(usize),
     StartChallenge(usize),
@@ -140,6 +148,23 @@ pub enum Action {
     ChallengeNext,
     ChallengeExit,
     Object(ObjectCmd, RigidBodyHandle),
+}
+
+/// Classic player window commands.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PlayerCmd {
+    Previous,
+    Play,
+    Pause,
+    Stop,
+    Next,
+    /// Load music.
+    Eject,
+    Close,
+    DoubleSize,
+    /// Jump to this fraction of the song.
+    Seek(f32),
+    Volume(f32),
 }
 
 /// Challenge editor commands.

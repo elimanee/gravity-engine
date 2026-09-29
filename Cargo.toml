@@ -1,6 +1,6 @@
 [package]
 name        = "gravity_engine"
-version     = "2.4.0"
+version     = "2.5.0"
 edition     = "2021"
 description = "A 2D physics sandbox: drop images, shapes and web buttons and watch them fly"
 readme      = "README.md"
@@ -28,6 +28,8 @@ cpal        = "0.15"   # cross-platform audio output
 ringbuf     = "0.3"    # lock-free ring buffer for the decode→playback pipe
 # Common audio playback (.mp3 / .flac / .wav / .ogg / …)
 rodio       = { version = "0.19", features = ["symphonia-all"] }
+# Song lengths (rodio 0.19 reports them wrongly); same version rodio uses
+symphonia   = { version = "0.5", default-features = false }
 # Synchronous HTTP for web fetchers and internet-radio streams
 ureq        = "2"
 # SVG rasteriser (includes usvg + tiny_skia as re-exports)
@@ -36,6 +38,8 @@ resvg       = "0.44"
 serde       = { version = "1", features = ["derive"] }
 serde_json  = "1"
 base64      = "0.22"
+# Winamp / Audacious skins (.wsz archives)
+zip         = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11  = { version = "2.21", features = ["xlib"] }

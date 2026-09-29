@@ -4,6 +4,20 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [2.5.0]
+
+### Added
+- **Classic player** (`X`): a Winamp-style player window that drives the built-in music player — previous / play / pause / stop / next / eject (load), elapsed time, scrolling title, spectrum analyzer, volume slider and a seek bar. Drag it by its title bar, double-click the title bar for normal or double size, and click × to hide it
+- **Winamp 2 / Audacious skins**: the player uses classic `.wsz` skins (BMP or PNG sprite sheets, `viscolor.txt`, and Audacious `skin.hints` layouts, including wider windows). Installed Audacious skins (`/usr/share/audacious/Skins`, `~/.local/share/audacious/Skins`), Winamp's `Skins` folder on Windows and `~/.config/gravity_engine/skins/` are found automatically; cycle them in the settings (*Audio → Skin*), pick a file with *Load a skin…*, or drop a `.wsz` on the window. Without any skin the player has a built-in look
+- Seeking in songs, next / previous track in playlists (next / previous pattern in tracker modules) and a stop button
+
+### Fixed
+- Song lengths are read from the file itself (the audio library reported them several seconds too long)
+
+### Downloads
+- `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
+- `gravity_engine-windows-x86_64.zip` — Windows build: unzip and run `gravity_engine.exe` (keep the DLLs next to it)
+
 ## [2.4.0]
 
 ### Added

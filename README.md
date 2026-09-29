@@ -4,13 +4,20 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
-![Version](https://img.shields.io/badge/version-2.4-8b78ff)
+![Version](https://img.shields.io/badge/version-2.5-8b78ff)
 
 ![Title screen](docs/screenshots/title.png)
 
 | Sandbox | Settings drawer (Space) | Tool picker (Tab) |
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
+
+## What's new in 2.5
+
+![Classic player with Audacious skins](docs/screenshots/player.png)
+
+- **Classic player** (`X`) — a Winamp-style window for the music player: transport buttons, time, scrolling title, spectrum, volume and seek bars. Double-click its title bar for double size.
+- **Winamp 2 / Audacious skins** — `.wsz` skins and Audacious skin folders (with their `skin.hints` layouts). Installed Audacious skins are found automatically; cycle them in *Settings → Audio → Skin*, or drop a `.wsz` on the window.
 
 ## What's new in 2.4
 
@@ -119,6 +126,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Trails** (`T`) — motion-blur ghost trail with length and fade settings
 - **Audio visualizer** — `V` cycles a spectrum layer behind the objects (Bars / Wave / Radial); `Shift+V` drops a visualizer *screen* that is a real physics object (throw it, pin it, resize it). Sensitivity and an optional "objects jump on the beat" mode live in the settings drawer
 - **Audio player** (`M`) — tracker modules (.mod/.xm/.it/.s3m/…), common formats (.mp3/.flac/.wav/.ogg/…), `.pls` playlists including HTTP radio streams
+- **Classic player** (`X`) — Winamp-style window with play / pause / stop / next / previous / seek / volume, skinned with Winamp 2 `.wsz` or Audacious skins (found automatically in Audacious's skin folders, `~/.config/gravity_engine/skins/`, or dropped on the window)
 - **Screenshots** (`F12`) and **GIF recording** (`F11`, up to 30 s) of the scene, without the interface
 - **Debug overlay** (`D`) — FPS, collider outlines, velocities and details of the object under the cursor
 
@@ -151,6 +159,7 @@ Press **F1** in the app for the full list.
 | `Shift+G` | Background from an image |
 | `W` / `T` / `H` | Toggle window shake / trails / water |
 | `M` / `P` | Load music / play-pause |
+| `X` | Classic player (Winamp / Audacious skins) |
 | `V` / `Shift+V` | Visualizer behind objects / spawn a visualizer screen |
 | `Ctrl+S` / `Ctrl+O` | Save a scene / open a scene or a challenge |
 | `F12` / `F11` | Screenshot / start or stop a GIF recording (scene only, without UI) |
@@ -173,7 +182,7 @@ sudo apt install pkg-config libopenmpt-dev libasound2-dev libx11-dev libxi-dev \
 cargo run --release
 ```
 
-Command line: `gravity_engine [--no-title] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes or `.gchallenge` challenges.
+Command line: `gravity_engine [--no-title] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins.
 
 `gravity_engine --verify-challenges` plays every built-in challenge with its reference solution (and once without drawing) and reports whether each one is solvable within its ink — handy when designing levels.
 
@@ -194,6 +203,7 @@ Everything lives in `~/.config/gravity_engine/` (or `$XDG_CONFIG_HOME/gravity_en
 | `settings.json` | Your preferences, saved on exit. Set `"show_title": false` to skip the title screen. |
 | `scenes/` | Default folder for saved scenes |
 | `challenges/` | Challenges made in the editor (`.gchallenge`), listed in Library → *My challenges* |
+| `skins/` | Extra Winamp / Audacious skins (`.wsz` files or folders) for the classic player |
 | `sgdb_key` | SteamGridDB API key for the logo fetcher (or set `SGDB_API_KEY`) |
 
 Screenshots and GIFs go to `~/Pictures/gravity_engine/` (or `~/.config/gravity_engine/screenshots/` if you have no Pictures folder).
@@ -208,6 +218,7 @@ src/
 │                      motion, challenge mode, challenge editor and verifier
 ├── camera.rs          zoom / pan and the world ↔ screen mapping
 ├── config.rs          constants and paths          settings.rs   persisted preferences
+├── skin.rs            Winamp 2 / Audacious skins (.wsz, folders, skin.hints)
 ├── assets.rs          image / GIF / SVG decoding   shapes.rs     procedural shapes
 ├── scene.rs           .gscene save / load          background.rs animated backgrounds
 ├── drawing.rs         Draw-tool strokes → shapes   history.rs    undo / redo

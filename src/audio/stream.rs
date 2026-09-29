@@ -48,6 +48,29 @@ impl<S: Source<Item = f32>> Source for Tapped<S> {
     fn total_duration(&self) -> Option<Duration> {
         self.inner.total_duration()
     }
+    fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+        self.chunk.clear();
+        self.inner.try_seek(pos)
+    }
+}
+
+/// Length of a local audio file, from its container (rodio 0.19 gets the
+/// fractional part of `total_duration` wrong).
+fn probe_duration(path: &str) -> Option<Duration> {
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+    let file = std::fs::File::open(path).ok()?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    hint.with_extension(&crate::config::ext_of(path));
+    let probed = symphonia::default::get_probe()
+        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .ok()?;
+    let params = &probed.format.default_track()?.codec_params;
+    let (frames, rate) = (params.n_frames?, params.sample_rate?);
+    (rate > 0).then(|| Duration::from_secs_f64(frames as f64 / rate as f64))
 }
 
 /// Parse a .pls playlist. Relative paths are resolved against the playlist's
@@ -119,13 +142,24 @@ pub struct StreamInfo {
     pub fmt: String,
 }
 
+/// An entry queued in the sink.
+struct Track {
+    /// Index in the playlist.
+    index: usize,
+    name: String,
+    duration: Option<Duration>,
+}
+
 pub struct StreamPlayer {
     _stream: OutputStream,
     handle: OutputStreamHandle,
     sink: Option<Sink>,
     state: StreamInfo,
-    /// Non-empty when a playlist is loaded; re-queued when the sink drains.
+    /// Files or URLs being played; re-queued when the sink drains, so a
+    /// single file or a whole playlist loops.
     playlist: Vec<String>,
+    /// What the sink holds, in order.
+    tracks: Vec<Track>,
     volume: f32,
     tap: Arc<Tap>,
 }
@@ -139,65 +173,65 @@ impl StreamPlayer {
             sink: None,
             state: StreamInfo::default(),
             playlist: vec![],
+            tracks: vec![],
             volume: 1.0,
             tap,
         })
     }
 
-    fn new_sink(&mut self) -> Result<Sink, String> {
-        if let Some(s) = self.sink.take() {
-            s.stop();
-        }
-        let sink = Sink::try_new(&self.handle).map_err(|e| e.to_string())?;
-        sink.set_volume(self.volume);
-        Ok(sink)
-    }
-
     /// Play a single file, looping forever.
     pub fn load(&mut self, path: &str) -> Result<(), String> {
-        let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-        let decoder = Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?;
-        let sink = self.new_sink()?;
-        sink.append(Tapped::new(decoder.convert_samples::<f32>().repeat_infinite(), self.tap.clone()));
-        self.sink = Some(sink);
-        self.playlist.clear();
-        self.state = StreamInfo {
-            loaded: true,
-            playing: true,
-            name: crate::config::file_name_of(path),
-            fmt: crate::config::ext_of(path).to_uppercase(),
-        };
+        std::fs::metadata(path).map_err(|e| e.to_string())?;
+        self.load_playlist(vec![path.to_string()], crate::config::file_name_of(path))?;
+        self.state.fmt = crate::config::ext_of(path).to_uppercase();
         Ok(())
     }
 
     /// Queue every entry of a playlist; loops as a whole.
     pub fn load_playlist(&mut self, paths: Vec<String>, display_name: String) -> Result<usize, String> {
-        let sink = self.new_sink()?;
-        let mut n = 0usize;
-        for p in &paths {
-            let lower = p.to_ascii_lowercase();
-            if lower.starts_with("http://") || lower.starts_with("https://") {
-                match HttpStream::open(p).map(|s| Decoder::new(BufReader::new(s))) {
-                    Some(Ok(d)) => {
-                        sink.append(Tapped::new(d.convert_samples::<f32>(), self.tap.clone()));
-                        n += 1;
-                    }
-                    _ => eprintln!("stream failed: {p}"),
-                }
-            } else if let Ok(f) = std::fs::File::open(p) {
-                if let Ok(d) = Decoder::new(BufReader::new(f)) {
-                    sink.append(Tapped::new(d.convert_samples::<f32>(), self.tap.clone()));
-                    n += 1;
-                }
-            }
-        }
-        if n == 0 {
-            return Err("no playable entries".into());
-        }
-        self.sink = Some(sink);
         self.playlist = paths;
+        self.state = StreamInfo::default();
+        let n = self.queue_from(0)?;
         self.state = StreamInfo { loaded: true, playing: true, name: display_name, fmt: "PLS".into() };
         Ok(n)
+    }
+
+    /// Replace the sink with the playlist from entry `start` on.
+    fn queue_from(&mut self, start: usize) -> Result<usize, String> {
+        if let Some(s) = self.sink.take() {
+            s.stop();
+        }
+        let sink = Sink::try_new(&self.handle).map_err(|e| e.to_string())?;
+        sink.set_volume(self.volume);
+        self.tracks.clear();
+        for (index, p) in self.playlist.iter().enumerate().skip(start) {
+            let lower = p.to_ascii_lowercase();
+            type Boxed = Box<dyn Source<Item = f32> + Send>;
+            let decoder: Option<Result<Boxed, _>> = if lower.starts_with("http://") || lower.starts_with("https://") {
+                HttpStream::open(p)
+                    .map(|s| Decoder::new(BufReader::new(s)).map(|d| Box::new(d.convert_samples()) as Boxed))
+            } else {
+                std::fs::File::open(p)
+                    .ok()
+                    .map(|f| Decoder::new(BufReader::new(f)).map(|d| Box::new(d.convert_samples()) as Boxed))
+            };
+            match decoder {
+                Some(Ok(d)) => {
+                    let duration = probe_duration(p);
+                    sink.append(Tapped::new(d, self.tap.clone()));
+                    self.tracks.push(Track { index, name: crate::config::file_name_of(p), duration });
+                }
+                _ => eprintln!("stream failed: {p}"),
+            }
+        }
+        if self.tracks.is_empty() {
+            return Err("no playable entries".into());
+        }
+        if !self.state.playing && self.state.loaded {
+            sink.pause();
+        }
+        self.sink = Some(sink);
+        Ok(self.tracks.len())
     }
 
     /// Call once per frame: re-queues the playlist when the sink drains.
@@ -205,12 +239,56 @@ impl StreamPlayer {
         if self.playlist.is_empty() || !self.state.playing {
             return;
         }
-        if self.sink.as_ref().is_some_and(|s| s.empty()) {
-            let paths = self.playlist.clone();
-            let name = self.state.name.clone();
-            if self.load_playlist(paths, name).is_err() {
-                self.stop();
-            }
+        if self.sink.as_ref().is_some_and(|s| s.empty()) && self.queue_from(0).is_err() {
+            self.stop();
+        }
+    }
+
+    /// The track playing now.
+    fn current(&self) -> Option<&Track> {
+        let left = self.sink.as_ref()?.len();
+        self.tracks.get(self.tracks.len().checked_sub(left)?)
+    }
+
+    /// Seconds into the current track, and its length when known.
+    pub fn position(&self) -> Option<(f64, Option<f64>)> {
+        let sink = self.sink.as_ref()?;
+        let t = self.current()?;
+        Some((sink.get_pos().as_secs_f64(), t.duration.map(|d| d.as_secs_f64())))
+    }
+
+    /// Name of the current entry of a playlist (None for a single file).
+    pub fn track_name(&self) -> Option<String> {
+        (self.playlist.len() > 1).then(|| self.current().map(|t| t.name.clone())).flatten()
+    }
+
+    /// Jump to `frac` (0‥1) of the current track, when its length is known.
+    pub fn seek(&mut self, frac: f64) {
+        let Some((_, Some(len))) = self.position() else { return };
+        if let Some(s) = &self.sink {
+            s.try_seek(Duration::from_secs_f64((len * frac.clamp(0.0, 1.0)).min(len - 0.05).max(0.0))).ok();
+        }
+    }
+
+    pub fn next(&mut self) {
+        let Some(sink) = &self.sink else { return };
+        if sink.len() > 1 {
+            sink.skip_one();
+        } else {
+            self.queue_from(0).ok();
+        }
+    }
+
+    /// Back to the start of the track, or to the previous one when already
+    /// near its start.
+    pub fn previous(&mut self) {
+        let Some((pos, _)) = self.position() else { return };
+        let index = self.current().map_or(0, |t| t.index);
+        let restart = pos > 3.0 || index == 0;
+        let seeked = restart && self.sink.as_ref().is_some_and(|s| s.try_seek(Duration::ZERO).is_ok());
+        if !seeked {
+            let start = if restart { index } else { index - 1 };
+            self.queue_from(start).ok();
         }
     }
 
@@ -230,6 +308,7 @@ impl StreamPlayer {
             s.stop();
         }
         self.playlist.clear();
+        self.tracks.clear();
         self.state = StreamInfo::default();
     }
 
