@@ -33,6 +33,7 @@ enum ToggleId {
     Effects,
     Sfx,
     SlowMo,
+    Player,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -42,6 +43,7 @@ enum StepperId {
     VisBackground,
     VisObject,
     WorldSize,
+    Skin,
 }
 
 enum Row {
@@ -75,9 +77,13 @@ const EDIT_BUTTONS: &[(&str, Action)] = &[("Undo  (Ctrl+Z)", Action::Undo), ("Re
 const GIF_BUTTONS: &[(&str, Action)] = &[("Record / stop a GIF  (F11)", Action::ToggleRecording)];
 const LIBRARY_BUTTONS: &[(&str, Action)] = &[("Examples & challenges  (E)", Action::OpenLibrary)];
 
+const SKIN_BUTTONS: &[(&str, Action)] = &[("Load a skin…  (.wsz)", Action::LoadSkin)];
+
 #[derive(Default)]
 pub struct Drawer {
     pub fader: Fader,
+    /// Name of the classic player's skin (set by the app).
+    pub skin_name: String,
     scroll: f32,
     sliders: [SliderState; 10],
 }
@@ -164,8 +170,13 @@ impl Drawer {
             Row::Header("AUDIO"),
             Row::Slider(SliderId::Volume),
             Row::Buttons(AUDIO_BUTTONS),
-            Row::Toggle(ToggleId::Sfx),
+            Row::Toggle(ToggleId::Player),
         ]);
+        if s.player {
+            rows.push(Row::Stepper(StepperId::Skin));
+            rows.push(Row::Buttons(SKIN_BUTTONS));
+        }
+        rows.extend([Row::Toggle(ToggleId::Sfx)]);
         if s.sfx {
             rows.push(Row::Slider(SliderId::SfxVolume));
         }
@@ -263,6 +274,7 @@ impl Drawer {
                             ToggleId::Water => actions.push(Action::ToggleWater),
                             ToggleId::Effects => actions.push(Action::ToggleEffects),
                             ToggleId::Sfx => s.sfx = !s.sfx,
+                            ToggleId::Player => actions.push(Action::TogglePlayer),
                             ToggleId::SlowMo => s.slow_motion = !s.slow_motion,
                         }
                     }
@@ -277,6 +289,7 @@ impl Drawer {
                             StepperId::VisBackground => Action::CycleVisualizer(d),
                             StepperId::VisObject => Action::CycleVisualizerObject(d),
                             StepperId::WorldSize => Action::CycleWorldSize(d),
+                            StepperId::Skin => Action::CycleSkin(d),
                         });
                     }
                 }
@@ -336,6 +349,7 @@ impl Drawer {
                         ToggleId::Water => ("Water  (H)", s.water),
                         ToggleId::Effects => ("Sparks, dust and splashes", s.effects),
                         ToggleId::Sfx => ("Sound effects", s.sfx),
+                        ToggleId::Player => ("Classic player  (X)", s.player),
                         ToggleId::SlowMo => ("Slow motion on big hits", s.slow_motion),
                     };
                     draw_toggle_row(r, label, on, hov, f);
@@ -349,6 +363,10 @@ impl Drawer {
                         }
                         StepperId::VisBackground => {
                             draw_stepper(sr, "Behind objects  (V)", s.vis_background.label(), ACCENT_HI, mouse, f)
+                        }
+                        StepperId::Skin => {
+                            let name = crate::util::ellipsize(&self.skin_name, 18);
+                            draw_stepper(sr, "Skin", &name, ACCENT_HI, mouse, f)
                         }
                         StepperId::WorldSize => {
                             let v = format!("×{}", s.world_size);

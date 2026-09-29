@@ -32,6 +32,7 @@ use crate::ui::hud::{Hud, HudState};
 use crate::ui::inspector::{Inspector, Props};
 use crate::ui::library::{Library, LibraryData};
 use crate::ui::now_playing::NowPlayingPill;
+use crate::ui::skin_player::{PlayerView, SkinPlayer};
 use crate::ui::spawner::{spawn_color, Spawner};
 use crate::ui::title::{self, PixelOut};
 use crate::ui::toasts::Toasts;
@@ -51,6 +52,7 @@ mod editor;
 mod impacts;
 mod juice;
 mod library;
+mod player;
 mod select;
 mod verify;
 
@@ -141,6 +143,10 @@ pub struct App {
     challenge: Option<library::ChallengeRun>,
     editor: Option<editor::Editor>,
     editor_bar: EditorBar,
+    /// Classic player window and its skin (loaded when first shown).
+    player: SkinPlayer,
+    skin: Option<crate::skin::Skin>,
+    skin_tried: bool,
     /// "My challenges", read from the challenge folder.
     custom: Vec<(std::path::PathBuf, crate::library::custom::ChallengeFile)>,
     help: Help,
@@ -225,6 +231,9 @@ impl App {
             challenge: None,
             editor: None,
             editor_bar: EditorBar::default(),
+            player: SkinPlayer::default(),
+            skin: None,
+            skin_tried: false,
             custom: Vec::new(),
             help: Help::default(),
             toasts,
@@ -460,6 +469,9 @@ impl App {
         if pressed(KeyCode::H) {
             actions.push(Action::ToggleWater);
         }
+        if pressed(KeyCode::X) {
+            actions.push(Action::TogglePlayer);
+        }
         if pressed(KeyCode::F11) {
             actions.push(Action::ToggleRecording);
         }
@@ -568,13 +580,25 @@ impl App {
         }
         let np = self.audio.now_playing();
         self.now_playing.update(dt, np.as_ref(), self.paused, input, actions);
+        if self.s.player {
+            self.ensure_skin();
+            self.player.animate(dt, &self.audio.analyzer.bands);
+            let view = PlayerView {
+                skin: self.skin.as_ref(),
+                now: np.as_ref(),
+                volume: self.s.volume,
+                double: self.s.player_double,
+            };
+            self.player.update(&view, input, actions);
+        }
         let hud_state = self.hud_state();
         let grabbing = self.grab.is_some()
             || self.field_active
             || self.card.dragging()
             || self.inspector.dragging()
             || self.stroke.is_some()
-            || self.link_drag.is_some();
+            || self.link_drag.is_some()
+            || self.player.busy();
         let mut hud_actions = vec![];
         self.hud.update(dt, &hud_state, input, grabbing, &mut hud_actions);
         actions.extend(hud_actions);
@@ -951,6 +975,20 @@ impl App {
             Action::Undo => self.undo(false),
             Action::Redo => self.undo(true),
             Action::ToggleRecording => self.toggle_recording(),
+            Action::TogglePlayer => {
+                self.s.player = !self.s.player;
+                if self.s.player {
+                    self.ensure_skin();
+                    let skin = self.skin.as_ref().map_or("built-in look".to_string(), |s| format!("skin “{}”", s.name));
+                    self.toasts.status(
+                        "player",
+                        format!("Classic player ({skin})  ·  X hides it, drop a .wsz to change the skin"),
+                    );
+                }
+            }
+            Action::Player(cmd) => self.player_cmd(cmd),
+            Action::CycleSkin(d) => self.cycle_skin(d),
+            Action::LoadSkin => self.pick_skin(),
             Action::ClearGrains if self.grains.is_empty() => {
                 self.toasts.status("grains", "No grains to remove  ·  hold the mouse with the Pour tool (K)");
             }
@@ -1257,6 +1295,8 @@ impl App {
         let ext = ext_of(path);
         if ext == SCENE_EXT {
             self.load_scene(std::path::Path::new(path));
+        } else if ext == "wsz" {
+            self.use_skin(std::path::Path::new(path));
         } else if ext == config::CHALLENGE_EXT {
             self.open_challenge_file(std::path::Path::new(path));
         } else if Audio::is_audio_file(path) {
@@ -1657,6 +1697,15 @@ impl App {
         }
         let np = self.audio.now_playing();
         self.now_playing.draw(np.as_ref(), m);
+        if self.s.player {
+            let view = PlayerView {
+                skin: self.skin.as_ref(),
+                now: np.as_ref(),
+                volume: self.s.volume,
+                double: self.s.player_double,
+            };
+            self.player.draw(&view, m);
+        }
         self.spawner.draw(&self.s, m);
         self.drawer.draw(&self.s, top, m, np.is_some());
         self.hud.draw(&self.hud_state(), m);

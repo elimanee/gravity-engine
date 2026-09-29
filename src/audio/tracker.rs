@@ -8,11 +8,18 @@ use std::sync::mpsc::{Receiver, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex};
 
 enum Cmd {
-    Load { data: Vec<u8>, name: String },
+    Load {
+        data: Vec<u8>,
+        name: String,
+    },
     Pause,
     Resume,
     Stop,
     SetVolume(f32),
+    /// Jump to this many seconds.
+    Seek(f64),
+    /// Move this many orders (patterns) forward or back.
+    Order(i32),
 }
 
 #[derive(Clone, Default)]
@@ -25,6 +32,9 @@ pub struct TrackerInfo {
     pub name: String,
     pub order: i32,
     pub orders: i32,
+    /// Seconds played and song length.
+    pub position: f64,
+    pub duration: f64,
 }
 
 pub struct TrackerPlayer {
@@ -55,6 +65,14 @@ impl TrackerPlayer {
 
     pub fn stop(&self) {
         self.tx.send(Cmd::Stop).ok();
+    }
+
+    pub fn seek(&self, seconds: f64) {
+        self.tx.try_send(Cmd::Seek(seconds)).ok();
+    }
+
+    pub fn jump_orders(&self, delta: i32) {
+        self.tx.try_send(Cmd::Order(delta)).ok();
     }
 
     pub fn set_volume(&self, vol: f32) {
@@ -143,6 +161,7 @@ fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>, tap: Arc<Tap>)
                         let title = m.get_metadata(MetadataKey::ModuleTitle).unwrap_or_default();
                         let fmt = m.get_metadata(MetadataKey::TypeExt).unwrap_or_default().to_uppercase();
                         let orders = m.get_num_orders();
+                        let duration = m.get_duration_seconds();
                         set(&|i| {
                             *i = TrackerInfo {
                                 loaded: true,
@@ -152,6 +171,8 @@ fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>, tap: Arc<Tap>)
                                 name: name.clone(),
                                 order: 0,
                                 orders,
+                                position: 0.0,
+                                duration,
                             }
                         });
                         playing = true;
@@ -174,6 +195,18 @@ fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>, tap: Arc<Tap>)
                     set(&|i| *i = TrackerInfo::default());
                 }
                 Ok(Cmd::SetVolume(v)) => volume.store(v.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed),
+                Ok(Cmd::Seek(s)) => {
+                    if let Some(m) = module.as_mut() {
+                        m.set_position_seconds(s.max(0.0));
+                    }
+                }
+                Ok(Cmd::Order(d)) => {
+                    if let Some(m) = module.as_mut() {
+                        let n = m.get_num_orders().max(1);
+                        let order = (m.get_current_order() + d).rem_euclid(n);
+                        m.set_position_order_row(order, 0);
+                    }
+                }
                 Err(TryRecvError::Disconnected) => return,
                 Err(TryRecvError::Empty) => break,
             }
@@ -181,8 +214,11 @@ fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>, tap: Arc<Tap>)
 
         if playing {
             if let Some(m) = module.as_mut() {
-                let order = m.get_current_order();
-                set(&|i| i.order = order);
+                let (order, position) = (m.get_current_order(), m.get_position_seconds());
+                set(&|i| {
+                    i.order = order;
+                    i.position = position;
+                });
                 let want = (prod.free_len() / CH as usize).min(4096);
                 if want > 0 {
                     // Pre-filled so capacity == want*2; the C API reads capacity>>1 frames.

@@ -19,6 +19,9 @@ pub struct NowPlaying {
     pub playing: bool,
     /// Extra detail, e.g. the tracker order position.
     pub detail: Option<String>,
+    /// Seconds played, and the length when known.
+    pub position: f64,
+    pub duration: Option<f64>,
 }
 
 pub struct Audio {
@@ -107,6 +110,42 @@ impl Audio {
         }
     }
 
+    /// Stop whatever is playing.
+    pub fn stop(&mut self) {
+        self.tracker.stop();
+        if let Some(s) = self.stream.as_mut() {
+            s.stop();
+        }
+    }
+
+    /// Next track (tracker modules: next order).
+    pub fn next(&mut self) {
+        if self.tracker.info().loaded {
+            self.tracker.jump_orders(1);
+        } else if let Some(s) = self.stream.as_mut() {
+            s.next();
+        }
+    }
+
+    /// Previous track, or back to the start of this one.
+    pub fn previous(&mut self) {
+        if self.tracker.info().loaded {
+            self.tracker.jump_orders(-1);
+        } else if let Some(s) = self.stream.as_mut() {
+            s.previous();
+        }
+    }
+
+    /// Jump to `frac` (0‥1) of the song, when its length is known.
+    pub fn seek(&mut self, frac: f64) {
+        let t = self.tracker.info();
+        if t.loaded {
+            self.tracker.seek(t.duration * frac.clamp(0.0, 1.0));
+        } else if let Some(s) = self.stream.as_mut() {
+            s.seek(frac);
+        }
+    }
+
     /// Play a sound effect (see [`sfx::Sfx::play`]).
     pub fn play_sfx(&mut self, now: f64, sound: sfx::Sound, volume: f32, pan: f32, pitch: f32) {
         if let Some(s) = self.sfx.as_mut() {
@@ -133,9 +172,17 @@ impl Audio {
                 title: if t.title.trim().is_empty() { t.name } else { t.title },
                 playing: t.playing,
                 detail: Some(format!("{}/{}", t.order + 1, t.orders.max(1))),
+                position: t.position,
+                duration: (t.duration > 0.0).then_some(t.duration),
             });
         }
-        let s = self.stream.as_ref()?.info();
-        s.loaded.then(|| NowPlaying { fmt: s.fmt.clone(), title: s.name.clone(), playing: s.playing, detail: None })
+        let stream = self.stream.as_ref()?;
+        let s = stream.info();
+        let (position, duration) = stream.position().unwrap_or((0.0, None));
+        let title = match stream.track_name() {
+            Some(track) => format!("{}  ·  {track}", s.name),
+            None => s.name.clone(),
+        };
+        s.loaded.then(|| NowPlaying { fmt: s.fmt.clone(), title, playing: s.playing, detail: None, position, duration })
     }
 }

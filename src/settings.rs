@@ -78,6 +78,15 @@ pub struct Settings {
     /// What the Pour tool pours.
     pub grain_kind: crate::physics::grains::GrainKind,
 
+    /// The classic player window is shown.
+    pub player: bool,
+    /// Drawn at twice the skin's size.
+    pub player_double: bool,
+    /// Skin file or folder; `None` for the built-in look.
+    pub player_skin: Option<String>,
+    /// The built-in look was chosen over the installed skins.
+    pub player_skin_builtin: bool,
+
     /// Procedural sound effects (hits, breaking glass, explosions…).
     pub sfx: bool,
     pub sfx_volume: f32,
@@ -126,6 +135,10 @@ impl Default for Settings {
             water_density: 1.6,
             world_size: 1,
             grain_kind: Default::default(),
+            player: false,
+            player_double: true,
+            player_skin: None,
+            player_skin_builtin: false,
             sfx: true,
             sfx_volume: 0.6,
             slow_motion: true,

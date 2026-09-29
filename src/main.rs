@@ -26,6 +26,7 @@ mod recorder;
 mod scene;
 mod settings;
 mod shapes;
+mod skin;
 mod ui;
 mod util;
 mod window_tracker;
