@@ -1,7 +1,6 @@
 //! Zones drawn with the Zone tool: rectangles that push objects (wind), make
 //! them float, or teleport them (portal pairs). Challenges add goal zones.
 
-use super::object::Object;
 use super::{to_screen, PhysWorld};
 use crate::config::PPM;
 use macroquad::prelude::*;
@@ -140,12 +139,18 @@ pub struct Teleport {
 }
 
 /// Apply every zone to the dynamic objects. Returns the teleports.
-pub fn apply(zones: &[Zone], state: &mut PortalState, world: &mut PhysWorld, objects: &[Object]) -> Vec<Teleport> {
+/// Push the bodies (objects and grains) that are inside zones.
+pub fn apply(
+    zones: &[Zone],
+    state: &mut PortalState,
+    world: &mut PhysWorld,
+    bodies: &[RigidBodyHandle],
+) -> Vec<Teleport> {
     let gravity = world.gravity;
     let mut teleports = vec![];
     let mut inside_now = HashSet::new();
-    for o in objects {
-        let Some(b) = world.bodies.get_mut(o.body) else { continue };
+    for &body in bodies {
+        let Some(b) = world.bodies.get_mut(body) else { continue };
         if !b.is_dynamic() {
             continue;
         }
@@ -169,9 +174,9 @@ pub fn apply(zones: &[Zone], state: &mut PortalState, world: &mut PhysWorld, obj
                     b.set_angvel(w * 0.98, true);
                 }
                 ZoneKind::Portal => {
-                    inside_now.insert(o.body);
+                    inside_now.insert(body);
                     let Some(exit) = z.pair.and_then(|j| zones.get(j)) else { continue };
-                    if state.inside.contains(&o.body) {
+                    if state.inside.contains(&body) {
                         continue;
                     }
                     // Same relative position in the exit, same velocity.
@@ -204,7 +209,7 @@ pub fn draw(zones: &[Zone]) {
         dashed_rect(r, Color { a: if unpaired { 0.45 } else { 0.7 }, ..c }, t * if unpaired { 0.0 } else { 18.0 });
 
         // Animated content, clipped to the rectangle.
-        crate::ui::widgets::clip(Some(r));
+        crate::ui::widgets::clip(Some(crate::camera::current().rect_to_screen(r)));
         match z.kind {
             ZoneKind::Wind => {
                 let dir = vec2(z.angle.cos(), -z.angle.sin());
@@ -322,6 +327,7 @@ fn dashed_rect(r: Rect, c: Color, offset: f32) {
 mod tests {
     use super::*;
     use crate::physics::borders::BorderMode;
+    use crate::physics::object::Object;
 
     fn zone(kind: ZoneKind, min: [f32; 2], max: [f32; 2]) -> Zone {
         Zone { kind, min, max, angle: 0.0, strength: 20.0, pair: None }
@@ -353,12 +359,12 @@ mod tests {
         add(&mut zones, zone(ZoneKind::Portal, [2.0, 0.0], [3.0, 1.0]));
         add(&mut zones, zone(ZoneKind::Portal, [8.0, 4.0], [10.0, 6.0]));
         let mut state = PortalState::default();
-        let t = apply(&zones, &mut state, &mut w, std::slice::from_ref(&o));
+        let t = apply(&zones, &mut state, &mut w, &[o.body]);
         assert_eq!(t.len(), 1);
         let p = *w.bodies[o.body].translation();
         assert!(zones[1].contains(p) && (p.x - 9.0).abs() < 0.01 && (p.y - 5.0).abs() < 0.01);
         // Still inside the exit: no bounce back.
-        assert!(apply(&zones, &mut state, &mut w, std::slice::from_ref(&o)).is_empty());
+        assert!(apply(&zones, &mut state, &mut w, &[o.body]).is_empty());
     }
 
     #[test]
@@ -366,7 +372,7 @@ mod tests {
         let (mut w, o) = world_with_box(5.0, 5.0);
         let zones = vec![zone(ZoneKind::Wind, [0.0, 0.0], [10.0, 10.0])];
         let mut state = PortalState::default();
-        apply(&zones, &mut state, &mut w, std::slice::from_ref(&o));
+        apply(&zones, &mut state, &mut w, &[o.body]);
         w.step_fixed();
         assert!(w.bodies[o.body].linvel().x > 0.2);
 
@@ -374,7 +380,7 @@ mod tests {
         let zones = vec![zone(ZoneKind::Float, [0.0, 0.0], [10.0, 10.0])];
         for _ in 0..60 {
             w.reset_forces();
-            apply(&zones, &mut state, &mut w, std::slice::from_ref(&o));
+            apply(&zones, &mut state, &mut w, &[o.body]);
             w.step_fixed();
         }
         assert!(w.bodies[o.body].translation().y >= 5.0, "floats instead of falling");

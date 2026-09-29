@@ -3,6 +3,7 @@
 pub mod borders;
 pub mod events;
 pub mod fracture;
+pub mod grains;
 pub mod links;
 pub mod magnets;
 pub mod object;
@@ -12,17 +13,25 @@ pub mod zones;
 
 use crate::config::{BOUNCE, FRICTION, PHYSICS_DT, PPM, WALL_T};
 use borders::BorderMode;
-use macroquad::prelude::{screen_height, vec2, Vec2};
+use macroquad::prelude::{vec2, Vec2};
 use rapier2d::prelude::*;
+use std::sync::atomic::{AtomicU32, Ordering};
 
-/// Screen pixels → physics metres (y up).
-pub fn to_phys(px: f32, py: f32) -> (f32, f32) {
-    (px / PPM, (screen_height() - py) / PPM)
+/// Height of the world in pixels (720 until a world is created).
+static WORLD_H: AtomicU32 = AtomicU32::new(0x4434_0000);
+
+fn world_height() -> f32 {
+    f32::from_bits(WORLD_H.load(Ordering::Relaxed))
 }
 
-/// Physics metres → screen pixels (y down).
+/// World pixels (y down, see `camera`) → physics metres (y up).
+pub fn to_phys(px: f32, py: f32) -> (f32, f32) {
+    (px / PPM, (world_height() - py) / PPM)
+}
+
+/// Physics metres → world pixels (y down).
 pub fn to_screen(bx: f32, by: f32) -> Vec2 {
-    vec2(bx * PPM, screen_height() - by * PPM)
+    vec2(bx * PPM, world_height() - by * PPM)
 }
 
 pub struct PhysWorld {
@@ -71,12 +80,14 @@ impl PhysWorld {
             border,
             arena: (arena_px.0 / PPM, arena_px.1 / PPM),
         };
+        WORLD_H.store(arena_px.1.to_bits(), Ordering::Relaxed);
         w.rebuild_walls();
         w
     }
 
     pub fn resize(&mut self, arena_px: (f32, f32)) {
         self.arena = (arena_px.0 / PPM, arena_px.1 / PPM);
+        WORLD_H.store(arena_px.1.to_bits(), Ordering::Relaxed);
         self.rebuild_walls();
     }
 

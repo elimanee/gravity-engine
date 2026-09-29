@@ -13,14 +13,17 @@ pub enum LinkKind {
     Hinge,
     /// A hinge that turns by itself.
     Motor,
+    /// Welds two objects (or one to the background) rigidly together.
+    Glue,
 }
 
 impl LinkKind {
-    pub const ALL: &'static [LinkKind] = &[LinkKind::Rope, LinkKind::Spring, LinkKind::Hinge, LinkKind::Motor];
+    pub const ALL: &'static [LinkKind] =
+        &[LinkKind::Rope, LinkKind::Spring, LinkKind::Hinge, LinkKind::Motor, LinkKind::Glue];
 
     /// Placed with a single click (at a point) rather than a drag.
     pub fn is_pivot(self) -> bool {
-        matches!(self, LinkKind::Hinge | LinkKind::Motor)
+        matches!(self, LinkKind::Hinge | LinkKind::Motor | LinkKind::Glue)
     }
 
     pub fn label(self) -> &'static str {
@@ -29,6 +32,7 @@ impl LinkKind {
             LinkKind::Spring => "Spring",
             LinkKind::Hinge => "Hinge",
             LinkKind::Motor => "Motor",
+            LinkKind::Glue => "Glue",
         }
     }
 
@@ -38,6 +42,7 @@ impl LinkKind {
             LinkKind::Rope | LinkKind::Spring => ["Drag from one object to another,", "or to empty space to hang it"],
             LinkKind::Hinge => ["Click where two objects overlap,", "or on one to nail it in place"],
             LinkKind::Motor => ["Click a wheel where it overlaps a body", "(or on its own) to make it spin"],
+            LinkKind::Glue => ["Click where two objects overlap to", "weld them (or on one to fix it)"],
         }
     }
 
@@ -47,6 +52,7 @@ impl LinkKind {
             LinkKind::Spring => Color::from_rgba(120, 220, 255, 255),
             LinkKind::Hinge => Color::from_rgba(230, 230, 240, 255),
             LinkKind::Motor => Color::from_rgba(255, 160, 70, 255),
+            LinkKind::Glue => Color::from_rgba(150, 235, 200, 255),
         }
     }
 }
@@ -81,9 +87,10 @@ pub struct Link {
     pub la: Point<f32>,
     /// Anchor in `b`'s local frame, or a world point for the background.
     pub lb: Point<f32>,
-    /// Rope length / spring rest length (m).
+    /// Rope length / spring rest length (m). Glue: angle of the joint frame on `a`.
     pub length: f32,
-    /// Motor speed (rad/s, positive = clockwise on screen).
+    /// Motor speed (rad/s, positive = clockwise on screen). Glue: angle of the
+    /// joint frame on `b`.
     pub speed: f32,
     pub joint: ImpulseJointHandle,
 }
@@ -104,7 +111,13 @@ impl Link {
             Some(b) => world.bodies.get(b)?.position().inverse_transform_point(&pb),
             None => pb,
         };
-        let length = (pa - pb).norm().max(0.05);
+        let (length, speed) = if kind == LinkKind::Glue {
+            // Both joint frames start aligned with the world axes.
+            let angle_b = b.and_then(|b| world.bodies.get(b)).map_or(0.0, |b| b.rotation().angle());
+            (-world.bodies.get(a)?.rotation().angle(), -angle_b)
+        } else {
+            ((pa - pb).norm().max(0.05), speed)
+        };
         Some(Self::restore(world, LinkSpec { kind, a, b, la, lb, length, speed }))
     }
 
@@ -136,6 +149,12 @@ impl Link {
                 .contacts_enabled(false)
                 .motor_model(MotorModel::AccelerationBased)
                 .motor_velocity(speed, MOTOR_GAIN)
+                .build()
+                .into(),
+            LinkKind::Glue => FixedJointBuilder::new()
+                .local_frame1(Isometry::new(la.coords, length))
+                .local_frame2(Isometry::new(lb.coords, speed))
+                .contacts_enabled(false)
                 .build()
                 .into(),
         };
@@ -209,6 +228,11 @@ impl Link {
                 }
             }
             LinkKind::Hinge => {}
+            LinkKind::Glue => {
+                draw_circle(a.x - 3.0, a.y, 4.0, Color { a: 0.8, ..c });
+                draw_circle(a.x + 3.0, a.y, 4.0, Color { a: 0.8, ..c });
+                return;
+            }
             LinkKind::Motor => {
                 // A ring with ticks that turn with the driven object.
                 let angle = world.bodies.get(self.a).map_or(0.0, |body| body.rotation().angle());
@@ -337,6 +361,43 @@ mod tests {
         let spin = motor_spin(3.0);
         assert!((spin + 3.0).abs() < 0.3, "expected -3 rad/s (clockwise), got {spin}");
         assert!(motor_spin(-3.0) * spin < 0.0, "negative speeds turn the other way");
+    }
+
+    #[test]
+    fn glue_keeps_two_bodies_together() {
+        let mut w = PhysWorld::new(-9.8, BorderMode::Portal, (1200.0, 1200.0));
+        let a = w.bodies.insert(RigidBodyBuilder::dynamic().translation(vector![10.0, 10.0]).rotation(0.3));
+        w.colliders.insert_with_parent(ColliderBuilder::cuboid(0.5, 0.2), a, &mut w.bodies);
+        let b = w.bodies.insert(RigidBodyBuilder::fixed().translation(vector![11.0, 10.0]));
+        w.colliders.insert_with_parent(ColliderBuilder::cuboid(0.2, 0.2), b, &mut w.bodies);
+        let p = point![10.8, 10.0];
+        Link::new(&mut w, LinkKind::Glue, a, Some(b), p, p, 0.0).unwrap();
+        for _ in 0..120 {
+            w.step_fixed();
+        }
+        let body = &w.bodies[a];
+        assert!((body.translation() - vector![10.0, 10.0]).norm() < 0.05, "stays put under gravity");
+        assert!((body.rotation().angle() - 0.3).abs() < 0.02, "keeps its angle");
+    }
+
+    #[test]
+    fn glued_bodies_move_as_one_piece() {
+        let mut w = PhysWorld::new(-9.8, BorderMode::Walls, (1200.0, 1200.0));
+        let a = w.bodies.insert(RigidBodyBuilder::dynamic().translation(vector![10.0, 10.0]));
+        w.colliders.insert_with_parent(ColliderBuilder::ball(0.5), a, &mut w.bodies);
+        let b = w.bodies.insert(RigidBodyBuilder::dynamic().translation(vector![8.0, 11.0]).rotation(0.7));
+        w.colliders.insert_with_parent(ColliderBuilder::cuboid(0.6, 0.1), b, &mut w.bodies);
+        let p = point![8.0, 11.0];
+        Link::new(&mut w, LinkKind::Glue, a, Some(b), p, p, 0.0).unwrap();
+        for _ in 0..300 {
+            w.step_fixed();
+        }
+        // The pair tips over as one piece: compare in the ball's own frame.
+        let (pa, pb) = (w.bodies[a].position(), w.bodies[b].position());
+        let d = pa.inverse_transform_point(&Point::from(pb.translation.vector));
+        assert!((d - point![-2.0, 1.0]).norm() < 0.05, "keeps its offset: {d:?}");
+        let turn = pb.rotation.angle() - pa.rotation.angle();
+        assert!((turn - 0.7).abs() < 0.02, "keeps the relative angle: {turn}");
     }
 
     #[test]

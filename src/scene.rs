@@ -20,7 +20,7 @@ use std::sync::Arc;
 const VERSION: u32 = 3;
 const EMBED_LIMIT: u64 = 4 * 1024 * 1024;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SceneFile {
     pub version: u32,
     pub gravity: f32,
@@ -41,7 +41,7 @@ pub struct SceneWater {
     pub density: f32,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SceneLink {
     pub kind: LinkKind,
     /// Index into `objects`.
@@ -57,7 +57,7 @@ pub struct SceneLink {
     pub speed: f32,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SceneObject {
     pub source: SceneSource,
     /// Centre in physics metres (y up), so scenes survive window resizes.
@@ -78,7 +78,7 @@ pub struct SceneObject {
     pub mass: Option<f32>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SceneSource {
     File { path: String },

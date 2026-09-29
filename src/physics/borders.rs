@@ -1,7 +1,6 @@
 //! Arena border modes: which walls exist, what happens at the edges, and how
 //! each mode is drawn.
 
-use super::object::Object;
 use super::PhysWorld;
 use crate::config::{CULL_MARGIN, PPM, WALL_T};
 use crate::util::hsv_to_rgb;
@@ -92,13 +91,13 @@ impl BorderMode {
     }
 
     /// Edge forces / impulses, applied before the physics step.
-    pub fn apply_forces(self, world: &mut PhysWorld, objects: &[Object]) {
+    pub fn apply_forces(self, world: &mut PhysWorld, bodies: &[RigidBodyHandle]) {
         let (sw, _) = world.arena;
         match self {
             BorderMode::Bounce => {
                 let (margin, strength) = (1.5_f32, 120.0_f32);
-                for o in objects {
-                    let Some(b) = world.bodies.get_mut(o.body) else { continue };
+                for &body in bodies {
+                    let Some(b) = world.bodies.get_mut(body) else { continue };
                     if !b.is_dynamic() {
                         continue;
                     }
@@ -119,8 +118,8 @@ impl BorderMode {
             }
             BorderMode::Repulse => {
                 let (zone, strength) = (3.0_f32, 80.0_f32);
-                for o in objects {
-                    let Some(b) = world.bodies.get_mut(o.body) else { continue };
+                for &body in bodies {
+                    let Some(b) = world.bodies.get_mut(body) else { continue };
                     if !b.is_dynamic() {
                         continue;
                     }
@@ -140,13 +139,13 @@ impl BorderMode {
 
     /// Wrapping and culling, applied after the physics step. Returns the
     /// bodies that must be deleted.
-    pub fn apply_positions(self, world: &mut PhysWorld, objects: &[Object]) -> Vec<RigidBodyHandle> {
+    pub fn apply_positions(self, world: &mut PhysWorld, bodies: &[RigidBodyHandle]) -> Vec<RigidBodyHandle> {
         let (sw, sh) = world.arena;
         let wrap_x = matches!(self, BorderMode::Loop | BorderMode::Warp | BorderMode::Portal);
         let wrap_y = matches!(self, BorderMode::Warp | BorderMode::Portal);
         let mut dead = vec![];
-        for o in objects {
-            let Some(b) = world.bodies.get_mut(o.body) else { continue };
+        for &body in bodies {
+            let Some(b) = world.bodies.get_mut(body) else { continue };
             let pos = *b.translation();
             let (mut nx, mut ny) = (pos.x, pos.y);
             if wrap_x {
@@ -170,7 +169,7 @@ impl BorderMode {
             let lost =
                 pos.x < -CULL_MARGIN || pos.x > sw + CULL_MARGIN || pos.y < -CULL_MARGIN || pos.y > sh + CULL_MARGIN;
             if (self == BorderMode::Kill && out_x) || lost {
-                dead.push(o.body);
+                dead.push(body);
             }
         }
         dead

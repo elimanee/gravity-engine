@@ -1,4 +1,5 @@
-//! Library panel (E): example scenes and challenges.
+//! Library panel (E): example scenes, challenges and the player's own
+//! challenges.
 
 use super::theme::*;
 use super::widgets::*;
@@ -6,19 +7,30 @@ use super::{icons, Action, Fader, Input};
 use crate::library::{challenges, examples};
 use crate::physics::zones::ZoneKind;
 use macroquad::prelude::*;
+use std::collections::BTreeMap;
 
 const COLS: usize = 4;
 const CELL_W: f32 = 200.0;
-const CELL_H: f32 = 86.0;
+const CELL_H: f32 = 96.0;
 const GAP: f32 = 10.0;
 const PAD: f32 = 18.0;
 const HEAD: f32 = 76.0;
+const ROWS: usize = 4;
+
+/// Progress and the player's challenges, for drawing.
+pub struct LibraryData<'a> {
+    pub done: &'a [String],
+    pub stars: &'a BTreeMap<String, u8>,
+    /// (name, id, ink) of each of "My challenges".
+    pub mine: &'a [(String, String, f32)],
+}
 
 #[derive(Clone, Copy, PartialEq, Default)]
 enum Tab {
     #[default]
     Examples,
     Challenges,
+    Mine,
 }
 
 #[derive(Default)]
@@ -28,23 +40,30 @@ pub struct Library {
 }
 
 impl Library {
-    fn count(&self) -> usize {
-        match self.tab {
+    fn count(&self, mine: usize) -> usize {
+        let n = match self.tab {
             Tab::Examples => examples::ALL.len(),
             Tab::Challenges => challenges::ALL.len(),
-        }
+            Tab::Mine => mine + 1,
+        };
+        n.min(ROWS * COLS)
     }
 
     fn panel(&self) -> Rect {
-        let rows = examples::ALL.len().max(challenges::ALL.len()).div_ceil(COLS);
+        let rows = ROWS;
         let w = COLS as f32 * CELL_W + (COLS - 1) as f32 * GAP + PAD * 2.0;
         let h = rows as f32 * CELL_H + (rows - 1) as f32 * GAP + PAD * 2.0 + HEAD;
         Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h)
     }
 
-    fn tabs(p: Rect) -> [Rect; 2] {
+    fn tabs(p: Rect) -> [Rect; 3] {
         let y = p.y + 44.0;
-        [Rect::new(p.x + PAD, y, 120.0, 26.0), Rect::new(p.x + PAD + 126.0, y, 120.0, 26.0)]
+        [0.0, 1.0, 2.0].map(|k| Rect::new(p.x + PAD + k * 136.0, y, 130.0, 26.0))
+    }
+
+    /// The "Edit" button of a "My challenges" cell.
+    fn edit_button(cell: Rect) -> Rect {
+        Rect::new(cell.x + cell.w - 52.0, cell.y + cell.h - 28.0, 42.0, 20.0)
     }
 
     fn cell(p: Rect, i: usize) -> Rect {
@@ -61,7 +80,7 @@ impl Library {
         self.tab = if challenges { Tab::Challenges } else { Tab::Examples };
     }
 
-    pub fn update(&mut self, dt: f32, input: &mut Input, actions: &mut Vec<Action>) {
+    pub fn update(&mut self, dt: f32, mine: usize, input: &mut Input, actions: &mut Vec<Action>) {
         self.fader.update(dt, 7.0);
         if !self.fader.open {
             return;
@@ -73,10 +92,16 @@ impl Library {
                 self.tab = Tab::Examples;
             } else if tabs[1].contains(input.mouse) {
                 self.tab = Tab::Challenges;
-            } else if let Some(i) = (0..self.count()).find(|&i| Self::cell(p, i).contains(input.mouse)) {
+            } else if tabs[2].contains(input.mouse) {
+                self.tab = Tab::Mine;
+            } else if let Some(i) = (0..self.count(mine)).find(|&i| Self::cell(p, i).contains(input.mouse)) {
+                let edit = Self::edit_button(Self::cell(p, i)).contains(input.mouse);
                 actions.push(match self.tab {
                     Tab::Examples => Action::LoadExample(i),
                     Tab::Challenges => Action::StartChallenge(i),
+                    Tab::Mine if i == 0 => Action::OpenEditor(None),
+                    Tab::Mine if edit => Action::OpenEditor(Some(i - 1)),
+                    Tab::Mine => Action::StartCustom(i - 1),
                 });
                 self.fader.open = false;
             } else if !p.contains(input.mouse) {
@@ -89,7 +114,8 @@ impl Library {
         input.wheel = 0.0;
     }
 
-    pub fn draw(&self, done: &[String], mouse: Vec2) {
+    pub fn draw(&self, data: &LibraryData, mouse: Vec2) {
+        let done = data.done;
         if !self.fader.visible() {
             return;
         }
@@ -101,17 +127,19 @@ impl Library {
         panel(p, f);
         text_bold("Library", p.x + PAD, p.y + PAD + 12.0, 17.0, fade(TEXT, f));
         let solved = challenges::ALL.iter().filter(|c| done.iter().any(|d| d == c.id)).count();
-        let hint = format!("{solved} / {} challenges solved · E or Esc to close", challenges::ALL.len());
+        let stars: u32 = challenges::ALL.iter().map(|c| *data.stars.get(c.id).unwrap_or(&0) as u32).sum();
+        let n = challenges::ALL.len();
+        let hint = format!("{solved} / {n} solved  ·  {stars} / {} stars  ·  E or Esc to close", n * 3);
         text(&hint, p.x + p.w - PAD - measure(&hint, 12.0), p.y + PAD + 12.0, 12.0, fade(TEXT_MUTED, f));
 
         let tabs = Self::tabs(p);
-        for (i, (label, tab)) in [("Examples", Tab::Examples), ("Challenges", Tab::Challenges)].into_iter().enumerate()
-        {
+        let tab_list = [("Examples", Tab::Examples), ("Challenges", Tab::Challenges), ("My challenges", Tab::Mine)];
+        for (i, (label, tab)) in tab_list.into_iter().enumerate() {
             draw_button(tabs[i], label, tabs[i].contains(mouse), self.tab == tab, f);
         }
 
         let t = get_time() as f32;
-        for i in 0..self.count() {
+        for i in 0..self.count(data.mine.len()) {
             let r = Self::cell(p, i);
             let hov = r.contains(mouse);
             rrect(r, 10.0, fade(if hov { SURFACE_HI } else { SURFACE_2 }, f));
@@ -129,19 +157,58 @@ impl Library {
                     let c = &challenges::ALL[i];
                     let solved = done.iter().any(|d| d == c.id);
                     keycap(r.x + 12.0, r.y + 18.0, &(i + 1).to_string(), 10.0, f);
-                    text_bold(c.name, r.x + 36.0, r.y + 23.0, 14.0, fade(TEXT, f));
+                    text_bold(&fit(c.name, r.w - 36.0 - 58.0, 14.0), r.x + 36.0, r.y + 23.0, 14.0, fade(TEXT, f));
                     for (k, line) in wrap(c.goal, r.w - 24.0, 11.0).iter().take(2).enumerate() {
                         text(line, r.x + 12.0, r.y + 46.0 + k as f32 * 14.0, 11.0, fade(TEXT_MUTED, f));
                     }
+                    let stars = data.stars.get(c.id).copied().unwrap_or(u8::from(solved));
+                    draw_stars(r, stars, f);
                     let (label, col) = if solved { ("Solved", SUCCESS) } else { ("Play", TEXT_DIM) };
-                    if solved {
-                        icons::zone_kind(ZoneKind::Goal, vec2(r.x + r.w - 58.0, r.y + 20.0), 18.0, fade(SUCCESS, f), t);
-                    }
                     text(label, r.x + r.w - 44.0, r.y + 26.0, 11.0, fade(if hov { ACCENT_HI } else { col }, f));
+                }
+                Tab::Mine if i == 0 => {
+                    icons::zone_kind(ZoneKind::Goal, vec2(r.x + 22.0, r.y + 22.0), 18.0, fade(ACCENT_HI, f), t);
+                    text_bold("New challenge", r.x + 38.0, r.y + 27.0, 14.0, fade(TEXT, f));
+                    let about = "Turn the current scene into a level: ball, goal, ink, test, save";
+                    for (k, line) in wrap(about, r.w - 24.0, 11.0).iter().take(2).enumerate() {
+                        text(line, r.x + 12.0, r.y + 46.0 + k as f32 * 14.0, 11.0, fade(TEXT_MUTED, f));
+                    }
+                }
+                Tab::Mine => {
+                    let (name, id, ink) = &data.mine[i - 1];
+                    let title = fit(name, r.w - 12.0 - 58.0, 14.0);
+                    text_bold(&title, r.x + 12.0, r.y + 26.0, 14.0, fade(TEXT, f));
+                    text(&format!("{ink:.0} px of ink"), r.x + 12.0, r.y + 46.0, 11.0, fade(TEXT_MUTED, f));
+                    draw_stars(r, data.stars.get(id).copied().unwrap_or(0), f);
+                    let e = Self::edit_button(r);
+                    draw_button(e, "Edit", e.contains(mouse), false, f);
+                    text("Play", r.x + r.w - 44.0, r.y + 26.0, 11.0, fade(if hov { ACCENT_HI } else { TEXT_DIM }, f));
                 }
             }
         }
     }
+}
+
+/// Up to three stars in the bottom-left corner of a cell (none: unsolved).
+fn draw_stars(cell: Rect, stars: u8, f: f32) {
+    if stars == 0 || f < 0.5 {
+        return;
+    }
+    for k in 0..3 {
+        icons::star(vec2(cell.x + 20.0 + k as f32 * 18.0, cell.y + cell.h - 16.0), 15.0, k < stars as usize);
+    }
+}
+
+/// `s` shortened with an ellipsis to fit `width` px in bold.
+fn fit(s: &str, width: f32, size: f32) -> String {
+    if measure_bold(s, size) <= width {
+        return s.to_string();
+    }
+    let mut out: String = s.to_string();
+    while !out.is_empty() && measure_bold(&format!("{out}…"), size) > width {
+        out.pop();
+    }
+    format!("{}…", out.trim_end())
 }
 
 /// Greedy word wrap to `width` px.

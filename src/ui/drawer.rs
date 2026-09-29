@@ -21,6 +21,7 @@ enum SliderId {
     VisGain,
     WaterLevel,
     WaterDensity,
+    SfxVolume,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -30,6 +31,8 @@ enum ToggleId {
     Dance,
     Water,
     Effects,
+    Sfx,
+    SlowMo,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -38,6 +41,7 @@ enum StepperId {
     Background,
     VisBackground,
     VisObject,
+    WorldSize,
 }
 
 enum Row {
@@ -75,7 +79,7 @@ const LIBRARY_BUTTONS: &[(&str, Action)] = &[("Examples & challenges  (E)", Acti
 pub struct Drawer {
     pub fader: Fader,
     scroll: f32,
-    sliders: [SliderState; 9],
+    sliders: [SliderState; 10],
 }
 
 fn slider_index(id: SliderId) -> usize {
@@ -105,6 +109,10 @@ fn slider_spec(id: SliderId, s: &Settings) -> (SliderSpec<'static>, f32) {
             let text = format!("×{:.1}", s.water_density);
             ("Density", WATER_DENSITY_RANGE, s.water_density, text, Color::new(0.35, 0.65, 1.0, 1.0))
         }
+        SliderId::SfxVolume => {
+            let text = format!("{:.0}%", s.sfx_volume * 100.0);
+            ("Effects volume", (0.0, 1.0), s.sfx_volume, text, Color::new(0.4, 0.8, 1.0, 1.0))
+        }
     };
     (SliderSpec { label, value_text: text, min: range.0, max: range.1, accent }, value)
 }
@@ -120,6 +128,7 @@ fn slider_value(id: SliderId, s: &mut Settings) -> &mut f32 {
         SliderId::VisGain => &mut s.vis_gain,
         SliderId::WaterLevel => &mut s.water_level,
         SliderId::WaterDensity => &mut s.water_density,
+        SliderId::SfxVolume => &mut s.sfx_volume,
     }
 }
 
@@ -131,6 +140,7 @@ impl Drawer {
             Row::Slider(SliderId::TimeScale),
             Row::Stepper(StepperId::Border),
             Row::Stepper(StepperId::Background),
+            Row::Stepper(StepperId::WorldSize),
             Row::Buttons(WORLD_BUTTONS),
             Row::Header("TRAILS"),
             Row::Toggle(ToggleId::Trails),
@@ -154,6 +164,12 @@ impl Drawer {
             Row::Header("AUDIO"),
             Row::Slider(SliderId::Volume),
             Row::Buttons(AUDIO_BUTTONS),
+            Row::Toggle(ToggleId::Sfx),
+        ]);
+        if s.sfx {
+            rows.push(Row::Slider(SliderId::SfxVolume));
+        }
+        rows.extend([
             Row::Header("VISUALIZER"),
             Row::Stepper(StepperId::VisBackground),
             Row::Stepper(StepperId::VisObject),
@@ -162,6 +178,7 @@ impl Drawer {
             Row::Buttons(VIS_BUTTONS),
             Row::Header("EFFECTS"),
             Row::Toggle(ToggleId::Effects),
+            Row::Toggle(ToggleId::SlowMo),
             Row::Header("ADD OBJECTS"),
             Row::Buttons(LIBRARY_BUTTONS),
             Row::Buttons(ADD_BUTTONS),
@@ -245,6 +262,8 @@ impl Drawer {
                             ToggleId::Dance => s.vis_dance = !s.vis_dance,
                             ToggleId::Water => actions.push(Action::ToggleWater),
                             ToggleId::Effects => actions.push(Action::ToggleEffects),
+                            ToggleId::Sfx => s.sfx = !s.sfx,
+                            ToggleId::SlowMo => s.slow_motion = !s.slow_motion,
                         }
                     }
                 }
@@ -257,6 +276,7 @@ impl Drawer {
                             StepperId::Background => Action::CycleBackground(d),
                             StepperId::VisBackground => Action::CycleVisualizer(d),
                             StepperId::VisObject => Action::CycleVisualizerObject(d),
+                            StepperId::WorldSize => Action::CycleWorldSize(d),
                         });
                     }
                 }
@@ -315,6 +335,8 @@ impl Drawer {
                         ToggleId::Dance => ("Objects jump on the beat", s.vis_dance),
                         ToggleId::Water => ("Water  (H)", s.water),
                         ToggleId::Effects => ("Sparks, dust and splashes", s.effects),
+                        ToggleId::Sfx => ("Sound effects", s.sfx),
+                        ToggleId::SlowMo => ("Slow motion on big hits", s.slow_motion),
                     };
                     draw_toggle_row(r, label, on, hov, f);
                 }
@@ -327,6 +349,10 @@ impl Drawer {
                         }
                         StepperId::VisBackground => {
                             draw_stepper(sr, "Behind objects  (V)", s.vis_background.label(), ACCENT_HI, mouse, f)
+                        }
+                        StepperId::WorldSize => {
+                            let v = format!("×{}", s.world_size);
+                            draw_stepper(sr, "World size", &v, ACCENT_HI, mouse, f)
                         }
                         StepperId::VisObject => {
                             draw_stepper(sr, "Object style", s.vis_object.label(), ACCENT_HI, mouse, f)

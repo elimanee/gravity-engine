@@ -3,12 +3,14 @@
 
 use crate::audio::Audio;
 use crate::background::{Background, BgMode};
+use crate::camera::{self, Camera, View};
 use crate::config::{self, ext_of, file_name_of, IMAGE_EXT, SCENE_EXT};
 use crate::config::{DENSITY, PPM, WALL_T};
 use crate::drawing;
 use crate::effects::Effects;
 use crate::history::{History, Snapshot};
 use crate::net::{FetchEvent, FetchJob, FetchKind};
+use crate::physics::grains::Grains;
 use crate::physics::links::{self, Link, LinkKind};
 use crate::physics::magnets;
 use crate::physics::object::{object_at, objects_at, Material, Object, Placement, Source, Visual};
@@ -24,10 +26,11 @@ use crate::ui::challenge_bar::ChallengeBar;
 use crate::ui::context_menu::ContextMenu;
 use crate::ui::cursor::{self, Blast};
 use crate::ui::drawer::Drawer;
+use crate::ui::editor_bar::EditorBar;
 use crate::ui::help::Help;
 use crate::ui::hud::{Hud, HudState};
 use crate::ui::inspector::{Inspector, Props};
-use crate::ui::library::Library;
+use crate::ui::library::{Library, LibraryData};
 use crate::ui::now_playing::NowPlayingPill;
 use crate::ui::spawner::{spawn_color, Spawner};
 use crate::ui::title::{self, PixelOut};
@@ -35,20 +38,26 @@ use crate::ui::toasts::Toasts;
 use crate::ui::tool_card::ToolCard;
 use crate::ui::tool_picker::ToolPicker;
 use crate::ui::visualizer::{self, VisStyle};
-use crate::ui::{debug, icons, theme, Action, Input, ObjectCmd};
+use crate::ui::{debug, icons, theme, Action, Input, ObjectCmd, SelectionCmd};
 use crate::window_tracker::WindowTracker;
 use macroquad::prelude::*;
 use rapier2d::prelude::{Point, RigidBodyHandle};
 use rfd::FileDialog;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 mod build;
+mod editor;
 mod impacts;
+mod juice;
 mod library;
+mod select;
+mod verify;
 
 const TIME_STEPS: &[f32] = &[0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
 const SPAWN_REPEAT: f32 = 0.11;
+/// Grains poured per second.
+const POUR_RATE: f32 = 170.0;
 
 type SpawnKey = (Shape, u32, (u8, u8, u8));
 
@@ -84,6 +93,14 @@ pub struct App {
     water: Water,
     effects: Effects,
     bg: Background,
+    camera: Camera,
+    /// Pointer position of the last frame of a middle-button pan.
+    pan_last: Option<Vec2>,
+    /// Bodies picked with the Select tool.
+    selection: Vec<RigidBodyHandle>,
+    select_drag: Option<select::SelectDrag>,
+    /// Last copied selection (Ctrl+C).
+    clipboard: Option<Snapshot>,
     audio: Audio,
     shaker: WindowTracker,
     jobs: Vec<FetchJob>,
@@ -103,6 +120,12 @@ pub struct App {
     fresh: HashMap<RigidBodyHandle, f64>,
     recording: Option<Recording>,
     finishing: Option<Finishing>,
+    slow: juice::SlowMo,
+    grains: Grains,
+    /// The Pour tool is pouring.
+    pouring: bool,
+    /// Seconds until the next pouring sound.
+    pour_sound: f32,
     /// An undo step was already recorded for the open properties panel.
     inspector_recorded: bool,
 
@@ -116,6 +139,10 @@ pub struct App {
     library: Library,
     challenge_bar: ChallengeBar,
     challenge: Option<library::ChallengeRun>,
+    editor: Option<editor::Editor>,
+    editor_bar: EditorBar,
+    /// "My challenges", read from the challenge folder.
+    custom: Vec<(std::path::PathBuf, crate::library::custom::ChallengeFile)>,
     help: Help,
     toasts: Toasts,
     now_playing: NowPlayingPill,
@@ -130,8 +157,10 @@ pub struct App {
 impl App {
     pub fn new(preload: Vec<String>, skip_title: bool) -> Self {
         let s = Settings::load();
-        let size = (screen_width(), screen_height());
+        let k = s.world_size as f32;
+        let size = (screen_width() * k, screen_height() * k);
         let world = PhysWorld::new(s.gravity, s.border, size);
+        let camera = Camera::new(vec2(size.0, size.1), vec2(screen_width(), screen_height()));
         let mut bg = Background::new(s.background);
         let mut toasts = Toasts::default();
         if let Some(path) = s.custom_background.clone() {
@@ -159,6 +188,15 @@ impl App {
             water: Water::default(),
             effects: Effects::default(),
             bg,
+            camera,
+            pan_last: None,
+            selection: Vec::new(),
+            slow: Default::default(),
+            grains: Grains::default(),
+            pouring: false,
+            pour_sound: 0.0,
+            select_drag: None,
+            clipboard: None,
             shaker,
             jobs: vec![],
             grab: None,
@@ -185,6 +223,9 @@ impl App {
             library: Library::default(),
             challenge_bar: ChallengeBar,
             challenge: None,
+            editor: None,
+            editor_bar: EditorBar::default(),
+            custom: Vec::new(),
             help: Help::default(),
             toasts,
             now_playing: NowPlayingPill::default(),
@@ -196,7 +237,8 @@ impl App {
         let n = preload.len();
         for (i, path) in preload.into_iter().enumerate() {
             let x = screen_width() / 2.0 + (i as f32 - n as f32 / 2.0) * 40.0;
-            app.open_path(&path, vec2(x, 120.0));
+            let at = app.view().to_world(vec2(x, 120.0));
+            app.open_path(&path, at);
         }
         app.history.clear();
         app
@@ -230,12 +272,15 @@ impl App {
             return;
         }
 
-        if (sw - self.last_size.0).abs() > 1.0 || (sh - self.last_size.1).abs() > 1.0 {
-            self.world.resize((sw, sh));
-            self.last_size = (sw, sh);
+        let arena = self.arena();
+        if (arena.0 - self.last_size.0).abs() > 1.0 || (arena.1 - self.last_size.1).abs() > 1.0 {
+            self.world.resize(arena);
+            self.camera.set_arena(vec2(arena.0, arena.1), vec2(sw, sh));
+            self.last_size = arena;
         }
 
         let mut input = Input::gather();
+        input.world = self.view().to_world(input.mouse);
         let mut actions = Vec::new();
         let in_transition = self.title.is_some();
         if !in_transition {
@@ -244,20 +289,25 @@ impl App {
             input.consumed = true;
         }
         self.update_ui(dt, &mut input, &mut actions);
-        self.handle_drops(input.mouse);
+        self.handle_drops(input.world);
         if !in_transition {
             self.world_input(dt, &mut input);
         }
         for a in actions {
-            self.apply(a, input.mouse);
+            self.apply(a, input.world);
         }
         self.sync_settings();
         self.poll_jobs();
         self.poll_recording();
         self.audio.tick();
         self.audio.analyze(dt, self.s.vis_gain);
-        self.simulate(dt, input.mouse);
+        self.tick_slow(dt);
+        self.simulate(dt, input.world);
         self.update_challenge(dt);
+        if !self.selection.is_empty() {
+            let objects = &self.objects;
+            self.selection.retain(|h| objects.iter().any(|o| o.body == *h));
+        }
 
         self.draw(dt, &input);
 
@@ -275,6 +325,9 @@ impl App {
     fn keyboard(&mut self, input: &Input, actions: &mut Vec<Action>) {
         let pressed = |k| is_key_pressed(k);
         let (shift, ctrl) = (input.shift, input.ctrl);
+        if self.editor_bar.typing() {
+            return;
+        }
 
         if pressed(KeyCode::F1) {
             actions.push(Action::ToggleHelp);
@@ -285,6 +338,8 @@ impl App {
                 self.link_drag = None;
             } else if self.help.fader.open {
                 self.help.fader.open = false;
+            } else if !self.selection.is_empty() {
+                self.selection.clear();
             } else if self.library.fader.open {
                 self.library.fader.open = false;
             } else if self.picker.fader.open {
@@ -297,6 +352,11 @@ impl App {
                 self.spawner.fader.open = false;
             } else if self.paused {
                 self.paused = false;
+            } else if self.editor.as_ref().is_some_and(|e| e.place.is_some()) {
+                if let Some(e) = self.editor.as_mut() {
+                    e.place = None;
+                    e.goal_drag = None;
+                }
             } else if self.challenge.is_some() {
                 actions.push(Action::ChallengeExit);
             } else {
@@ -320,6 +380,23 @@ impl App {
             if pressed(KeyCode::Y) {
                 actions.push(Action::Redo);
             }
+            let sel = |c| Action::Selection(c);
+            if pressed(KeyCode::C) && !self.selection.is_empty() {
+                actions.push(sel(SelectionCmd::Copy));
+            }
+            if pressed(KeyCode::V) {
+                actions.push(sel(SelectionCmd::Paste));
+            }
+            if pressed(KeyCode::D) && !self.selection.is_empty() {
+                actions.push(sel(SelectionCmd::Duplicate));
+            }
+            if pressed(KeyCode::A) {
+                actions.push(Action::SetTool(Tool::Select));
+                actions.push(sel(SelectionCmd::All));
+            }
+            if pressed(KeyCode::G) && !self.selection.is_empty() {
+                actions.push(sel(SelectionCmd::Glue));
+            }
             return;
         }
         if pressed(KeyCode::Q) {
@@ -336,10 +413,27 @@ impl App {
             actions.push(Action::ChallengeNext);
         }
         if pressed(KeyCode::E) {
-            actions.push(Action::OpenLibrary);
+            actions.push(if shift { Action::OpenEditor(None) } else { Action::OpenLibrary });
         }
         if pressed(KeyCode::Tab) {
             actions.push(Action::OpenToolPicker);
+        }
+        let screen = vec2(screen_width(), screen_height());
+        let zoom_key = if pressed(KeyCode::Equal) || pressed(KeyCode::KpAdd) {
+            1.25
+        } else if pressed(KeyCode::Minus) || pressed(KeyCode::KpSubtract) {
+            0.8
+        } else {
+            1.0
+        };
+        if zoom_key != 1.0 {
+            self.camera.zoom_at(zoom_key, screen / 2.0, screen);
+            self.zoom_toast();
+        }
+        if pressed(KeyCode::Home) {
+            let (aw, ah) = self.arena();
+            self.camera.fit(vec2(aw, ah), screen);
+            self.zoom_toast();
         }
         let digits = [
             KeyCode::Key1,
@@ -354,6 +448,8 @@ impl App {
             KeyCode::Key0,
             KeyCode::J,
             KeyCode::Z,
+            KeyCode::S,
+            KeyCode::K,
         ];
         for (i, k) in digits.iter().enumerate() {
             if pressed(*k) {
@@ -368,7 +464,7 @@ impl App {
             actions.push(Action::ToggleRecording);
         }
         if pressed(KeyCode::I) {
-            if let Some(i) = object_at(&self.objects, &self.world, input.mouse.x, input.mouse.y) {
+            if let Some(i) = object_at(&self.objects, &self.world, input.world.x, input.world.y) {
                 let h = self.objects[i].body;
                 actions.push(Action::Object(ObjectCmd::Properties, h));
             }
@@ -418,12 +514,14 @@ impl App {
         if pressed(KeyCode::F12) {
             actions.push(Action::Screenshot);
         }
-        if pressed(KeyCode::Delete) || pressed(KeyCode::Backspace) {
-            if let Some(i) = object_at(&self.objects, &self.world, input.mouse.x, input.mouse.y) {
+        if (pressed(KeyCode::Delete) || pressed(KeyCode::Backspace)) && !self.selection.is_empty() {
+            actions.push(Action::Selection(SelectionCmd::Delete));
+        } else if pressed(KeyCode::Delete) || pressed(KeyCode::Backspace) {
+            if let Some(i) = object_at(&self.objects, &self.world, input.world.x, input.world.y) {
                 let h = self.objects[i].body;
                 actions.push(Action::Object(ObjectCmd::Delete, h));
             } else {
-                self.remove_zone_at(input.mouse);
+                self.remove_zone_at(input.world);
             }
         }
         if pressed(KeyCode::LeftBracket) || pressed(KeyCode::RightBracket) {
@@ -445,7 +543,7 @@ impl App {
     fn update_ui(&mut self, dt: f32, input: &mut Input, actions: &mut Vec<Action>) {
         // Top-most first, so overlays swallow clicks meant for them.
         self.help.update(dt, input);
-        self.library.update(dt, input, actions);
+        self.library.update(dt, self.custom.len(), input, actions);
         self.picker.update(dt, input, actions);
         self.menu.update(dt, input, actions);
         self.update_inspector(dt, input);
@@ -456,10 +554,17 @@ impl App {
         self.spawner.update(dt, &mut self.s, input);
         // The tool is fixed during challenges, and the card would hide the level.
         if self.challenge.is_none() {
+            self.card.selected = self.selection.len();
+            self.card.grains = self.grains.len();
             self.card.update(dt, &mut self.s, input, actions);
         }
         if let Some(v) = self.challenge_view() {
             self.challenge_bar.update(&v, top, input, actions);
+        }
+        if self.editor_view().is_some() {
+            if let Some(ed) = self.editor.as_mut() {
+                self.editor_bar.update(&mut ed.name, top, input, actions);
+            }
         }
         let np = self.audio.now_playing();
         self.now_playing.update(dt, np.as_ref(), self.paused, input, actions);
@@ -516,8 +621,24 @@ impl App {
     }
 
     fn world_input(&mut self, dt: f32, input: &mut Input) {
-        let m = input.mouse;
+        let m = input.world;
         let pos = (m.x, m.y);
+
+        // Ctrl + wheel zooms around the pointer, the middle button pans.
+        let screen = vec2(screen_width(), screen_height());
+        if input.wheel != 0.0 && input.ctrl && !input.over_ui {
+            self.camera.zoom_at(1.2f32.powf(input.wheel), input.mouse, screen);
+            self.zoom_toast();
+            input.wheel = 0.0;
+        }
+        if input.middle_down {
+            if let Some(last) = self.pan_last {
+                self.camera.pan(input.mouse - last, screen);
+            }
+            self.pan_last = Some(input.mouse);
+        } else {
+            self.pan_last = None;
+        }
 
         // Mouse wheel adjusts the active tool / spawn size.
         if input.wheel != 0.0 && !input.over_ui {
@@ -538,7 +659,9 @@ impl App {
             }
         }
 
-        if input.left_pressed && !input.consumed {
+        if input.left_pressed && !input.consumed && self.challenge.is_none() && self.editor_press(m) {
+            // Placing the challenge ball or goal.
+        } else if input.left_pressed && !input.consumed {
             if self.spawner.is_open() {
                 self.record("Spawn shapes");
                 self.spawn_shape_at(m);
@@ -560,10 +683,14 @@ impl App {
                     self.start_link(m);
                 } else if tool == Tool::Zone {
                     self.zone_drag = Some(m);
+                } else if tool == Tool::Select {
+                    self.select_press(m, input.shift);
+                } else if tool == Tool::Pour {
+                    self.pouring = true;
                 } else if tool.is_field() {
                     self.field_active = true;
                 } else if tool == Tool::Bomb {
-                    let handles: Vec<RigidBodyHandle> = self.objects.iter().map(|o| o.body).collect();
+                    let handles = self.dynamic_bodies();
                     let hits = tools::detonate(
                         &mut self.world.bodies,
                         &handles,
@@ -602,7 +729,16 @@ impl App {
             }
         }
 
+        if input.left_down && self.select_drag.is_some() {
+            self.select_drag_to(m);
+        }
+
         if input.left_released || !input.left_down {
+            if self.select_drag.is_some() {
+                self.select_release(m);
+            }
+            self.pouring = false;
+            self.editor_release(m);
             if let Some(g) = self.grab.take() {
                 g.release(&mut self.world.bodies, to_phys(m.x, m.y));
             }
@@ -618,7 +754,9 @@ impl App {
             }
         }
 
-        if input.right_pressed && !input.consumed && !input.over_ui {
+        if self.s.tool == Tool::Pour && input.right_down && !input.consumed && !input.over_ui {
+            self.grains.erase(&mut self.world, m, 26.0);
+        } else if input.right_pressed && !input.consumed && !input.over_ui {
             let near_link = (self.s.tool == Tool::Link)
                 .then(|| {
                     (0..self.links.len())
@@ -637,7 +775,7 @@ impl App {
             } else if let Some(i) = object_at(&self.objects, &self.world, m.x, m.y) {
                 let o = &self.objects[i];
                 let linked = self.links.iter().any(|l| l.involves(o.body));
-                self.menu.open(m, o.body, o.name(), o.pinned, linked);
+                self.menu.open(input.mouse, o.body, o.name(), o.pinned, linked);
             }
         }
     }
@@ -677,6 +815,7 @@ impl App {
                     self.field_active = false;
                     self.stroke = None;
                     self.link_drag = None;
+                    self.select_drag = None;
                     self.spawner.fader.open = false;
                 }
             }
@@ -713,7 +852,8 @@ impl App {
                     for (i, p) in paths.into_iter().enumerate() {
                         let x =
                             screen_width() / 2.0 + (i as f32 - n as f32 / 2.0) * 50.0 + rand::gen_range(-40.0, 40.0);
-                        self.add_object(Source::File(p.to_string_lossy().into_owned()), vec2(x, self.spawn_y()), None);
+                        let at = self.spawn_point(x);
+                        self.add_object(Source::File(p.to_string_lossy().into_owned()), at, None);
                     }
                 }
             }
@@ -748,18 +888,22 @@ impl App {
                     self.record("Clear all");
                 }
                 self.clear_objects();
+                self.grains.clear(&mut self.world);
                 if n > 0 {
                     self.toasts.info(format!("Cleared {n} objects"));
                 }
             }
             Action::SaveScene => self.save_scene(),
             Action::LoadScene => {
-                let mut dlg = FileDialog::new().add_filter("Gravity scene", &[SCENE_EXT]);
+                let mut dlg = FileDialog::new()
+                    .add_filter("Scene or challenge", &[SCENE_EXT, config::CHALLENGE_EXT])
+                    .add_filter("Gravity scene", &[SCENE_EXT])
+                    .add_filter("Gravity challenge", &[config::CHALLENGE_EXT]);
                 if let Some(dir) = config::scene_dir().filter(|d| d.is_dir()) {
                     dlg = dlg.set_directory(dir);
                 }
                 if let Some(p) = dlg.pick_file() {
-                    self.load_scene(&p);
+                    self.open_path(&p.to_string_lossy(), vec2(0.0, 0.0));
                 }
             }
             Action::Screenshot => self.screenshot = true,
@@ -790,7 +934,7 @@ impl App {
             }
             Action::SpawnVisualizer => {
                 // From the keyboard it appears under the cursor, from the drawer near the top.
-                let at = if self.paused { vec2(screen_width() / 2.0, self.spawn_y()) } else { mouse };
+                let at = if self.paused { self.spawn_point(screen_width() / 2.0) } else { mouse };
                 self.record("Add visualizer");
                 self.spawn_visualizer(at);
             }
@@ -807,6 +951,23 @@ impl App {
             Action::Undo => self.undo(false),
             Action::Redo => self.undo(true),
             Action::ToggleRecording => self.toggle_recording(),
+            Action::ClearGrains if self.grains.is_empty() => {
+                self.toasts.status("grains", "No grains to remove  ·  hold the mouse with the Pour tool (K)");
+            }
+            Action::ClearGrains => {
+                let n = self.grains.len();
+                self.grains.clear(&mut self.world);
+                self.toasts.status("grains", format!("Removed {n} grains"));
+            }
+            Action::CycleWorldSize(d) => {
+                self.s.world_size = (self.s.world_size as i32 - 1 + d).rem_euclid(3) as u8 + 1;
+                let (aw, ah) = self.arena();
+                self.world.resize((aw, ah));
+                self.last_size = (aw, ah);
+                let screen = vec2(screen_width(), screen_height());
+                self.camera.fit(vec2(aw, ah), screen);
+                self.toasts.status("world", format!("World size ×{}  ·  zoom with Ctrl+wheel", self.s.world_size));
+            }
             Action::ToggleEffects => {
                 self.s.effects = !self.s.effects;
                 if !self.s.effects {
@@ -816,6 +977,7 @@ impl App {
             Action::OpenLibrary => {
                 let open = !self.library.fader.open;
                 if open {
+                    self.refresh_custom();
                     self.library.open(self.challenge.is_some());
                 } else {
                     self.library.fader.open = false;
@@ -823,10 +985,15 @@ impl App {
             }
             Action::LoadExample(i) => self.open_example(i),
             Action::StartChallenge(i) => self.start_challenge(i),
+            Action::StartCustom(i) => self.start_custom_index(i),
+            Action::OpenEditor(i) => self.open_editor(i),
+            Action::Editor(cmd) => self.editor_cmd(cmd),
             Action::ChallengeGo | Action::ChallengeRetry | Action::ChallengeNext | Action::ChallengeExit => {
                 self.challenge_action(action)
             }
             Action::Object(cmd, handle) => self.object_cmd(cmd, handle, mouse),
+            Action::Selection(_) if self.challenge.is_some() => {}
+            Action::Selection(cmd) => self.selection_cmd(cmd, mouse),
         }
     }
 
@@ -859,7 +1026,7 @@ impl App {
             ObjectCmd::Properties => {
                 let o = &self.objects[i];
                 let (p, _) = o.screen_pos(&self.world);
-                self.inspector.open(o.body, o.name(), p);
+                self.inspector.open(o.body, o.name(), self.view().to_screen(p));
                 self.inspector_recorded = false;
                 self.menu.close();
             }
@@ -898,8 +1065,25 @@ impl App {
     // ═══════════════════════════════════════════════════════════
     // Objects
     // ═══════════════════════════════════════════════════════════
-    fn spawn_y(&self) -> f32 {
-        self.hud.bottom().max(20.0) + 60.0 + rand::gen_range(0.0, 50.0)
+    /// World point near the top of the view, below the HUD, at screen x `sx`.
+    fn spawn_point(&self, sx: f32) -> Vec2 {
+        let sy = self.hud.bottom().max(20.0) + 60.0 + rand::gen_range(0.0, 50.0);
+        self.view().to_world(vec2(sx, sy))
+    }
+
+    /// World size in pixels.
+    fn arena(&self) -> (f32, f32) {
+        let k = self.s.world_size as f32;
+        (screen_width() * k, screen_height() * k)
+    }
+
+    fn view(&self) -> View {
+        self.camera.view(vec2(screen_width(), screen_height()))
+    }
+
+    fn zoom_toast(&mut self) {
+        let msg = format!("Zoom {:.0}%  ·  Ctrl+wheel, middle-drag to move, Home to fit", self.camera.zoom * 100.0);
+        self.toasts.status("zoom", msg);
     }
 
     fn add_object(&mut self, source: Source, at: Vec2, vel: Option<(f32, f32)>) -> bool {
@@ -928,7 +1112,13 @@ impl App {
             if self.s.spawn_color >= shapes::PALETTE.len() { rand::gen_range(0.0, 400.0) } else { 0.0 },
         );
         let rgb = ((c.r * 255.0) as u8, (c.g * 255.0) as u8, (c.b * 255.0) as u8);
-        let size = self.s.spawn_size.round() as u32;
+        self.spawn_shape(shape, rgb, self.s.spawn_size, at, false, Material::DEFAULT);
+        self.sound(crate::audio::sfx::Sound::Pop, at, 0.3);
+    }
+
+    /// Add a spawner shape of `size` px centred on `at` (world px).
+    fn spawn_shape(&mut self, shape: Shape, rgb: (u8, u8, u8), size: f32, at: Vec2, pinned: bool, material: Material) {
+        let size = size.round() as u32;
         let source = Source::Shape { shape, rgb };
         let visual = self
             .spawn_cache
@@ -942,8 +1132,8 @@ impl App {
         if self.spawn_cache.len() > 256 {
             self.spawn_cache.clear();
         }
-        let o =
-            Object::spawn(&mut self.world, source, visual, Placement { pos_px: (at.x, at.y), ..Default::default() });
+        let placement = Placement { pos_px: (at.x, at.y), pinned, material, ..Default::default() };
+        let o = Object::spawn(&mut self.world, source, visual, placement);
         self.objects.push(o);
     }
 
@@ -965,12 +1155,19 @@ impl App {
         links::prune(&mut self.links, &self.world);
     }
 
+    /// Every body the tools and zones act on: objects and grains.
+    fn dynamic_bodies(&self) -> Vec<RigidBodyHandle> {
+        self.objects.iter().map(|o| o.body).chain(self.grains.bodies()).collect()
+    }
+
     fn clear_objects(&mut self) {
         self.grab = None;
         self.link_drag = None;
         self.menu.close();
         self.inspector.close();
         self.zone_drag = None;
+        self.selection.clear();
+        self.select_drag = None;
         self.zones.clear();
         self.effects.clear();
         for l in self.links.drain(..) {
@@ -986,6 +1183,7 @@ impl App {
     // ═══════════════════════════════════════════════════════════
     /// Remember the scene before an edit, so it can be undone.
     fn record(&mut self, label: &str) {
+        self.editor_touched();
         let snap = Snapshot::capture(&self.world, &self.objects, &self.links, &self.zones);
         self.history.record(label, snap);
     }
@@ -1059,6 +1257,8 @@ impl App {
         let ext = ext_of(path);
         if ext == SCENE_EXT {
             self.load_scene(std::path::Path::new(path));
+        } else if ext == config::CHALLENGE_EXT {
+            self.open_challenge_file(std::path::Path::new(path));
         } else if Audio::is_audio_file(path) {
             self.load_audio(path);
         } else {
@@ -1117,7 +1317,7 @@ impl App {
                     FetchEvent::Item { name, data } => {
                         let x = rand::gen_range(60.0, (screen_width() - 60.0).max(61.0));
                         let src = Source::Memory { name, data: Arc::new(data) };
-                        let at = vec2(x, self.spawn_y() - 40.0);
+                        let at = self.spawn_point(x) - vec2(0.0, 40.0);
                         self.add_object(src, at, Some((rand::gen_range(-1.0, 1.0), 0.0)));
                     }
                     FetchEvent::Failed(msg) => self.toasts.error(msg),
@@ -1192,15 +1392,24 @@ impl App {
 
     fn simulate(&mut self, dt: f32, mouse: Vec2) {
         let running = !self.paused || self.step_once;
-        let step = if self.step_once { crate::config::PHYSICS_DT } else { dt * self.s.time_scale };
+        let time_scale = self.s.time_scale * self.slow_factor();
+        let step = if self.step_once { crate::config::PHYSICS_DT } else { dt * time_scale };
         if running {
             let pos = (mouse.x, mouse.y);
             self.world.reset_forces();
+            if self.pouring && self.s.tool == Tool::Pour {
+                let n = self.grains.pour(&mut self.world, self.s.grain_kind, mouse, POUR_RATE, dt);
+                self.pour_sound -= dt;
+                if n > 0 && self.pour_sound <= 0.0 {
+                    self.pour_sound = 0.15;
+                    self.sound(crate::audio::sfx::Sound::Pour, mouse, 0.5);
+                }
+            }
             if let Some(g) = &self.grab {
                 g.apply(&mut self.world.bodies, to_phys(mouse.x, mouse.y));
             }
+            let handles = self.dynamic_bodies();
             if self.field_active {
-                let handles: Vec<RigidBodyHandle> = self.objects.iter().map(|o| o.body).collect();
                 tools::apply_field(
                     &mut self.world.bodies,
                     &handles,
@@ -1210,12 +1419,12 @@ impl App {
                     self.s.tool_strength,
                 );
             }
-            self.world.border.apply_forces(&mut self.world, &self.objects);
+            self.world.border.apply_forces(&mut self.world, &handles);
             links::apply_springs(&self.links, &mut self.world);
             magnets::apply(&mut self.world, &self.objects);
-            let teleports = zones::apply(&self.zones, &mut self.portals, &mut self.world, &self.objects);
+            let teleports = zones::apply(&self.zones, &mut self.portals, &mut self.world, &handles);
             if self.s.effects {
-                for t in teleports {
+                for t in teleports.into_iter().take(6) {
                     self.effects.splash(crate::physics::to_screen(t.from.x, t.from.y), 0.6);
                     self.effects.splash(crate::physics::to_screen(t.to.x, t.to.y), 0.6);
                 }
@@ -1240,14 +1449,20 @@ impl App {
                 self.world.step_fixed();
                 self.step_once = false;
             } else {
-                self.world.step_frame(dt, self.s.time_scale);
+                self.world.step_frame(dt, time_scale);
             }
 
-            let dead = self.world.border.apply_positions(&mut self.world, &self.objects);
+            let dead = self.world.border.apply_positions(&mut self.world, &handles);
+            let mut dead_grains = HashSet::new();
             for h in dead {
                 if let Some(i) = self.objects.iter().position(|o| o.body == h) {
                     self.remove_object(i);
+                } else {
+                    dead_grains.insert(h);
                 }
+            }
+            if !dead_grains.is_empty() {
+                self.grains.remove(&mut self.world, &dead_grains);
             }
             self.process_impacts();
             links::prune(&mut self.links, &self.world);
@@ -1266,7 +1481,7 @@ impl App {
             o.update_anim(dt_ms);
         }
         self.blasts.retain(Blast::alive);
-        let floor = if self.world.border.walls().floor { screen_height() - WALL_T * PPM } else { f32::MAX };
+        let floor = if self.world.border.walls().floor { self.arena().1 - WALL_T * PPM } else { f32::MAX };
         let gravity = -self.world.gravity.y * PPM;
         self.effects.update(if running { step } else { 0.0 }, gravity, floor);
     }
@@ -1290,11 +1505,21 @@ impl App {
     // ═══════════════════════════════════════════════════════════
     fn draw(&mut self, dt: f32, input: &Input) {
         let (sw, sh) = (screen_width(), screen_height());
-        let m = input.mouse;
+        let screen = vec2(sw, sh);
+        let (aw, ah) = self.arena();
+        let m = input.world;
         self.bg.draw(sw, sh);
-        let floor = if self.world.border.walls().floor { WALL_T * PPM } else { 0.0 };
+        let view = self.view();
+        let floor = if self.world.border.walls().floor {
+            (sh - view.to_screen(vec2(0.0, ah - WALL_T * PPM)).y).max(0.0)
+        } else {
+            0.0
+        };
         visualizer::draw_background(self.s.vis_background, &self.audio.analyzer, sw, sh, floor);
-        self.world.border.draw(sw, sh);
+
+        // The scene, in world pixels.
+        self.camera.begin_world(screen);
+        self.world.border.draw(aw, ah);
         zones::draw(&self.zones);
 
         if self.s.trails {
@@ -1310,6 +1535,7 @@ impl App {
                 o.draw(&self.world);
             }
         }
+        self.grains.draw(&self.world);
         for l in &self.links {
             l.draw(&self.world);
         }
@@ -1339,7 +1565,7 @@ impl App {
         }
         if self.s.water {
             let rest = water::rest_level(&self.world, self.s.water_level);
-            self.water.draw(&self.world, rest, sw, sh);
+            self.water.draw(&self.world, rest, aw, ah);
         }
         self.effects.draw();
         for target in [self.menu.target, self.inspector.target].into_iter().flatten() {
@@ -1352,22 +1578,28 @@ impl App {
             }
         }
 
+        camera::end_world();
+
         if self.screenshot {
             self.screenshot = false;
             self.take_screenshot();
         }
         self.capture_frame();
 
+        // Tool feedback, still in world pixels.
+        self.camera.begin_world(screen);
         if let Some(g) = &self.grab {
             cursor::draw_grab(g, &self.world, m);
         }
         for b in &self.blasts {
             b.draw();
         }
-        if let Some(start) = self.zone_drag {
-            let zone = Zone::from_screen(self.s.zone_kind, start, m, 0.0, 0.0);
+        let zone_drag = self.zone_drag.map(|p| (p, self.s.zone_kind));
+        let goal_drag = self.editor_goal_drag().map(|p| (p, zones::ZoneKind::Goal));
+        if let Some((start, kind)) = zone_drag.or(goal_drag) {
+            let zone = Zone::from_screen(kind, start, m, 0.0, 0.0);
             let r = zone.rect();
-            let c = self.s.zone_kind.accent();
+            let c = kind.accent();
             draw_rectangle(r.x, r.y, r.w, r.h, theme::alpha(c, 0.12));
             draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, theme::alpha(c, 0.9));
         }
@@ -1404,15 +1636,20 @@ impl App {
             }
         }
 
+        if self.debug {
+            debug::draw_world(&self.world, &self.objects);
+        }
+        self.draw_selection(input.world);
+        camera::end_world();
+        self.draw_slow_vignette();
+
+        // Interface, in screen pixels.
+        let (m, world_mouse) = (input.mouse, m);
         let top = self.hud.bottom();
         if self.debug {
-            debug::draw(
-                &self.world,
-                &self.objects,
-                &debug::DebugStats { paused: self.paused, time_scale: self.s.time_scale },
-                m,
-                top,
-            );
+            let stats =
+                debug::DebugStats { paused: self.paused, time_scale: self.s.time_scale, zoom: self.camera.zoom };
+            debug::draw_panel(&self.world, &self.objects, &stats, world_mouse, top);
         }
 
         if self.challenge.is_none() {
@@ -1430,7 +1667,21 @@ impl App {
         if let Some(v) = self.challenge_view() {
             self.challenge_bar.draw(&v, top, m);
         }
-        self.library.draw(&self.s.challenges_done, m);
+        if let (Some(v), Some(ed)) = (self.editor_view(), self.editor.as_ref()) {
+            self.editor_bar.draw(&v, &ed.name, top, m);
+        }
+        if self.library.fader.visible() {
+            let mine: Vec<(String, String, f32)> = self
+                .custom
+                .iter()
+                .map(|(p, c)| {
+                    let stem = p.file_stem().map_or_else(|| c.name.clone(), |s| s.to_string_lossy().into_owned());
+                    (c.name.clone(), format!("custom:{stem}"), c.ink)
+                })
+                .collect();
+            let data = LibraryData { done: &self.s.challenges_done, stars: &self.s.challenge_stars, mine: &mine };
+            self.library.draw(&data, m);
+        }
         self.help.draw();
         self.draw_rec_indicator(top);
     }

@@ -154,6 +154,42 @@ pub fn tool(tool: Tool, c: Vec2, size: f32, color: Color, t: f32) {
             draw_triangle(cone - n, back - n, back + n, color);
             draw_circle(tip.x, tip.y, 1.6 * s, Color::new(0.1, 0.1, 0.12, color.a));
         }
+        Tool::Select => {
+            // Marching-ants box with an arrow pointer.
+            let r = Rect::new(c.x - 17.0 * s, c.y - 14.0 * s, 26.0 * s, 22.0 * s);
+            let corners = [vec2(r.x, r.y), vec2(r.x + r.w, r.y), vec2(r.x + r.w, r.y + r.h), vec2(r.x, r.y + r.h)];
+            let shift = (t * 2.0) % 1.0;
+            for i in 0..4 {
+                let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                for k in 0..4 {
+                    let u0 = (k as f32 + shift) / 4.0;
+                    let u1 = (u0 + 0.125).min(1.0);
+                    let (p0, p1) = (a.lerp(b, u0.min(1.0)), a.lerp(b, u1));
+                    draw_line(p0.x, p0.y, p1.x, p1.y, th * 0.8, soft);
+                }
+            }
+            let tip = vec2(c.x + 2.0 * s, c.y - 2.0 * s);
+            draw_triangle(tip, tip + vec2(0.0, 18.0 * s), tip + vec2(12.0 * s, 12.0 * s), color);
+            draw_line(tip.x + 5.0 * s, tip.y + 13.0 * s, tip.x + 9.0 * s, tip.y + 20.0 * s, th * 1.4, color);
+        }
+        Tool::Pour => {
+            // A tilted cup pouring a stream onto a heap.
+            let cup = [
+                vec2(c.x - 16.0 * s, c.y - 14.0 * s),
+                vec2(c.x - 4.0 * s, c.y - 18.0 * s),
+                vec2(c.x - 1.0 * s, c.y - 8.0 * s),
+                vec2(c.x - 12.0 * s, c.y - 4.0 * s),
+            ];
+            draw_triangle(cup[0], cup[1], cup[2], color);
+            draw_triangle(cup[0], cup[2], cup[3], color);
+            for k in 0..4 {
+                let u = ((t * 1.6 + k as f32 * 0.25) % 1.0) * 14.0 * s;
+                draw_circle(c.x + 1.0 * s, c.y - 6.0 * s + u, 1.6 * s, color);
+            }
+            for (dx, dy) in [(-6.0, 0.0), (0.0, 0.0), (6.0, 0.0), (-3.0, -4.5), (3.0, -4.5), (0.0, -9.0)] {
+                draw_circle(c.x + (dx + 2.0) * s, c.y + (14.0 + dy) * s, 2.6 * s, soft);
+            }
+        }
         Tool::Zone => {
             // A dashed frame with wind streaks blowing through it.
             let r = Rect::new(c.x - 17.0 * s, c.y - 13.0 * s, 34.0 * s, 26.0 * s);
@@ -193,6 +229,56 @@ pub fn tool(tool: Tool, c: Vec2, size: f32, color: Color, t: f32) {
     }
 }
 
+/// A five-pointed star, gold when `filled`.
+pub fn star(c: Vec2, size: f32, filled: bool) {
+    let (outer, inner) = (size / 2.0, size / 4.6);
+    let pts: Vec<Vec2> = (0..10)
+        .map(|i| {
+            let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 5.0;
+            let r = if i % 2 == 0 { outer } else { inner };
+            c + vec2(a.cos(), a.sin()) * r
+        })
+        .collect();
+    let colour = if filled { Color::from_rgba(255, 200, 60, 255) } else { Color::from_rgba(255, 255, 255, 40) };
+    for i in 0..10 {
+        draw_triangle(c, pts[i], pts[(i + 1) % 10], colour);
+    }
+    if filled {
+        for i in 0..10 {
+            let (a, b) = (pts[i], pts[(i + 1) % 10]);
+            draw_line(a.x, a.y, b.x, b.y, 1.0, Color::from_rgba(200, 130, 20, 200));
+        }
+    }
+}
+
+/// Small glyph for a grain kind: a little heap, puddle or scatter.
+pub fn grain_kind(kind: crate::physics::grains::GrainKind, c: Vec2, size: f32, color: Color, t: f32) {
+    use crate::physics::grains::GrainKind;
+    let s = size / 24.0;
+    match kind {
+        GrainKind::Sand => {
+            for (dx, dy) in [(-6.0, 5.0), (0.0, 5.0), (6.0, 5.0), (-3.0, 0.0), (3.0, 0.0), (0.0, -5.0)] {
+                draw_circle(c.x + dx * s, c.y + dy * s, 2.8 * s, color);
+            }
+        }
+        GrainKind::Liquid => {
+            let top = c.y + 1.0 * s;
+            draw_rectangle(c.x - 10.0 * s, top, 20.0 * s, 7.0 * s, color);
+            for k in 0..5 {
+                let x = c.x - 10.0 * s + k as f32 * 5.0 * s;
+                draw_circle(x + 2.5 * s, top + (t * 3.0 + k as f32).sin() * 1.2 * s, 2.8 * s, color);
+            }
+            draw_circle(c.x + 2.0 * s, c.y - 7.0 * s, 2.5 * s, color);
+        }
+        GrainKind::Beads => {
+            for (i, (dx, dy)) in [(-7.0, 4.0), (1.0, 6.0), (7.0, -1.0), (-2.0, -5.0)].iter().enumerate() {
+                let hop = ((t * 4.0 + i as f32 * 1.3).sin() * 2.0).abs() * s;
+                draw_circle(c.x + dx * s, c.y + dy * s - hop, 3.2 * s, color);
+            }
+        }
+    }
+}
+
 /// Small glyph for a link kind.
 pub fn link_kind(kind: crate::physics::links::LinkKind, c: Vec2, size: f32, color: Color) {
     use crate::physics::links::LinkKind;
@@ -226,6 +312,18 @@ pub fn link_kind(kind: crate::physics::links::LinkKind, c: Vec2, size: f32, colo
                 draw_line(prev.x, prev.y, p.x, p.y, 1.6 * s, color);
                 prev = p;
             }
+        }
+        LinkKind::Glue => {
+            // A tube with a drop.
+            draw_rectangle(c.x - 9.0 * s, c.y - 3.0 * s, 12.0 * s, 7.0 * s, color);
+            draw_triangle(
+                vec2(c.x + 3.0 * s, c.y - 3.0 * s),
+                vec2(c.x + 3.0 * s, c.y + 4.0 * s),
+                vec2(c.x + 8.0 * s, c.y),
+                color,
+            );
+            draw_circle(c.x + 9.0 * s, c.y + 6.0 * s, 2.5 * s, color);
+            return;
         }
         LinkKind::Motor => {
             draw_circle_lines(c.x, c.y, 8.0 * s, 2.0 * s, color);

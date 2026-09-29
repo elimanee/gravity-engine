@@ -7,6 +7,7 @@ pub mod context_menu;
 pub mod cursor;
 pub mod debug;
 pub mod drawer;
+pub mod editor_bar;
 pub mod help;
 pub mod hud;
 pub mod icons;
@@ -28,11 +29,16 @@ use rapier2d::prelude::RigidBodyHandle;
 
 /// Pointer / modifier snapshot for one frame.
 pub struct Input {
+    /// Pointer in screen pixels (for the UI).
     pub mouse: Vec2,
+    /// Pointer in world pixels (for the scene; see `camera`).
+    pub world: Vec2,
+    pub middle_down: bool,
     pub left_pressed: bool,
     pub left_down: bool,
     pub left_released: bool,
     pub right_pressed: bool,
+    pub right_down: bool,
     pub wheel: f32,
     pub shift: bool,
     pub ctrl: bool,
@@ -48,10 +54,13 @@ impl Input {
         let wheel = mouse_wheel().1;
         Input {
             mouse: vec2(mx, my),
+            world: vec2(mx, my),
+            middle_down: is_mouse_button_down(MouseButton::Middle),
             left_pressed: is_mouse_button_pressed(MouseButton::Left),
             left_down: is_mouse_button_down(MouseButton::Left),
             left_released: is_mouse_button_released(MouseButton::Left),
             right_pressed: is_mouse_button_pressed(MouseButton::Right),
+            right_down: is_mouse_button_down(MouseButton::Right),
             wheel: if wheel.abs() > 0.0 { wheel.signum() } else { 0.0 },
             shift: is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift),
             ctrl: is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl),
@@ -113,6 +122,16 @@ pub enum Action {
     Redo,
     ToggleRecording,
     ToggleEffects,
+    /// Remove every poured grain.
+    ClearGrains,
+    /// Open the challenge editor on the current scene (or on "My
+    /// challenges" entry `Some(i)`).
+    OpenEditor(Option<usize>),
+    Editor(EditorCmd),
+    /// Play "My challenges" entry `i`.
+    StartCustom(usize),
+    CycleWorldSize(i32),
+    Selection(SelectionCmd),
     OpenLibrary,
     LoadExample(usize),
     StartChallenge(usize),
@@ -121,6 +140,30 @@ pub enum Action {
     ChallengeNext,
     ChallengeExit,
     Object(ObjectCmd, RigidBodyHandle),
+}
+
+/// Challenge editor commands.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EditorCmd {
+    PlaceBall,
+    PlaceGoal,
+    /// Change the ink budget by this many steps.
+    Ink(i32),
+    Test,
+    Save,
+    Exit,
+}
+
+/// Commands for the Select tool's selection.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SelectionCmd {
+    Duplicate,
+    Delete,
+    TogglePin,
+    Glue,
+    Copy,
+    Paste,
+    All,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

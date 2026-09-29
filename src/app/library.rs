@@ -1,36 +1,57 @@
 //! Example scenes and challenge mode.
 
 use super::*;
+use crate::library::custom::{self, ChallengeFile};
 use crate::library::{challenges, examples, BALL_RGB};
 use crate::physics::zones::ZoneKind;
 use crate::ui::challenge_bar::ChallengeView;
+use std::rc::Rc;
 
 /// The ball must stay in the goal this long (s) to count.
 const WIN_HOLD: f32 = 0.6;
 /// After Go, the attempt fails when nothing happened for this long (s).
 const TIME_LIMIT: f64 = 15.0;
 
+/// Where a challenge comes from.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Origin {
+    BuiltIn(usize),
+    /// Index into the "My challenges" list.
+    Custom(usize),
+    /// A `.gchallenge` opened from elsewhere.
+    File,
+    /// Testing the level in the editor.
+    Test,
+}
+
+/// Everything needed to (re)start a challenge.
+pub(super) struct ChallengeDef {
+    pub origin: Origin,
+    pub id: String,
+    pub name: String,
+    pub goal: String,
+    pub ink: f32,
+    pub scene: scene::SceneFile,
+}
+
 /// A challenge being played.
 pub(super) struct ChallengeRun {
-    pub index: usize,
+    pub def: Rc<ChallengeDef>,
     pub ink_left: f32,
     pub started: bool,
     pub go_time: f64,
     pub in_goal: f32,
     pub won: bool,
     pub failed: bool,
-}
-
-impl ChallengeRun {
-    fn challenge(&self) -> &'static crate::library::Challenge {
-        &challenges::ALL[self.index]
-    }
+    /// Stars earned (set on a win).
+    pub stars: u8,
 }
 
 impl App {
     /// Replace the scene with `sc` (from a file or the library).
     pub(super) fn apply_scene(&mut self, sc: scene::SceneFile) -> (usize, usize) {
         self.clear_objects();
+        self.grains.clear(&mut self.world);
         self.s.gravity = sc.gravity.clamp(crate::settings::GRAVITY_RANGE.0, crate::settings::GRAVITY_RANGE.1);
         self.s.border = sc.border;
         self.world.set_border(sc.border);
@@ -55,33 +76,85 @@ impl App {
         let Some(e) = examples::ALL.get(i) else { return };
         self.challenge = None;
         self.record(&format!("Open {}", e.name));
-        self.apply_scene(e.scene(screen_width(), screen_height()));
+        let (aw, ah) = self.arena();
+        self.apply_scene(e.scene(aw, ah));
+        self.frame_design_area();
         self.paused = false;
         self.toasts.success(format!("{}  ·  {}", e.name, e.about));
     }
 
     pub(super) fn start_challenge(&mut self, i: usize) {
         let Some(c) = challenges::ALL.get(i) else { return };
-        self.apply_scene(c.scene(screen_width(), screen_height()));
+        let (aw, ah) = self.arena();
+        self.play(Rc::new(ChallengeDef {
+            origin: Origin::BuiltIn(i),
+            id: c.id.to_string(),
+            name: c.name.to_string(),
+            goal: c.goal.to_string(),
+            ink: c.ink,
+            scene: c.scene(aw, ah),
+        }));
+    }
+
+    /// Play a challenge from "My challenges" (or a file opened directly).
+    pub(super) fn start_custom(&mut self, origin: Origin, file: &ChallengeFile, path: &std::path::Path) {
+        let (aw, ah) = self.arena();
+        let stem = path.file_stem().map_or_else(|| file.name.clone(), |s| s.to_string_lossy().into_owned());
+        self.play(Rc::new(ChallengeDef {
+            origin,
+            id: format!("custom:{stem}"),
+            name: file.name.clone(),
+            goal: file.goal.clone(),
+            ink: file.ink,
+            scene: file.scene_for(aw, ah),
+        }));
+    }
+
+    pub(super) fn start_custom_index(&mut self, i: usize) {
+        self.refresh_custom();
+        let Some((path, file)) = self.custom.get(i).cloned() else { return };
+        self.start_custom(Origin::Custom(i), &file, &path);
+    }
+
+    /// Re-read the "My challenges" folder.
+    pub(super) fn refresh_custom(&mut self) {
+        self.custom = crate::config::challenge_dir().map(|d| custom::list(&d)).unwrap_or_default();
+    }
+
+    /// (Re)start the challenge `def`.
+    pub(super) fn play(&mut self, def: Rc<ChallengeDef>) {
+        self.apply_scene(def.scene.clone());
+        if def.origin != Origin::Test {
+            self.frame_design_area();
+        }
         self.history.clear();
         self.challenge = Some(ChallengeRun {
-            index: i,
-            ink_left: c.ink,
+            ink_left: def.ink,
+            def,
             started: false,
             go_time: 0.0,
             in_goal: 0.0,
             won: false,
             failed: false,
+            stars: 0,
         });
         self.s.tool = Tool::Draw;
         self.paused = false;
         self.stroke = None;
+        self.selection.clear();
         self.picker.fader.open = false;
         self.spawner.fader.open = false;
     }
 
+    /// Point the camera at the area built-in scenes are laid out in.
+    fn frame_design_area(&mut self) {
+        let (aw, ah) = self.arena();
+        let r = crate::library::design_rect(aw, ah);
+        self.camera.frame(r, vec2(screen_width(), screen_height()));
+    }
+
     /// Index of the challenge ball.
-    fn ball(&self) -> Option<usize> {
+    pub(super) fn ball(&self) -> Option<usize> {
         let gold = (BALL_RGB[0], BALL_RGB[1], BALL_RGB[2]);
         self.objects.iter().position(|o| matches!(o.source, Source::Shape { shape: Shape::Circle, rgb } if rgb == gold))
     }
@@ -125,43 +198,72 @@ impl App {
         run.in_goal = if inside { run.in_goal + dt } else { 0.0 };
         if run.in_goal >= WIN_HOLD {
             run.won = true;
-            let (id, name) = (run.challenge().id, run.challenge().name);
+            run.stars = custom::stars(1.0 - run.ink_left / run.def.ink.max(1.0));
+            let (stars, def) = (run.stars, run.def.clone());
             let at = crate::physics::to_screen(p.x, p.y);
             self.effects.confetti(at);
             self.effects.confetti(at + vec2(-120.0, 0.0));
             self.effects.confetti(at + vec2(120.0, 0.0));
-            if !self.s.challenges_done.iter().any(|d| d == id) {
-                self.s.challenges_done.push(id.to_string());
+            let shown = format!("{stars}/3 stars");
+            if def.origin == Origin::Test {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.verified = true;
+                }
+                self.toasts.success(format!("Solved in test ({shown})  ·  × goes back to the editor, then Save"));
+            } else {
+                let best = self.s.challenge_stars.entry(def.id.clone()).or_insert(0);
+                let improved = stars > *best;
+                *best = (*best).max(stars);
+                if !self.s.challenges_done.iter().any(|d| *d == def.id) {
+                    self.s.challenges_done.push(def.id.clone());
+                }
                 self.save_settings();
+                let more = if stars < 3 { "  ·  use less ink for more stars" } else { "" };
+                let new = if improved { "  ·  new best" } else { "" };
+                self.toasts.success(format!("Solved “{}”  ·  {shown}{new}{more}", def.name));
             }
-            self.toasts.success(format!("Solved “{name}”!"));
+            self.sound(crate::audio::sfx::Sound::Win, at, 0.8);
         } else if get_time() - run.go_time > TIME_LIMIT && run.in_goal == 0.0 {
             run.failed = true;
         }
     }
 
-    pub(super) fn challenge_view(&self) -> Option<ChallengeView<'static>> {
+    pub(super) fn challenge_view(&self) -> Option<ChallengeView<'_>> {
         let run = self.challenge.as_ref()?;
-        let c = run.challenge();
+        let def = &run.def;
+        let (head, has_next) = match def.origin {
+            Origin::BuiltIn(i) => {
+                (format!("CHALLENGE {} / {}", i + 1, challenges::ALL.len()), i + 1 < challenges::ALL.len())
+            }
+            Origin::Custom(i) => ("MY CHALLENGE".to_string(), i + 1 < self.custom.len()),
+            Origin::File => ("CHALLENGE".to_string(), false),
+            Origin::Test => ("TESTING".to_string(), false),
+        };
         Some(ChallengeView {
-            number: run.index + 1,
-            count: challenges::ALL.len(),
-            name: c.name,
-            goal: c.goal,
-            ink: (run.ink_left / c.ink).clamp(0.0, 1.0),
+            head,
+            name: &def.name,
+            goal: &def.goal,
+            ink: (run.ink_left / def.ink).clamp(0.0, 1.0),
             started: run.started,
             won: run.won,
             failed: run.failed,
-            has_next: run.index + 1 < challenges::ALL.len(),
+            has_next,
+            stars: run.stars,
+            testing: def.origin == Origin::Test,
         })
     }
 
     pub(super) fn challenge_action(&mut self, action: Action) {
-        let Some(index) = self.challenge.as_ref().map(|r| r.index) else { return };
+        let Some(def) = self.challenge.as_ref().map(|r| r.def.clone()) else { return };
         match action {
             Action::ChallengeGo => self.challenge_go(),
-            Action::ChallengeRetry => self.start_challenge(index),
-            Action::ChallengeNext => self.start_challenge(index + 1),
+            Action::ChallengeRetry => self.play(def),
+            Action::ChallengeNext => match def.origin {
+                Origin::BuiltIn(i) => self.start_challenge(i + 1),
+                Origin::Custom(i) => self.start_custom_index(i + 1),
+                _ => {}
+            },
+            Action::ChallengeExit if def.origin == Origin::Test => self.editor_back(),
             Action::ChallengeExit => {
                 self.challenge = None;
                 self.toasts.info("Left the challenge  ·  the scene stays as a sandbox");

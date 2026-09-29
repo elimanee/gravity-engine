@@ -1,12 +1,14 @@
 //! Bottom-left card with the current tool's settings: radius and strength
 //! for area tools, thickness / colour / pinning for Draw, the kind of link
-//! (and motor speed) for Link, and the kind of zone for Zone.
+//! (and motor speed) for Link, the kind of zone for Zone, and the
+//! selection commands for Select.
 
 use super::spawner::spawn_color;
 use super::theme::*;
 use super::widgets::*;
-use super::{icons, Action, Input};
+use super::{icons, Action, Input, SelectionCmd};
 use crate::config::{PPM, WALL_T};
+use crate::physics::grains::GrainKind;
 use crate::physics::links::LinkKind;
 use crate::physics::tools::Card;
 use crate::physics::zones::ZoneKind;
@@ -33,13 +35,27 @@ pub struct ToolCard {
     /// Card kept on screen while sliding out.
     card: Card,
     sliders: [SliderState; 5],
+    /// Objects currently selected (set by the app each frame).
+    pub selected: usize,
+    /// Grains in the world (set by the app each frame).
+    pub grains: usize,
 }
 
 impl Default for ToolCard {
     fn default() -> Self {
-        ToolCard { shown: 0.0, card: Card::None, sliders: Default::default() }
+        ToolCard { shown: 0.0, card: Card::None, sliders: Default::default(), selected: 0, grains: 0 }
     }
 }
+
+/// Select-card buttons, two rows of three.
+const SELECT_CMDS: [(SelectionCmd, &str); 6] = [
+    (SelectionCmd::Duplicate, "Duplicate"),
+    (SelectionCmd::Delete, "Delete"),
+    (SelectionCmd::TogglePin, "Pin"),
+    (SelectionCmd::Glue, "Glue"),
+    (SelectionCmd::Copy, "Copy"),
+    (SelectionCmd::Paste, "Paste"),
+];
 
 #[derive(Default)]
 struct Layout {
@@ -51,6 +67,11 @@ struct Layout {
     /// Kind buttons (link or zone kinds).
     kinds: Vec<Rect>,
     directions: Vec<Rect>,
+    /// Select card: selection count line and command buttons.
+    info: Option<Rect>,
+    commands: Vec<Rect>,
+    /// Pour card: "clear grains" button.
+    clear: Option<Rect>,
     /// Two hint lines at the bottom.
     hint: Option<[&'static str; 2]>,
 }
@@ -101,6 +122,17 @@ impl ToolCard {
                 }
                 add(30.0, 6.0);
             }
+            Card::Pour => {
+                add(50.0, 6.0);
+                add(28.0, 8.0);
+                add(30.0, 6.0);
+            }
+            Card::Select => {
+                add(18.0, 4.0);
+                add(28.0, 8.0);
+                add(28.0, 6.0);
+                add(30.0, 6.0);
+            }
             Card::None => {}
         }
         let h = y + 8.0;
@@ -140,6 +172,22 @@ impl ToolCard {
                 }
                 next();
                 l.hint = Some(s.zone_kind.hint());
+            }
+            Card::Pour => {
+                l.kinds = row_of(next(), GrainKind::ALL.len(), 6.0);
+                l.clear = Some(next());
+                next();
+                l.hint = Some(s.grain_kind.hint());
+            }
+            Card::Select => {
+                l.info = Some(next());
+                l.commands = row_of(next(), 3, 6.0);
+                l.commands.extend(row_of(next(), 3, 6.0));
+                next();
+                l.hint = Some([
+                    "Drag to move  ·  Shift+click adds or removes",
+                    "Ctrl+C / Ctrl+V  ·  Ctrl+D duplicates  ·  Del",
+                ]);
             }
             Card::None => {}
         }
@@ -212,6 +260,7 @@ impl ToolCard {
             if button(*r, input) {
                 match self.card {
                     Card::Link => s.link_kind = LinkKind::ALL[i],
+                    Card::Pour => s.grain_kind = GrainKind::ALL[i],
                     _ => s.zone_kind = ZoneKind::TOOL[i],
                 }
             }
@@ -219,6 +268,14 @@ impl ToolCard {
         for (i, r) in l.directions.iter().enumerate() {
             if button(*r, input) {
                 s.zone_angle = DIRECTIONS[i];
+            }
+        }
+        if l.clear.is_some_and(|r| button(r, input)) {
+            actions.push(Action::ClearGrains);
+        }
+        for (i, r) in l.commands.iter().enumerate() {
+            if button(*r, input) {
+                actions.push(Action::Selection(SELECT_CMDS[i].0));
             }
         }
         if button(l.head, input) {
@@ -271,6 +328,10 @@ impl ToolCard {
         for (i, r) in l.kinds.iter().enumerate() {
             let (label, kind_accent, active) = match self.card {
                 Card::Link => (LinkKind::ALL[i].label(), LinkKind::ALL[i].accent(), LinkKind::ALL[i] == s.link_kind),
+                Card::Pour => {
+                    let k = GrainKind::ALL[i];
+                    (k.label(), k.accent(), k == s.grain_kind)
+                }
                 _ => (ZoneKind::TOOL[i].label(), ZoneKind::TOOL[i].accent(), ZoneKind::TOOL[i] == s.zone_kind),
             };
             let hov = r.contains(mouse);
@@ -287,6 +348,7 @@ impl ToolCard {
             let c = vec2(r.x + r.w / 2.0, r.y + 18.0);
             match self.card {
                 Card::Link => icons::link_kind(LinkKind::ALL[i], c, 24.0, col),
+                Card::Pour => icons::grain_kind(GrainKind::ALL[i], c, 24.0, col, t),
                 _ => icons::zone_kind(ZoneKind::TOOL[i], c, 24.0, col, t),
             }
             text_centered(label, r.x + r.w / 2.0, r.y + 39.0, 12.0, fade(TEXT, f));
@@ -315,6 +377,36 @@ impl ToolCard {
             let col = fade(if active { TEXT } else { TEXT_DIM }, f);
             draw_line(c.x - d.x * 8.0, c.y - d.y * 8.0, c.x + d.x * 6.0, c.y + d.y * 6.0, 2.0, col);
             draw_triangle(c + d * 9.0, c + d * 3.0 + n * 5.0, c + d * 3.0 - n * 5.0, col);
+        }
+        if let Some(r) = l.clear {
+            let label = match self.grains {
+                0 => "No grains yet".to_string(),
+                n => format!("Clear {n} grains"),
+            };
+            draw_button(
+                r,
+                &label,
+                r.contains(mouse) && self.grains > 0,
+                false,
+                if self.grains > 0 { f } else { f * 0.5 },
+            );
+        }
+        if let Some(r) = l.info {
+            let line = match self.selected {
+                0 => "Nothing selected  ·  click or drag a box".to_string(),
+                1 => "1 object selected".to_string(),
+                n => format!("{n} objects selected"),
+            };
+            text(&line, r.x, r.y + 13.0, 13.0, fade(if self.selected > 0 { TEXT } else { TEXT_MUTED }, f));
+        }
+        for (i, r) in l.commands.iter().enumerate() {
+            let (cmd, label) = SELECT_CMDS[i];
+            let enabled = self.selected > 0 || cmd == SelectionCmd::Paste;
+            let hov = enabled && r.contains(mouse);
+            rrect(*r, 7.0, fade(if hov { SURFACE_HI } else { SURFACE_2 }, f));
+            rrect_lines(*r, 7.0, 1.0, fade(BORDER, f));
+            let col = if enabled { TEXT } else { TEXT_MUTED };
+            text_centered(label, r.x + r.w / 2.0, r.y + r.h / 2.0, 12.0, fade(col, f));
         }
         if let Some(hint) = l.hint {
             let r = l.panel;

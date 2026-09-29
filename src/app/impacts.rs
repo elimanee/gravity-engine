@@ -1,7 +1,9 @@
 //! What collisions and explosions do besides pushing things: particle
 //! effects, and breakable objects shattering into pieces.
 
+use super::juice::{HITS_PER_FRAME, HIT_SOUND_SPEED, SLOW_IMPACT};
 use super::*;
+use crate::audio::sfx::Sound;
 use crate::physics::fracture;
 use crate::physics::to_screen;
 use rapier2d::prelude::ColliderHandle;
@@ -28,7 +30,7 @@ impl App {
         let index: HashMap<ColliderHandle, usize> =
             self.objects.iter().enumerate().map(|(i, o)| (o.collider, i)).collect();
 
-        // (speed, point, normal) of each impact, and the objects it breaks.
+        // (speed, point, normal, size, hardness) of each impact, and the objects it breaks.
         let mut hits = Vec::with_capacity(impacts.len());
         let mut breaks: Vec<(RigidBodyHandle, Point<f32>)> = vec![];
         for imp in impacts {
@@ -43,7 +45,11 @@ impl App {
             let dv = |k: usize| masses[k].or(masses[1 - k]).map_or(0.0, |m| imp.impulse / m);
             let speed =
                 masses.iter().zip([dv(0), dv(1)]).filter(|(m, _)| m.is_some()).map(|(_, v)| v).fold(0.0, f32::max);
-            hits.push((speed, imp.point, imp.normal));
+            // What it sounds like: the larger object's size, the bouncier material.
+            let objs = sides.iter().flatten().map(|&i| &self.objects[i]);
+            let size = objs.clone().map(|o| o.size.x.max(o.size.y)).fold(0.0, f32::max);
+            let hard = objs.map(|o| o.material.bounce).fold(0.0, f32::max) * 1.3 + 0.25;
+            hits.push((speed, imp.point, imp.normal, size, hard));
             for (k, side) in sides.iter().enumerate() {
                 let Some(i) = *side else { continue };
                 let o = &self.objects[i];
@@ -53,9 +59,19 @@ impl App {
             }
         }
 
+        hits.sort_by(|a, b| b.0.total_cmp(&a.0));
+        for &(speed, point, _, size, hard) in hits.iter().take(HITS_PER_FRAME) {
+            if speed < HIT_SOUND_SPEED || size <= 0.0 {
+                break;
+            }
+            let volume = ((speed - HIT_SOUND_SPEED) / 14.0).min(1.0).powf(0.7) * 0.9;
+            self.sound(Sound::Hit { size, hard }, to_screen(point.x, point.y), volume);
+        }
+        if hits.first().is_some_and(|h| h.0 > SLOW_IMPACT) {
+            self.slow_motion(0.5);
+        }
         if self.s.effects {
-            hits.sort_by(|a, b| b.0.total_cmp(&a.0));
-            for &(speed, point, normal) in hits.iter().take(EFFECTS_PER_FRAME) {
+            for &(speed, point, normal, ..) in hits.iter().take(EFFECTS_PER_FRAME) {
                 let at = to_screen(point.x, point.y);
                 let n = vec2(normal.x, -normal.y);
                 if speed > SPARK_SPEED {
@@ -82,6 +98,11 @@ impl App {
 
     /// Explosion aftermath: flash, and breakable objects kicked hard enough shatter.
     pub(super) fn bomb_hits(&mut self, at: Vec2, hits: Vec<(RigidBodyHandle, f32)>) {
+        let force = (self.s.tool_strength / 600.0).clamp(0.2, 1.0);
+        self.sound(Sound::Boom, at, 0.5 + force * 0.5);
+        if hits.len() >= 3 {
+            self.slow_motion(force);
+        }
         if self.s.effects {
             self.effects.explosion(at, self.s.tool_radius * 0.35);
         }
@@ -163,6 +184,8 @@ impl App {
         if self.s.effects {
             self.effects.debris(to_screen(point.x, point.y), size.x.max(size.y) / 2.0, colour);
         }
+        self.sound(Sound::Shatter, to_screen(point.x, point.y), 0.8);
+        self.slow_motion(1.0);
         true
     }
 }

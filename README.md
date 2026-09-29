@@ -4,13 +4,29 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
-![Version](https://img.shields.io/badge/version-2.3-8b78ff)
+![Version](https://img.shields.io/badge/version-2.4-8b78ff)
 
 ![Title screen](docs/screenshots/title.png)
 
 | Sandbox | Settings drawer (Space) | Tool picker (Tab) |
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
+
+## What's new in 2.4
+
+| Challenge editor (Shift+E) | Sand, liquid and beads (K) |
+|---|---|
+| ![Challenge editor](docs/screenshots/editor.png) | ![Pour tool](docs/screenshots/pour.png) |
+
+- **Challenge editor** — build your own levels: place the ball and the goal, set the ink, test it (you must solve it to save it), and share the `.gchallenge` file. Your levels live in Library → *My challenges*.
+- **Ten new challenges** (fifteen in all) and **stars** — ★★★ when you use half the ink or less.
+- **Sound effects** — synthesised hits (by size and material), breaking glass, explosions, pops and a win fanfare.
+- **Slow motion** — time slows for a moment on shatters, explosions and very hard hits.
+- **Camera** — `Ctrl`+wheel or `+` / `-` to zoom, middle-drag to pan, `Home` to fit; worlds up to 3× the window (*World size*).
+- **Select tool** (`S`) — box-select, move, copy / paste, duplicate, pin, delete, and **glue** objects into rigid groups.
+- **Pour tool** (`K`) — sand that piles up, a liquid that flows, bouncy beads.
+
+![Selection and glue](docs/screenshots/select.png)
 
 ## What's new in 2.3
 
@@ -59,7 +75,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Shape spawner** (`N`) — Circle, Box, Triangle, Pentagon, Hexagon, Star, Capsule; pick a colour (or random) and size, click or hold to spawn
 - **88×31 button fetcher** (`F`) — 20 random classic web buttons scraped from 8 galleries (animated GIFs supported)
 - **Game logo fetcher** (`L`) — 20 random logos from [SteamGridDB](https://www.steamgriddb.com/) (needs an API key, see below)
-- **12 tools** — `Tab`, `1`–`9`, `0`, `J` or `Z`:
+- **14 tools** — `Tab`, `1`–`9`, `0`, `J`, `Z`, `S` or `K`:
 
   | # | Tool | Description |
   |---|------|-------------|
@@ -73,10 +89,12 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | 8 | Bomb | Click to detonate |
   | 9 | Swing | Hold by the clicked point: objects dangle and spin when thrown |
   | 0 | Draw | Draw shapes and planks (`Shift` pins / unpins them) |
-  | J | Link | Ropes, springs, hinges and motors between objects, or to the background |
+  | J | Link | Ropes, springs, hinges, motors and glue between objects, or to the background |
   | Z | Zone | Wind, float and portal areas |
+  | S | Select | Select objects (click, `Shift`+click, box), move them, copy / paste, duplicate, pin, delete, glue |
+  | K | Pour | Pour sand, liquid or beads; right-drag erases |
 
-  The tool card (bottom left) holds each tool's settings: radius / strength for area tools (mouse wheel: radius, `Shift`+wheel: strength), thickness, colour and pinning for Draw, the kind of link (and motor speed) for Link, and the kind of zone for Zone.
+  The tool card (bottom left) holds each tool's settings: radius / strength for area tools (mouse wheel: radius, `Shift`+wheel: strength), thickness, colour and pinning for Draw, the kind of link (and motor speed) for Link, the kind of zone for Zone, the selection commands for Select and the kind of grain for Pour.
 - **7 border modes** — `B` to cycle (`Shift+B` backwards):
 
   | Mode | Description |
@@ -91,7 +109,10 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **7 backgrounds** — `G` to cycle: Dark, Space, Grid, Sunset, Ocean, Aurora, Custom (`Shift+G` picks an image)
 - **Water** (`H`) — a pool with buoyancy and drag; level and density in the settings drawer, waves react to splashes and to the music
 - **Object properties** — bounce, friction, mass, gravity, breakable, magnet and conveyor per object (right-click → *Properties…*, or `I`)
-- **Library** (`E`) — example scenes and challenges
+- **Library** (`E`) — example scenes, fifteen challenges with star ratings, and your own challenges
+- **Challenge editor** (`Shift+E`) — make levels and share them as `.gchallenge` files
+- **Camera** — zoom (`Ctrl`+wheel, `+` / `-`, `Home` to fit) and pan (middle mouse button); *World size* makes the arena up to 3× the window
+- **Sound effects and slow motion** — procedural sounds for hits, glass, explosions and wins; a moment of slow motion on big impacts (both can be turned off)
 - **Undo / redo** — `Ctrl+Z` / `Ctrl+Y` for every edit
 - **Gravity** — presets ZERO / MOON / MARS / EARTH / JUPITER / HEAVY / REVERSE in the HUD, or any value with the slider
 - **Window shake** (`W`) — moving the window pushes every body; KDE Wayland via KWin DBus, X11 otherwise
@@ -109,8 +130,11 @@ Press **F1** in the app for the full list.
 |-------------|--------|
 | Left-drag | Use the current tool |
 | Right-click | Object menu (Resize, Duplicate, Resize all, Properties, Pin, Detach links, Delete) |
-| `Tab` / `1`–`9`, `0`, `J`, `Z` | Tool picker / select a tool |
-| `E` | Examples & challenges |
+| `Tab` / `1`–`9`, `0`, `J`, `Z`, `S`, `K` | Tool picker / select a tool |
+| `E` / `Shift+E` | Examples & challenges / challenge editor |
+| `Ctrl`+Wheel, `+` / `-`, `Home` | Zoom at the pointer, zoom in / out, fit the world |
+| Middle-drag | Pan the view |
+| `Ctrl+C` / `Ctrl+V` / `Ctrl+D` / `Ctrl+A` / `Ctrl+G` | Copy / paste / duplicate / select all / glue (Select tool) |
 | `Space` / `R` / `Enter` (in a challenge) | Release the ball / retry / next challenge |
 | Wheel / `Shift`+Wheel | Tool radius / strength (Draw: thickness; spawn size when the spawner is open) |
 | `I` | Properties of the object under the cursor |
@@ -128,7 +152,7 @@ Press **F1** in the app for the full list.
 | `W` / `T` / `H` | Toggle window shake / trails / water |
 | `M` / `P` | Load music / play-pause |
 | `V` / `Shift+V` | Visualizer behind objects / spawn a visualizer screen |
-| `Ctrl+S` / `Ctrl+O` | Save / open a scene |
+| `Ctrl+S` / `Ctrl+O` | Save a scene / open a scene or a challenge |
 | `F12` / `F11` | Screenshot / start or stop a GIF recording (scene only, without UI) |
 | `D` | Debug overlay |
 | `F1` | Help |
@@ -149,7 +173,9 @@ sudo apt install pkg-config libopenmpt-dev libasound2-dev libx11-dev libxi-dev \
 cargo run --release
 ```
 
-Command line: `gravity_engine [--no-title] [FILES…]` — files can be images, audio, playlists or `.gscene` scenes.
+Command line: `gravity_engine [--no-title] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes or `.gchallenge` challenges.
+
+`gravity_engine --verify-challenges` plays every built-in challenge with its reference solution (and once without drawing) and reports whether each one is solvable within its ink — handy when designing levels.
 
 On Windows, install libopenmpt with [vcpkg](https://vcpkg.io) (`vcpkg install libopenmpt:x64-windows`), copy its `libopenmpt.lib` to a folder as `openmpt.lib`, set `OPENMPT_LIB_DIR` to that folder and run `cargo build --release`; the DLLs from vcpkg's `installed\x64-windows\bin` must sit next to the executable (or be on `PATH`). `.github/scripts/openmpt-windows.ps1` does all of this in CI.
 
@@ -167,6 +193,7 @@ Everything lives in `~/.config/gravity_engine/` (or `$XDG_CONFIG_HOME/gravity_en
 |------|---------|
 | `settings.json` | Your preferences, saved on exit. Set `"show_title": false` to skip the title screen. |
 | `scenes/` | Default folder for saved scenes |
+| `challenges/` | Challenges made in the editor (`.gchallenge`), listed in Library → *My challenges* |
 | `sgdb_key` | SteamGridDB API key for the logo fetcher (or set `SGDB_API_KEY`) |
 
 Screenshots and GIFs go to `~/Pictures/gravity_engine/` (or `~/.config/gravity_engine/screenshots/` if you have no Pictures folder).
@@ -177,7 +204,9 @@ Screenshots and GIFs go to `~/Pictures/gravity_engine/` (or `~/.config/gravity_e
 src/
 ├── main.rs            entry point, window config, CLI
 ├── app/               app state and frame loop (input → UI → actions → simulation → render),
-│                      building tools, impacts and shattering, challenge mode
+│                      building tools, selection, impacts and shattering, sounds and slow
+│                      motion, challenge mode, challenge editor and verifier
+├── camera.rs          zoom / pan and the world ↔ screen mapping
 ├── config.rs          constants and paths          settings.rs   persisted preferences
 ├── assets.rs          image / GIF / SVG decoding   shapes.rs     procedural shapes
 ├── scene.rs           .gscene save / load          background.rs animated backgrounds
@@ -185,12 +214,14 @@ src/
 ├── recorder.rs        GIF recording                net.rs        web fetchers
 ├── effects.rs         particles                    library/      example scenes and challenges
 ├── window_tracker.rs  window shake
-├── audio/             tracker modules, streams, playlists and the visualizer's analyzer
-├── physics/           world, objects, tools, links, zones, water, magnets, fracture, border modes
+├── audio/             tracker modules, streams, playlists, the visualizer's analyzer, sound effects
+├── physics/           world, objects, tools, links, zones, water, grains, magnets, fracture, border modes
 └── ui/                theme, widgets, HUD, drawer, tool card, menus, properties panel, overlays, title screen
 ```
 
-`cargo test` runs the unit tests (decoding, shapes, drawings, links, motors, conveyors, magnets, zones, water, fracture, particles, scenes, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
+`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
+
+`gravity_engine --verify-challenges` (needs a display) checks that every built-in challenge can be solved.
 
 ## Usage of AI
 this project is mainly developed by ai (totally not with claude )BUT the project will be rewritten at some point in future (if i don't get too lazy)

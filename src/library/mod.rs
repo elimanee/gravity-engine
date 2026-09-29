@@ -6,6 +6,7 @@
 //! layout is centred horizontally and anchored to the floor.
 
 pub mod challenges;
+pub mod custom;
 pub mod examples;
 
 use crate::config::PPM;
@@ -19,6 +20,11 @@ use crate::shapes::Shape;
 
 const DESIGN_W: f32 = 1100.0;
 const DESIGN_H: f32 = 720.0;
+
+/// Where built-in scenes are laid out in a world of `aw × ah` pixels.
+pub fn design_rect(aw: f32, ah: f32) -> macroquad::prelude::Rect {
+    macroquad::prelude::Rect::new((aw - DESIGN_W) / 2.0, ah - DESIGN_H, DESIGN_W, DESIGN_H)
+}
 
 /// Colour reserved for the challenge ball (it identifies the ball).
 pub const BALL_RGB: [u8; 3] = [255, 196, 36];
@@ -174,6 +180,9 @@ pub struct Challenge {
     /// Length of line (px) the player may draw.
     pub ink: f32,
     pub build: fn(&mut Builder),
+    /// A known solution: pinned strokes in design px (checked by
+    /// `--verify-challenges`).
+    pub solution: &'static [&'static [(f32, f32)]],
 }
 
 impl Challenge {
