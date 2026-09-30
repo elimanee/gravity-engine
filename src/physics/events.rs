@@ -71,15 +71,44 @@ pub fn conveyor_speed(c: &Collider) -> f32 {
 }
 
 pub fn set_conveyor_speed(c: &mut Collider, speed: f32) {
-    c.user_data = speed.to_bits() as u128;
-    let hooks = if speed != 0.0 { ActiveHooks::MODIFY_SOLVER_CONTACTS } else { ActiveHooks::empty() };
+    c.user_data = (c.user_data & !(u32::MAX as u128)) | speed.to_bits() as u128;
+    let hooks = c.active_hooks() - ActiveHooks::MODIFY_SOLVER_CONTACTS;
+    let hooks = if speed != 0.0 { hooks | ActiveHooks::MODIFY_SOLVER_CONTACTS } else { hooks };
     c.set_active_hooks(hooks);
 }
 
-/// Makes conveyor surfaces drag what touches them along.
+/// A fresh id for the balls of one soft body.
+pub fn new_soft_group() -> u32 {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Soft-body group stored in the collider's user data (0: none).
+fn soft_group(c: &Collider) -> u32 {
+    (c.user_data >> 64) as u32
+}
+
+/// Colliders of the same soft group do not collide with each other.
+pub fn set_soft_group(c: &mut Collider, group: u32) {
+    c.user_data = (c.user_data & u64::MAX as u128) | ((group as u128) << 64);
+    c.set_active_hooks(c.active_hooks() | ActiveHooks::FILTER_CONTACT_PAIRS);
+}
+
+/// Makes conveyor surfaces drag what touches them along, and keeps the
+/// balls of a jelly from colliding with each other.
 pub struct Hooks;
 
 impl PhysicsHooks for Hooks {
+    fn filter_contact_pair(&self, ctx: &PairFilterContext) -> Option<SolverFlags> {
+        let group = |h: ColliderHandle| ctx.colliders.get(h).map_or(0, soft_group);
+        let (a, b) = (group(ctx.collider1), group(ctx.collider2));
+        if a != 0 && a == b {
+            None
+        } else {
+            Some(SolverFlags::COMPUTE_IMPULSES)
+        }
+    }
+
     fn modify_solver_contacts(&self, ctx: &mut ContactModificationContext) {
         let speed = |h: ColliderHandle| ctx.colliders.get(h).map_or(0.0, conveyor_speed);
         // The belt moves along the surface tangent; the sign depends on which

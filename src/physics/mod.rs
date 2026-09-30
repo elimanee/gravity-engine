@@ -7,6 +7,7 @@ pub mod grains;
 pub mod links;
 pub mod magnets;
 pub mod object;
+pub mod soft;
 pub mod tools;
 pub mod water;
 pub mod zones;

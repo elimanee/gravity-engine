@@ -89,6 +89,8 @@ pub struct Settings {
     /// Equalizer and playlist windows shown under the player.
     pub player_eq: bool,
     pub player_playlist: bool,
+    /// The player windows are a physical object in the world.
+    pub player_physics: bool,
     pub shuffle: bool,
     pub repeat: bool,
     pub eq_on: bool,
@@ -152,6 +154,7 @@ impl Default for Settings {
             player_skin_builtin: false,
             player_eq: false,
             player_playlist: true,
+            player_physics: false,
             shuffle: false,
             repeat: true,
             eq_on: false,

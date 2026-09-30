@@ -94,6 +94,15 @@ impl Grains {
         self.list.iter().map(|g| g.body)
     }
 
+    /// Positions (world px) of the liquid drops.
+    pub fn liquid_px(&self, world: &PhysWorld) -> Vec<Vec2> {
+        self.list
+            .iter()
+            .filter(|g| g.kind == GrainKind::Liquid)
+            .filter_map(|g| world.bodies.get(g.body).map(|b| to_screen(b.translation().x, b.translation().y)))
+            .collect()
+    }
+
     /// Add one grain at `at` (world px), moving at `vel` (m/s).
     pub fn add(&mut self, world: &mut PhysWorld, kind: GrainKind, at: Vec2, vel: Vector<f32>) {
         let (x, y) = to_phys(at.x, at.y);

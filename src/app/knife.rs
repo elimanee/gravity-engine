@@ -27,7 +27,7 @@ pub(super) struct Knife {
 }
 
 /// Whether segments `a`–`b` and `c`–`d` cross.
-fn segments_cross(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> bool {
+pub(super) fn segments_cross(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> bool {
     let cross = |o: Vec2, p: Vec2, q: Vec2| (p - o).perp_dot(q - o);
     let (d1, d2) = (cross(c, d, a), cross(c, d, b));
     let (d3, d4) = (cross(a, b, c), cross(a, b, d));
@@ -68,13 +68,19 @@ impl App {
                 }
             })
             .collect();
-        if cut.is_empty() {
+        let cloth = self.softs.iter().any(|s| {
+            s.kind == crate::physics::soft::SoftKind::Cloth
+                && (0..s.edges.len())
+                    .any(|e| s.edge_ends(&self.world, e).is_some_and(|(a, b)| segments_cross(last, m, a, b)))
+        });
+        if cut.is_empty() && !cloth {
             return;
         }
         if !self.knife.recorded {
             self.record("Cut");
             self.knife.recorded = true;
         }
+        self.knife_cloth(last, m);
         for &i in cut.iter().rev() {
             let l = self.links.remove(i);
             l.remove(&mut self.world);

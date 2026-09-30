@@ -21,6 +21,12 @@ enum Kind {
     Shard,
     /// Spinning paper rectangle.
     Confetti,
+    /// Tongue of fire: rises, shrinks, yellow → orange → red.
+    Flame,
+    /// Grey puff that rises and spreads.
+    Smoke,
+    /// Glowing speck that drifts up.
+    Ember,
 }
 
 struct Particle {
@@ -181,6 +187,50 @@ impl Effects {
         }
     }
 
+    /// A tongue of flame at `at`, `size` px across.
+    pub fn flame(&mut self, at: Vec2, size: f32) {
+        self.push(Particle {
+            kind: Kind::Flame,
+            pos: at + vec2(gen_range(-2.0, 2.0), 0.0),
+            vel: vec2(gen_range(-14.0, 14.0), -gen_range(30.0, 70.0)),
+            age: 0.0,
+            life: gen_range(0.35, 0.7),
+            size: size * gen_range(0.7, 1.1),
+            color: WHITE,
+            angle: gen_range(0.0, TAU),
+            spin: 0.0,
+        });
+        if gen_range(0, 12) == 0 {
+            self.push(Particle {
+                kind: Kind::Ember,
+                pos: at,
+                vel: vec2(gen_range(-40.0, 40.0), -gen_range(60.0, 140.0)),
+                age: 0.0,
+                life: gen_range(0.6, 1.4),
+                size: gen_range(1.0, 1.8),
+                color: WHITE,
+                angle: gen_range(0.0, TAU),
+                spin: gen_range(4.0, 9.0),
+            });
+        }
+    }
+
+    /// A puff of smoke (grey `shade` 0 dark ‥ 1 light, e.g. steam).
+    pub fn smoke(&mut self, at: Vec2, size: f32, shade: f32) {
+        let g = 0.18 + shade * 0.7;
+        self.push(Particle {
+            kind: Kind::Smoke,
+            pos: at + vec2(gen_range(-4.0, 4.0), 0.0),
+            vel: vec2(gen_range(-10.0, 10.0), -gen_range(20.0, 45.0)),
+            age: 0.0,
+            life: gen_range(1.2, 2.2),
+            size: size * gen_range(0.5, 0.8),
+            color: Color::new(g, g, g + 0.02, 0.22 + shade * 0.1),
+            angle: 0.0,
+            spin: 0.0,
+        });
+    }
+
     /// Advance by `dt` seconds; `gravity` is in px/s², screen y down.
     pub fn update(&mut self, dt: f32, gravity: f32, floor_y: f32) {
         for p in &mut self.items {
@@ -191,6 +241,9 @@ impl Effects {
                 Kind::Drop => (gravity, 0.3),
                 Kind::Shard => (gravity, 0.6),
                 Kind::Confetti => (gravity * 0.18, 2.2),
+                Kind::Flame => (-260.0, 2.5),
+                Kind::Smoke => (-18.0, 1.2),
+                Kind::Ember => (-40.0, 1.0),
             };
             p.vel.y += g * dt;
             p.vel *= (-drag * dt).exp();
@@ -200,8 +253,13 @@ impl Effects {
             }
             p.pos += p.vel * dt;
             p.angle += p.spin * dt;
-            if p.kind == Kind::Dust {
-                p.size += dt * 9.0;
+            match p.kind {
+                Kind::Dust => p.size += dt * 9.0,
+                Kind::Smoke => p.size += dt * 14.0,
+                Kind::Flame => p.size = (p.size - dt * p.size * 1.2).max(0.5),
+                // Embers wander as they rise.
+                Kind::Ember => p.vel.x += (p.age * p.spin + p.angle).sin() * 90.0 * dt,
+                _ => {}
             }
             // Debris and confetti settle on the floor instead of falling through.
             if matches!(p.kind, Kind::Shard | Kind::Confetti) && p.pos.y > floor_y {
@@ -214,6 +272,12 @@ impl Effects {
     }
 
     pub fn draw(&self) {
+        // Smoke goes behind the flames.
+        for p in self.items.iter().filter(|p| p.kind == Kind::Smoke) {
+            let fade = 1.0 - p.age / p.life;
+            let a = p.color.a * fade * (p.age / 0.15).min(1.0);
+            draw_circle(p.pos.x, p.pos.y, p.size, Color { a, ..p.color });
+        }
         for p in &self.items {
             let t = p.age / p.life;
             let fade = 1.0 - t;
@@ -235,6 +299,22 @@ impl Effects {
                     let s = p.size;
                     let pts = [0.0f32, 2.2, 4.1].map(|o| p.pos + dir(p.angle + o) * s);
                     draw_triangle(pts[0], pts[1], pts[2], c);
+                }
+                Kind::Smoke => {}
+                Kind::Flame => {
+                    // Hot core over a wider, redder glow.
+                    let outer = Color::new(1.0, 0.42 - 0.3 * t, 0.08, 0.55 * fade);
+                    let inner = Color::new(1.0, 0.92 - 0.5 * t, 0.55 - 0.5 * t, 0.9 * fade * fade);
+                    // Tongues: taller than wide, leaning with their drift.
+                    let lean = (p.vel.x / 120.0).clamp(-0.5, 0.5).to_degrees();
+                    draw_circle(p.pos.x, p.pos.y, p.size * 1.7, Color::new(1.0, 0.5, 0.1, 0.06 * fade));
+                    draw_ellipse(p.pos.x, p.pos.y, p.size * 0.8, p.size * 1.35, lean, outer);
+                    draw_ellipse(p.pos.x, p.pos.y + p.size * 0.25, p.size * 0.45, p.size * 0.75, lean, inner);
+                }
+                Kind::Ember => {
+                    let flicker = 0.6 + 0.4 * (p.age * 30.0 + p.angle).sin().abs();
+                    let c = Color::new(1.0, 0.7 - 0.4 * t, 0.25, fade * flicker);
+                    draw_circle(p.pos.x, p.pos.y, p.size, c);
                 }
                 Kind::Confetti => {
                     let c = Color { a: (fade * 3.0).min(1.0), ..p.color };

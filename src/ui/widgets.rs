@@ -134,8 +134,18 @@ pub fn draw_stepper(r: Rect, label: &str, value: &str, accent: Color, mouse: Vec
 }
 
 /// Restrict drawing to `r` (screen coordinates); `None` removes the clip.
+/// Pixels per UI unit of the current render target, when it is not the
+/// screen (0: the screen's DPI scale).
+static CLIP_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Drawing into a render target with `scale` pixels per unit (`None`: the screen).
+pub fn set_clip_scale(scale: Option<f32>) {
+    CLIP_SCALE.store(scale.unwrap_or(0.0).to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
 pub fn clip(r: Option<Rect>) {
-    let dpi = screen_dpi_scale();
+    let custom = f32::from_bits(CLIP_SCALE.load(std::sync::atomic::Ordering::Relaxed));
+    let dpi = if custom > 0.0 { custom } else { screen_dpi_scale() };
     let mut gl = unsafe { get_internal_gl() };
     gl.flush();
     gl.quad_gl.scissor(

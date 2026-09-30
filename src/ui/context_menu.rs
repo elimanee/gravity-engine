@@ -21,6 +21,8 @@ enum Item {
     SizeAll,
     Properties,
     Pin,
+    Jelly,
+    Flag,
     Unlink,
     Delete,
 }
@@ -35,6 +37,8 @@ impl Item {
             Item::Unlink => "Detach links",
             Item::Pin if pinned => "Unpin",
             Item::Pin => "Pin in place",
+            Item::Jelly => "Make it jelly   (U)",
+            Item::Flag => "Hang it as a flag",
             Item::Delete => "Delete",
         }
     }
@@ -69,7 +73,8 @@ impl Default for ContextMenu {
 
 impl ContextMenu {
     pub fn open(&mut self, at: Vec2, target: RigidBodyHandle, title: String, pinned: bool, linked: bool) {
-        self.items = vec![Item::Resize, Item::Duplicate, Item::SizeAll, Item::Properties, Item::Pin];
+        self.items =
+            vec![Item::Resize, Item::Duplicate, Item::SizeAll, Item::Properties, Item::Pin, Item::Jelly, Item::Flag];
         if linked {
             self.items.push(Item::Unlink);
         }
@@ -161,6 +166,8 @@ impl ContextMenu {
                         Item::Pin => Some(ObjectCmd::TogglePin),
                         Item::Properties => Some(ObjectCmd::Properties),
                         Item::Unlink => Some(ObjectCmd::Unlink),
+                        Item::Jelly => Some(ObjectCmd::Jelly),
+                        Item::Flag => Some(ObjectCmd::Flag),
                         Item::Delete => Some(ObjectCmd::Delete),
                         _ => None,
                     };
