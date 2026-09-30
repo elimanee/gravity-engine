@@ -2,6 +2,7 @@
 //! (including HTTP radio streams) via rodio + symphonia.
 
 use super::analyzer::Tap;
+use super::eq::{EqParams, EqSource};
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 use std::io::BufReader;
 use std::sync::Arc;
@@ -56,7 +57,7 @@ impl<S: Source<Item = f32>> Source for Tapped<S> {
 
 /// Length of a local audio file, from its container (rodio 0.19 gets the
 /// fractional part of `total_duration` wrong).
-fn probe_duration(path: &str) -> Option<Duration> {
+pub fn probe_duration(path: &str) -> Option<Duration> {
     use symphonia::core::formats::FormatOptions;
     use symphonia::core::io::MediaSourceStream;
     use symphonia::core::meta::MetadataOptions;
@@ -98,6 +99,27 @@ pub fn parse_pls(content: &str, dir: &std::path::Path) -> Vec<String> {
         }
     }
     entries.into_values().collect()
+}
+
+/// Parse an .m3u / .m3u8 playlist: one path or URL per line, `#` lines
+/// are comments. Relative paths are resolved like in [`parse_pls`].
+pub fn parse_m3u(content: &str, dir: &std::path::Path) -> Vec<String> {
+    content
+        .lines()
+        .map(|l| l.trim().trim_start_matches('\u{feff}'))
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter_map(|raw| {
+            let lower = raw.to_ascii_lowercase();
+            let is_url = ["http://", "https://"].iter().any(|p| lower.starts_with(p));
+            let path = raw.strip_prefix("file://").unwrap_or(raw);
+            let entry = if is_url || std::path::Path::new(path).is_absolute() {
+                path.to_string()
+            } else {
+                dir.join(path).to_string_lossy().into_owned()
+            };
+            (is_url || std::path::Path::new(&entry).exists()).then_some(entry)
+        })
+        .collect()
 }
 
 /// Lets an HTTP body satisfy rodio's `Read + Seek` bound. Seeking is a no-op;
@@ -142,154 +164,77 @@ pub struct StreamInfo {
     pub fmt: String,
 }
 
-/// An entry queued in the sink.
-struct Track {
-    /// Index in the playlist.
-    index: usize,
-    name: String,
-    duration: Option<Duration>,
-}
-
+/// Plays one file or radio stream at a time; the playlist is the caller's.
 pub struct StreamPlayer {
     _stream: OutputStream,
     handle: OutputStreamHandle,
     sink: Option<Sink>,
     state: StreamInfo,
-    /// Files or URLs being played; re-queued when the sink drains, so a
-    /// single file or a whole playlist loops.
-    playlist: Vec<String>,
-    /// What the sink holds, in order.
-    tracks: Vec<Track>,
+    duration: Option<Duration>,
     volume: f32,
     tap: Arc<Tap>,
+    eq: Arc<EqParams>,
 }
 
 impl StreamPlayer {
-    pub fn new(tap: Arc<Tap>) -> Option<Self> {
+    pub fn new(tap: Arc<Tap>, eq: Arc<EqParams>) -> Option<Self> {
         let (stream, handle) = OutputStream::try_default().ok()?;
         Some(Self {
             _stream: stream,
             handle,
             sink: None,
             state: StreamInfo::default(),
-            playlist: vec![],
-            tracks: vec![],
+            duration: None,
             volume: 1.0,
             tap,
+            eq,
         })
     }
 
-    /// Play a single file, looping forever.
-    pub fn load(&mut self, path: &str) -> Result<(), String> {
-        std::fs::metadata(path).map_err(|e| e.to_string())?;
-        self.load_playlist(vec![path.to_string()], crate::config::file_name_of(path))?;
-        self.state.fmt = crate::config::ext_of(path).to_uppercase();
-        Ok(())
-    }
-
-    /// Queue every entry of a playlist; loops as a whole.
-    pub fn load_playlist(&mut self, paths: Vec<String>, display_name: String) -> Result<usize, String> {
-        self.playlist = paths;
-        self.state = StreamInfo::default();
-        let n = self.queue_from(0)?;
-        self.state = StreamInfo { loaded: true, playing: true, name: display_name, fmt: "PLS".into() };
-        Ok(n)
-    }
-
-    /// Replace the sink with the playlist from entry `start` on.
-    fn queue_from(&mut self, start: usize) -> Result<usize, String> {
+    /// Start playing `path` (a file or an http(s) URL) from the beginning.
+    pub fn play(&mut self, path: &str) -> Result<(), String> {
+        type Boxed = Box<dyn Source<Item = f32> + Send>;
+        let lower = path.to_ascii_lowercase();
+        let source: Boxed = if lower.starts_with("http://") || lower.starts_with("https://") {
+            let s = HttpStream::open(path).ok_or("could not open the stream")?;
+            Box::new(Decoder::new(BufReader::new(s)).map_err(|e| e.to_string())?.convert_samples())
+        } else {
+            let f = std::fs::File::open(path).map_err(|e| e.to_string())?;
+            Box::new(Decoder::new(BufReader::new(f)).map_err(|e| e.to_string())?.convert_samples())
+        };
         if let Some(s) = self.sink.take() {
             s.stop();
         }
         let sink = Sink::try_new(&self.handle).map_err(|e| e.to_string())?;
         sink.set_volume(self.volume);
-        self.tracks.clear();
-        for (index, p) in self.playlist.iter().enumerate().skip(start) {
-            let lower = p.to_ascii_lowercase();
-            type Boxed = Box<dyn Source<Item = f32> + Send>;
-            let decoder: Option<Result<Boxed, _>> = if lower.starts_with("http://") || lower.starts_with("https://") {
-                HttpStream::open(p)
-                    .map(|s| Decoder::new(BufReader::new(s)).map(|d| Box::new(d.convert_samples()) as Boxed))
-            } else {
-                std::fs::File::open(p)
-                    .ok()
-                    .map(|f| Decoder::new(BufReader::new(f)).map(|d| Box::new(d.convert_samples()) as Boxed))
-            };
-            match decoder {
-                Some(Ok(d)) => {
-                    let duration = probe_duration(p);
-                    sink.append(Tapped::new(d, self.tap.clone()));
-                    self.tracks.push(Track { index, name: crate::config::file_name_of(p), duration });
-                }
-                _ => eprintln!("stream failed: {p}"),
-            }
-        }
-        if self.tracks.is_empty() {
-            return Err("no playable entries".into());
-        }
-        if !self.state.playing && self.state.loaded {
-            sink.pause();
-        }
+        sink.append(Tapped::new(EqSource::new(source, self.eq.clone()), self.tap.clone()));
         self.sink = Some(sink);
-        Ok(self.tracks.len())
+        self.duration = probe_duration(path);
+        self.state = StreamInfo {
+            loaded: true,
+            playing: true,
+            name: crate::config::file_name_of(path),
+            fmt: crate::config::ext_of(path).to_uppercase(),
+        };
+        Ok(())
     }
 
-    /// Call once per frame: re-queues the playlist when the sink drains.
-    pub fn tick(&mut self) {
-        if self.playlist.is_empty() || !self.state.playing {
-            return;
-        }
-        if self.sink.as_ref().is_some_and(|s| s.empty()) && self.queue_from(0).is_err() {
-            self.stop();
-        }
+    /// The song played to its end.
+    pub fn finished(&self) -> bool {
+        self.state.loaded && self.state.playing && self.sink.as_ref().is_some_and(|s| s.empty())
     }
 
-    /// The track playing now.
-    fn current(&self) -> Option<&Track> {
-        let left = self.sink.as_ref()?.len();
-        self.tracks.get(self.tracks.len().checked_sub(left)?)
-    }
-
-    /// Seconds into the current track, and its length when known.
+    /// Seconds played, and the length when known.
     pub fn position(&self) -> Option<(f64, Option<f64>)> {
         let sink = self.sink.as_ref()?;
-        let t = self.current()?;
-        Some((sink.get_pos().as_secs_f64(), t.duration.map(|d| d.as_secs_f64())))
+        Some((sink.get_pos().as_secs_f64(), self.duration.map(|d| d.as_secs_f64())))
     }
 
-    /// Name of the current entry of a playlist (None for a single file).
-    pub fn track_name(&self) -> Option<String> {
-        (self.playlist.len() > 1).then(|| self.current().map(|t| t.name.clone())).flatten()
-    }
-
-    /// Jump to `frac` (0‥1) of the current track, when its length is known.
+    /// Jump to `frac` (0‥1) of the song, when its length is known.
     pub fn seek(&mut self, frac: f64) {
-        let Some((_, Some(len))) = self.position() else { return };
-        if let Some(s) = &self.sink {
-            s.try_seek(Duration::from_secs_f64((len * frac.clamp(0.0, 1.0)).min(len - 0.05).max(0.0))).ok();
-        }
-    }
-
-    pub fn next(&mut self) {
-        let Some(sink) = &self.sink else { return };
-        if sink.len() > 1 {
-            sink.skip_one();
-        } else {
-            self.queue_from(0).ok();
-        }
-    }
-
-    /// Back to the start of the track, or to the previous one when already
-    /// near its start.
-    pub fn previous(&mut self) {
-        let Some((pos, _)) = self.position() else { return };
-        let index = self.current().map_or(0, |t| t.index);
-        let restart = pos > 3.0 || index == 0;
-        let seeked = restart && self.sink.as_ref().is_some_and(|s| s.try_seek(Duration::ZERO).is_ok());
-        if !seeked {
-            let start = if restart { index } else { index - 1 };
-            self.queue_from(start).ok();
-        }
+        let (Some(sink), Some(len)) = (&self.sink, self.duration) else { return };
+        let len = len.as_secs_f64();
+        sink.try_seek(Duration::from_secs_f64((len * frac.clamp(0.0, 1.0)).min(len - 0.05).max(0.0))).ok();
     }
 
     pub fn toggle_pause(&mut self) {
@@ -307,8 +252,7 @@ impl StreamPlayer {
         if let Some(s) = self.sink.take() {
             s.stop();
         }
-        self.playlist.clear();
-        self.tracks.clear();
+        self.duration = None;
         self.state = StreamInfo::default();
     }
 
@@ -338,6 +282,19 @@ mod tests {
         assert_eq!(got.len(), 2);
         assert!(got[0].ends_with("a.mp3"));
         assert_eq!(got[1], "http://radio.example/stream");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn m3u_skips_comments_and_missing_files() {
+        let dir = std::env::temp_dir().join(format!("ge_m3u_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("b.ogg"), b"x").unwrap();
+        let m3u = "#EXTM3U\n#EXTINF:12,Song\nb.ogg\n\nmissing.mp3\nhttps://radio.example/live\n";
+        let got = parse_m3u(m3u, &dir);
+        assert_eq!(got.len(), 2);
+        assert!(got[0].ends_with("b.ogg"));
+        assert_eq!(got[1], "https://radio.example/live");
         std::fs::remove_dir_all(dir).ok();
     }
 }

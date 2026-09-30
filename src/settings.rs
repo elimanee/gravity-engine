@@ -86,6 +86,17 @@ pub struct Settings {
     pub player_skin: Option<String>,
     /// The built-in look was chosen over the installed skins.
     pub player_skin_builtin: bool,
+    /// Equalizer and playlist windows shown under the player.
+    pub player_eq: bool,
+    pub player_playlist: bool,
+    pub shuffle: bool,
+    pub repeat: bool,
+    pub eq_on: bool,
+    /// Gains in dB (±12).
+    pub eq_preamp: f32,
+    pub eq_bands: [f32; 10],
+    /// Songs in the playlist (files or URLs), restored at start.
+    pub playlist: Vec<String>,
 
     /// Procedural sound effects (hits, breaking glass, explosions…).
     pub sfx: bool,
@@ -139,6 +150,14 @@ impl Default for Settings {
             player_double: true,
             player_skin: None,
             player_skin_builtin: false,
+            player_eq: false,
+            player_playlist: true,
+            shuffle: false,
+            repeat: true,
+            eq_on: false,
+            eq_preamp: 0.0,
+            eq_bands: [0.0; 10],
+            playlist: vec![],
             sfx: true,
             sfx_volume: 0.6,
             slow_motion: true,
@@ -197,6 +216,11 @@ impl Settings {
         self.shake_force = clamp(self.shake_force, SHAKE_RANGE, d.shake_force);
         self.volume = clamp(self.volume, (0.0, 1.0), d.volume);
         self.sfx_volume = clamp(self.sfx_volume, (0.0, 1.0), d.sfx_volume);
+        let db = crate::audio::eq::MAX_DB;
+        self.eq_preamp = clamp(self.eq_preamp, (-db, db), 0.0);
+        for b in &mut self.eq_bands {
+            *b = clamp(*b, (-db, db), 0.0);
+        }
         self.vis_gain = clamp(self.vis_gain, VIS_GAIN_RANGE, d.vis_gain);
         if self.vis_object == VisStyle::Off {
             self.vis_object = VisStyle::Bars;

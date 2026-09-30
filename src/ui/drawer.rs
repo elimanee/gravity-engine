@@ -69,6 +69,7 @@ impl Row {
 const WORLD_BUTTONS: &[(&str, Action)] = &[("Image…", Action::PickBackground), ("Reset all", Action::ResetSettings)];
 const AUDIO_BUTTONS: &[(&str, Action)] = &[("Load…", Action::LoadAudio), ("Play / Pause", Action::ToggleAudio)];
 const ADD_BUTTONS: &[(&str, Action)] = &[("Images…", Action::AddImages), ("Shapes", Action::ToggleSpawner)];
+const RAGDOLL_BUTTONS: &[(&str, Action)] = &[("Ragdoll  (O)", Action::SpawnRagdoll)];
 const WEB_BUTTONS: &[(&str, Action)] = &[("88×31 buttons", Action::FetchButtons), ("Game logos", Action::FetchLogos)];
 const SCENE_BUTTONS: &[(&str, Action)] = &[("Save…", Action::SaveScene), ("Open…", Action::LoadScene)];
 const VIS_BUTTONS: &[(&str, Action)] = &[("Spawn visualizer  (Shift+V)", Action::SpawnVisualizer)];
@@ -193,6 +194,7 @@ impl Drawer {
             Row::Header("ADD OBJECTS"),
             Row::Buttons(LIBRARY_BUTTONS),
             Row::Buttons(ADD_BUTTONS),
+            Row::Buttons(RAGDOLL_BUTTONS),
             Row::Buttons(WEB_BUTTONS),
             Row::Header("SCENE"),
             Row::Buttons(SCENE_BUTTONS),

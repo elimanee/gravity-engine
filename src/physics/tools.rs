@@ -22,6 +22,7 @@ pub enum Tool {
     Zone,
     Select,
     Pour,
+    Knife,
 }
 
 /// What the bottom-left tool card shows for a tool.
@@ -62,6 +63,7 @@ impl Tool {
         Tool::Zone,
         Tool::Select,
         Tool::Pour,
+        Tool::Knife,
     ];
 
     /// Keyboard shortcut.
@@ -81,6 +83,7 @@ impl Tool {
             Tool::Zone => "Z",
             Tool::Select => "S",
             Tool::Pour => "K",
+            Tool::Knife => "C",
         }
     }
 
@@ -100,6 +103,7 @@ impl Tool {
             Tool::Zone => "Zone",
             Tool::Select => "Select",
             Tool::Pour => "Pour",
+            Tool::Knife => "Knife",
         }
     }
 
@@ -119,6 +123,7 @@ impl Tool {
             Tool::Zone => "Wind, float and portal areas",
             Tool::Select => "Select, move, copy and glue",
             Tool::Pour => "Pour sand, liquid and beads",
+            Tool::Knife => "Cut ropes, joints and objects",
         }
     }
 
@@ -138,6 +143,7 @@ impl Tool {
             Tool::Zone => (120, 210, 255),
             Tool::Select => (235, 235, 245),
             Tool::Pour => (232, 196, 120),
+            Tool::Knife => (220, 235, 255),
         };
         Color::from_rgba(r, g, b, 255)
     }

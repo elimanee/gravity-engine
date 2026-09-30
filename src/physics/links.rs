@@ -15,6 +15,9 @@ pub enum LinkKind {
     Motor,
     /// Welds two objects (or one to the background) rigidly together.
     Glue,
+    /// A ragdoll joint: a hinge that only bends so far. `length` and
+    /// `speed` hold its angle limits (rad).
+    Limb,
 }
 
 impl LinkKind {
@@ -23,7 +26,7 @@ impl LinkKind {
 
     /// Placed with a single click (at a point) rather than a drag.
     pub fn is_pivot(self) -> bool {
-        matches!(self, LinkKind::Hinge | LinkKind::Motor | LinkKind::Glue)
+        matches!(self, LinkKind::Hinge | LinkKind::Motor | LinkKind::Glue | LinkKind::Limb)
     }
 
     pub fn label(self) -> &'static str {
@@ -33,6 +36,7 @@ impl LinkKind {
             LinkKind::Hinge => "Hinge",
             LinkKind::Motor => "Motor",
             LinkKind::Glue => "Glue",
+            LinkKind::Limb => "Joint",
         }
     }
 
@@ -43,6 +47,7 @@ impl LinkKind {
             LinkKind::Hinge => ["Click where two objects overlap,", "or on one to nail it in place"],
             LinkKind::Motor => ["Click a wheel where it overlaps a body", "(or on its own) to make it spin"],
             LinkKind::Glue => ["Click where two objects overlap to", "weld them (or on one to fix it)"],
+            LinkKind::Limb => ["A ragdoll joint", "that only bends so far"],
         }
     }
 
@@ -53,6 +58,7 @@ impl LinkKind {
             LinkKind::Hinge => Color::from_rgba(230, 230, 240, 255),
             LinkKind::Motor => Color::from_rgba(255, 160, 70, 255),
             LinkKind::Glue => Color::from_rgba(150, 235, 200, 255),
+            LinkKind::Limb => Color::from_rgba(230, 230, 240, 255),
         }
     }
 }
@@ -151,6 +157,13 @@ impl Link {
                 .motor_velocity(speed, MOTOR_GAIN)
                 .build()
                 .into(),
+            LinkKind::Limb => RevoluteJointBuilder::new()
+                .local_anchor1(la)
+                .local_anchor2(lb)
+                .contacts_enabled(false)
+                .limits([length.min(speed), length.max(speed)])
+                .build()
+                .into(),
             LinkKind::Glue => FixedJointBuilder::new()
                 .local_frame1(Isometry::new(la.coords, length))
                 .local_frame2(Isometry::new(lb.coords, speed))
@@ -228,6 +241,8 @@ impl Link {
                 }
             }
             LinkKind::Hinge => {}
+            // Ragdoll joints are hidden inside the body.
+            LinkKind::Limb => return,
             LinkKind::Glue => {
                 draw_circle(a.x - 3.0, a.y, 4.0, Color { a: 0.8, ..c });
                 draw_circle(a.x + 3.0, a.y, 4.0, Color { a: 0.8, ..c });

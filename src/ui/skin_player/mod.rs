@@ -1,14 +1,19 @@
-//! A classic Winamp-style player window drawn with a Winamp 2 / Audacious
-//! skin (or a built-in look when there is none): transport buttons, the
-//! time, a scrolling title, a spectrum analyzer, volume and seek bars. It
-//! drives the app's own audio player.
+//! Classic Winamp-style player windows drawn with a Winamp 2 / Audacious
+//! skin (or a built-in look when there is none), stacked like Winamp's:
+//! the main window (transport, time, scrolling title, spectrum, volume and
+//! seek bars), the equalizer and the playlist. They drive the app's own
+//! audio player.
+
+mod eq;
+mod playlist;
 
 use super::theme::*;
 use super::{Action, Input, PlayerCmd};
-use crate::audio::NowPlaying;
+use crate::audio::{NowPlaying, PlaylistEntry};
 use crate::config::{PPM, WALL_T};
-use crate::skin::{glyph, time_digits, Layout, Skin};
+use crate::skin::{glyph, time_digits, Layout, PlaylistColors, Skin};
 use macroquad::prelude::*;
+use std::collections::BTreeSet;
 
 /// Bars in the mini analyzer (3 px wide, 1 px apart).
 const VIS_BARS: usize = 19;
@@ -24,9 +29,15 @@ enum Button {
     Next,
     Eject,
     Close,
+    Shuffle,
+    Repeat,
+    Eq,
+    Playlist,
 }
 
 impl Button {
+    const TOGGLES: [Button; 4] = [Button::Shuffle, Button::Repeat, Button::Eq, Button::Playlist];
+
     const TRANSPORT: [Button; 6] =
         [Button::Previous, Button::Play, Button::Pause, Button::Stop, Button::Next, Button::Eject];
 
@@ -40,8 +51,22 @@ impl Button {
             Button::Next => (l.next, vec2(22.0, 18.0)),
             Button::Eject => (l.eject, vec2(22.0, 16.0)),
             Button::Close => (l.close, vec2(9.0, 9.0)),
+            Button::Shuffle => (l.shuffle, vec2(47.0, 15.0)),
+            Button::Repeat => (l.repeat, vec2(28.0, 15.0)),
+            Button::Eq => (l.eq_button, vec2(23.0, 12.0)),
+            Button::Playlist => (l.pl_button, vec2(23.0, 12.0)),
         };
         Rect::new(p.x, p.y, size.x, size.y)
+    }
+
+    /// Source rectangle of a toggle in `shufrep.bmp`.
+    fn toggle_sprite(self, on: bool, pressed: bool) -> Rect {
+        match self {
+            Button::Shuffle => Rect::new(28.0, [0.0, 15.0, 30.0, 45.0][on as usize * 2 + pressed as usize], 47.0, 15.0),
+            Button::Repeat => Rect::new(0.0, [0.0, 15.0, 30.0, 45.0][on as usize * 2 + pressed as usize], 28.0, 15.0),
+            Button::Eq => Rect::new(if pressed { 46.0 } else { 0.0 }, if on { 73.0 } else { 61.0 }, 23.0, 12.0),
+            _ => Rect::new(if pressed { 69.0 } else { 23.0 }, if on { 73.0 } else { 61.0 }, 23.0, 12.0),
+        }
     }
 
     /// Source rectangle in `cbuttons.bmp`.
@@ -53,7 +78,7 @@ impl Button {
             Button::Stop => (69.0, 23.0, 18.0),
             Button::Next => (92.0, 22.0, 18.0),
             Button::Eject => (114.0, 22.0, 16.0),
-            Button::Close => (18.0, 9.0, 9.0),
+            _ => (18.0, 9.0, 9.0),
         };
         Rect::new(x, if pressed { h } else { 0.0 }, w, h)
     }
@@ -67,6 +92,10 @@ impl Button {
             Button::Next => PlayerCmd::Next,
             Button::Eject => PlayerCmd::Eject,
             Button::Close => PlayerCmd::Close,
+            Button::Shuffle => PlayerCmd::Shuffle,
+            Button::Repeat => PlayerCmd::Repeat,
+            Button::Eq => PlayerCmd::ToggleEq,
+            Button::Playlist => PlayerCmd::TogglePlaylist,
         }
     }
 }
@@ -79,6 +108,20 @@ enum Drag {
     Volume,
     /// The seek bar, at this fraction.
     Seek(f32),
+    /// An equalizer slider (0 = preamp).
+    EqSlider(usize),
+    /// The playlist scrollbar, grabbed this far below the thumb's top (px).
+    PlScroll(f32),
+    /// Playlist entries being dragged, from this row.
+    PlRows(usize),
+}
+
+/// A button held down.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Press {
+    Main(Button),
+    Eq(eq::EqButton),
+    Playlist(playlist::PlButton),
 }
 
 #[derive(Default)]
@@ -86,19 +129,56 @@ pub struct SkinPlayer {
     /// Top-left corner on screen; placed bottom-right the first time.
     pos: Option<Vec2>,
     drag: Option<Drag>,
-    pressed: Option<Button>,
+    pressed: Option<Press>,
     last_title_click: f64,
     marquee: f32,
     bars: [f32; VIS_BARS],
     peaks: [f32; VIS_BARS],
+    /// The pointer is over one of the windows.
+    hovered: bool,
+    /// First playlist row shown.
+    pl_scroll: usize,
+    pl_selected: BTreeSet<usize>,
+    /// Row of the last click (for double-clicks and Shift ranges), and when.
+    pl_last_click: Option<(usize, f64)>,
 }
 
-/// What the window shows.
+/// Equalizer settings (dB).
+#[derive(Clone, Copy, Default)]
+pub struct EqView {
+    pub on: bool,
+    pub preamp: f32,
+    pub bands: [f32; 10],
+}
+
+/// What the windows show.
 pub struct PlayerView<'a> {
     pub skin: Option<&'a Skin>,
     pub now: Option<&'a NowPlaying>,
     pub volume: f32,
     pub double: bool,
+    pub playlist: &'a [PlaylistEntry],
+    pub eq: EqView,
+    pub show_eq: bool,
+    pub show_playlist: bool,
+    pub shuffle: bool,
+    pub repeat: bool,
+}
+
+/// Where the windows are on screen.
+struct Stack {
+    main: Rect,
+    eq: Option<Rect>,
+    playlist: Option<Rect>,
+    /// Playlist size in skin px (its height fits the screen).
+    pl_size: Vec2,
+    s: f32,
+}
+
+impl Stack {
+    fn contains(&self, p: Vec2) -> bool {
+        self.main.contains(p) || self.eq.is_some_and(|r| r.contains(p)) || self.playlist.is_some_and(|r| r.contains(p))
+    }
 }
 
 impl PlayerView<'_> {
@@ -122,6 +202,39 @@ impl SkinPlayer {
         vec2(p.x.clamp(0.0, (sw - size.x).max(0.0)), p.y.clamp(0.0, (sh - size.y).max(0.0)))
     }
 
+    fn stack(&self, v: &PlayerView) -> Stack {
+        let l = v.layout();
+        let s = v.scale();
+        let main = l.size * s;
+        let eq_h = if v.show_eq { eq::SIZE.y * s } else { 0.0 };
+        // The playlist is as wide as the main window, as tall as fits (1‥6 rows of tiles).
+        let pl_w = (l.size.x.max(275.0) / 25.0).round() * 25.0;
+        let room = (screen_height() - main.y - eq_h - 8.0) / s;
+        let tiles = ((room - 58.0) / 29.0).floor().clamp(1.0, 6.0);
+        let pl_size = vec2(pl_w, 58.0 + 29.0 * tiles);
+        let pl_h = if v.show_playlist { pl_size.y * s } else { 0.0 };
+        let width =
+            main.x.max(if v.show_eq { eq::SIZE.x * s } else { 0.0 }).max(if v.show_playlist { pl_w * s } else { 0.0 });
+        let o = self.origin(vec2(width, main.y + eq_h + pl_h));
+        Stack {
+            main: Rect::new(o.x, o.y, main.x, main.y),
+            eq: v.show_eq.then(|| Rect::new(o.x, o.y + main.y, eq::SIZE.x * s, eq::SIZE.y * s)),
+            playlist: v.show_playlist.then(|| Rect::new(o.x, o.y + main.y + eq_h, pl_size.x * s, pl_h)),
+            pl_size,
+            s,
+        }
+    }
+
+    /// The pointer is over one of the windows (last frame).
+    pub fn hovered(&self) -> bool {
+        self.hovered
+    }
+
+    /// Screen rectangle of the playlist window, when shown.
+    pub fn playlist_rect(&self, v: &PlayerView) -> Option<Rect> {
+        self.stack(v).playlist
+    }
+
     /// Feed the analyzer bands (call every frame the window is shown).
     pub fn animate(&mut self, dt: f32, bands: &[f32]) {
         self.marquee += dt * MARQUEE_SPEED;
@@ -136,32 +249,28 @@ impl SkinPlayer {
     }
 
     pub fn update(&mut self, v: &PlayerView, input: &mut Input, actions: &mut Vec<Action>) {
+        let st = self.stack(v);
         let l = v.layout();
-        let scale = v.scale();
-        let size = l.size * scale;
-        let o = self.origin(size);
-        let local = (input.mouse - o) / scale;
-        let window = Rect::new(o.x, o.y, size.x, size.y);
+        let s = st.s;
+        let o = st.main.point();
+        let local = (input.mouse - o) / s;
+        self.hovered = st.contains(input.mouse);
+        // Keep the selection valid when the playlist shrinks.
+        self.pl_selected.retain(|&i| i < v.playlist.len());
 
-        if input.left_pressed && !input.consumed && window.contains(input.mouse) {
-            let hit = Button::TRANSPORT.into_iter().chain([Button::Close]).find(|b| b.rect(&l).contains(local));
-            let volume = Rect::new(l.volume.x, l.volume.y, 68.0, 13.0);
-            let seek = Rect::new(l.position.x, l.position.y, 248.0, 10.0);
-            if let Some(b) = hit {
-                self.pressed = Some(b);
-            } else if volume.contains(local) {
-                self.drag = Some(Drag::Volume);
-            } else if seek.contains(local) && v.now.is_some_and(|n| n.duration.is_some()) {
-                self.drag = Some(Drag::Seek(seek_frac(local.x, &l)));
-            } else if local.y < TITLE_H {
-                let now = get_time();
-                if now - self.last_title_click < 0.35 {
-                    actions.push(Action::Player(PlayerCmd::DoubleSize));
-                }
-                self.last_title_click = now;
-                self.drag = Some(Drag::Window(input.mouse - o));
+        if input.left_pressed && !input.consumed && self.hovered {
+            if st.main.contains(input.mouse) {
+                self.main_press(v, &l, local, input.mouse - o, actions);
+            } else if let Some(r) = st.eq.filter(|r| r.contains(input.mouse)) {
+                self.eq_press(v, (input.mouse - r.point()) / s, input.mouse - o, actions);
+            } else if let Some(r) = st.playlist.filter(|r| r.contains(input.mouse)) {
+                self.pl_press(v, st.pl_size, (input.mouse - r.point()) / s, input, input.mouse - o, actions);
             }
         }
+        if st.playlist.is_some_and(|r| r.contains(input.mouse) && input.wheel != 0.0) {
+            self.pl_scroll_by(-input.wheel.signum() as i32 * 3, v.playlist.len(), st.pl_size);
+        }
+
         match self.drag {
             Some(Drag::Window(grab)) if input.left_down => self.pos = Some(input.mouse - grab),
             Some(Drag::Volume) if input.left_down => {
@@ -173,21 +282,85 @@ impl SkinPlayer {
                 actions.push(Action::Player(PlayerCmd::Seek(f)));
                 self.drag = None;
             }
-            Some(_) => self.drag = None,
-            None => {}
+            Some(Drag::EqSlider(i)) if input.left_down => {
+                if let Some(r) = st.eq {
+                    let y = (input.mouse.y - r.y) / s;
+                    actions.push(Action::Player(PlayerCmd::EqGain(i, eq::slider_gain(y))));
+                }
+            }
+            Some(Drag::PlScroll(grab)) if input.left_down => {
+                if let Some(r) = st.playlist {
+                    let y = (input.mouse.y - r.y) / s - grab;
+                    self.pl_scroll_to_thumb(y, v.playlist.len(), st.pl_size);
+                }
+            }
+            Some(Drag::PlRows(from)) if !input.left_down => {
+                self.drag = None;
+                if let Some(r) = st.playlist {
+                    let local = (input.mouse - r.point()) / s;
+                    if let Some(to) = self.pl_row_at(local, v.playlist.len(), st.pl_size).filter(|&t| t != from) {
+                        actions.push(Action::Player(PlayerCmd::MoveEntry(from, to)));
+                        self.pl_selected = BTreeSet::from([to]);
+                    }
+                }
+            }
+            Some(Drag::PlRows(_)) => {}
+            Some(_) if !input.left_down => self.drag = None,
+            _ => {}
         }
         if !input.left_down {
-            if let Some(b) = self.pressed.take() {
-                if b.rect(&l).contains(local) {
-                    actions.push(Action::Player(b.cmd()));
+            if let Some(p) = self.pressed.take() {
+                let inside = match p {
+                    Press::Main(b) => b.rect(&l).contains(local),
+                    Press::Eq(b) => st.eq.is_some_and(|r| b.rect().contains((input.mouse - r.point()) / s)),
+                    Press::Playlist(b) => {
+                        st.playlist.is_some_and(|r| b.rect(st.pl_size).contains((input.mouse - r.point()) / s))
+                    }
+                };
+                if inside {
+                    match p {
+                        Press::Main(b) => actions.push(Action::Player(b.cmd())),
+                        Press::Eq(b) => actions.push(Action::Player(b.cmd())),
+                        Press::Playlist(b) => self.pl_button(b, v, actions),
+                    }
                 }
             }
         }
-        if window.contains(input.mouse) || self.drag.is_some() || self.pressed.is_some() {
+        if st.playlist.is_some_and(|r| r.contains(input.mouse)) {
+            self.pl_keys(v, actions);
+        }
+        if self.hovered || self.drag.is_some() || self.pressed.is_some() {
             input.over_ui = true;
             input.consumed |= input.left_pressed || input.right_pressed;
             input.wheel = 0.0;
         }
+    }
+
+    fn main_press(&mut self, v: &PlayerView, l: &Layout, local: Vec2, grab: Vec2, actions: &mut Vec<Action>) {
+        let mut buttons = Button::TRANSPORT.into_iter().chain([Button::Close]).chain(Button::TOGGLES);
+        let hit = buttons.find(|b| b.rect(l).contains(local));
+        let volume = Rect::new(l.volume.x, l.volume.y, 68.0, 13.0);
+        let seek = Rect::new(l.position.x, l.position.y, 248.0, 10.0);
+        if let Some(b) = hit {
+            self.pressed = Some(Press::Main(b));
+        } else if volume.contains(local) {
+            self.drag = Some(Drag::Volume);
+        } else if seek.contains(local) && v.now.is_some_and(|n| n.duration.is_some()) {
+            self.drag = Some(Drag::Seek(seek_frac(local.x, l)));
+        } else if local.y < TITLE_H {
+            self.title_press(grab, actions);
+        }
+    }
+
+    /// Title bar pressed (any window): drag the stack, double-click for
+    /// double size.
+    fn title_press(&mut self, grab: Vec2, actions: &mut Vec<Action>) {
+        let now = get_time();
+        if now - self.last_title_click < 0.35 {
+            actions.push(Action::Player(PlayerCmd::DoubleSize));
+        }
+        self.last_title_click = now;
+        self.drag = Some(Drag::Window(grab));
     }
 
     /// The window is being dragged or a control is held.
@@ -196,23 +369,28 @@ impl SkinPlayer {
     }
 
     pub fn draw(&self, v: &PlayerView, mouse: Vec2) {
+        let st = self.stack(v);
         let l = v.layout();
-        let scale = v.scale();
-        let o = self.origin(l.size * scale);
-        let local = (mouse - o) / scale;
+        let o = st.main.point();
+        let local = (mouse - o) / st.s;
         match v.skin {
-            Some(skin) => self.draw_skin(skin, v, o, scale, local),
-            None => self.draw_builtin(v, &l, o, scale, local),
+            Some(skin) => self.draw_skin(skin, v, o, st.s, local),
+            None => self.draw_builtin(v, &l, o, st.s, local),
+        }
+        if let Some(r) = st.eq {
+            self.eq_draw(v, r.point(), st.s, (mouse - r.point()) / st.s);
+        }
+        if let Some(r) = st.playlist {
+            self.pl_draw(v, r.point(), st.pl_size, st.s, (mouse - r.point()) / st.s);
         }
     }
 
-    fn title_text(now: Option<&NowPlaying>) -> String {
-        match now {
-            Some(n) => {
-                let len = n.duration.map_or(String::new(), |d| format!(" ({}:{:02})", d as u64 / 60, d as u64 % 60));
-                format!("1. {}{len}", n.title)
-            }
-            None => "Gravity Engine  ·  press eject to load music".to_string(),
+    fn title_text(v: &PlayerView) -> String {
+        let len = |d: Option<f64>| d.map_or(String::new(), |d| format!(" ({}:{:02})", d as u64 / 60, d as u64 % 60));
+        match (v.now, v.playlist.first()) {
+            (Some(n), _) => format!("{}. {}{}", n.index.map_or(1, |i| i + 1), n.title, len(n.duration)),
+            (None, Some(e)) => format!("1. {}{}", e.title, len(e.duration)),
+            (None, None) => "Gravity Engine  ·  press eject to load music".to_string(),
         }
     }
 
@@ -223,7 +401,7 @@ impl SkinPlayer {
         if skin.has("titlebar") && l.size.x <= 275.0 {
             sprite("titlebar", Rect::new(27.0, 0.0, 275.0, 14.0), Vec2::ZERO);
         }
-        let held = |b: Button| self.pressed == Some(b) && b.rect(l).contains(local);
+        let held = |b: Button| self.pressed == Some(Press::Main(b)) && b.rect(l).contains(local);
         if skin.has("titlebar") {
             sprite("titlebar", Button::Close.sprite(held(Button::Close)), l.close);
         }
@@ -253,7 +431,7 @@ impl SkinPlayer {
 
         // Scrolling title.
         if l.text_visible && skin.has("text") {
-            let title = Self::title_text(now);
+            let title = Self::title_text(v);
             let chars = (l.text_width / 5.0).floor() as usize;
             let line: Vec<char> = title.chars().collect();
             let shown: Vec<char> = if line.len() <= chars {
@@ -273,13 +451,20 @@ impl SkinPlayer {
             }
         }
 
-        // Stereo light, repeat on (playback loops).
+        // Stereo light; shuffle, repeat, equalizer and playlist toggles.
         if l.size.x <= 275.0 && l.othertext_visible {
             sprite("monoster", Rect::new(0.0, if playing { 0.0 } else { 12.0 }, 29.0, 12.0), l.stereo);
             sprite("monoster", Rect::new(29.0, 12.0, 27.0, 12.0), l.mono);
         }
-        sprite("shufrep", Rect::new(0.0, 30.0, 28.0, 15.0), l.repeat);
-        sprite("shufrep", Rect::new(28.0, 0.0, 47.0, 15.0), l.shuffle);
+        for b in Button::TOGGLES {
+            let on = match b {
+                Button::Shuffle => v.shuffle,
+                Button::Repeat => v.repeat,
+                Button::Eq => v.show_eq,
+                _ => v.show_playlist,
+            };
+            sprite("shufrep", b.toggle_sprite(on, held(b)), b.rect(l).point());
+        }
 
         // Volume and balance.
         let frame = (v.volume * 27.0).round();
@@ -359,7 +544,7 @@ impl SkinPlayer {
         }
         let marquee = r(l.text.x - 3.0, l.text.y - 3.0, l.text_width + 6.0, 12.0);
         rrect(marquee, 2.0 * s, Color::new(0.02, 0.03, 0.05, 1.0));
-        clip_text(&Self::title_text(now), marquee, self.marquee, 7.0 * s, green);
+        clip_text(&Self::title_text(v), marquee, self.marquee, 7.0 * s, green);
         let vis = [Color::new(0.02, 0.03, 0.05, 1.0); 2]
             .into_iter()
             .chain((2..18).map(|i| mix(Color::new(1.0, 0.3, 0.3, 1.0), green, (i - 2) as f32 / 15.0)))
@@ -371,7 +556,7 @@ impl SkinPlayer {
         // Buttons.
         for b in Button::TRANSPORT {
             let br = b.rect(l);
-            let held = self.pressed == Some(b) && br.contains(local);
+            let held = self.pressed == Some(Press::Main(b)) && br.contains(local);
             let rr = r(br.x, br.y, br.w, br.h);
             rrect(rr, 3.0 * s, if held { SURFACE_HI } else { SURFACE_2 });
             rrect_lines(rr, 3.0 * s, 1.0, BORDER);
@@ -399,8 +584,21 @@ impl SkinPlayer {
                     draw_triangle(vec2(cx - u, cy), vec2(cx + u, cy), vec2(cx, cy - u * 1.2), col);
                     draw_rectangle(cx - u, cy + u * 0.4, u * 2.0, s, col);
                 }
-                Button::Close => {}
+                _ => {}
             }
+        }
+        // Shuffle / repeat / EQ / playlist toggles.
+        for (b, on, label) in [
+            (Button::Shuffle, v.shuffle, "SHUF"),
+            (Button::Repeat, v.repeat, "REP"),
+            (Button::Eq, v.show_eq, "EQ"),
+            (Button::Playlist, v.show_playlist, "PL"),
+        ] {
+            let br = b.rect(l);
+            let rr = r(br.x, br.y, br.w, br.h);
+            rrect(rr, 3.0 * s, if on { alpha(ACCENT, 0.35) } else { SURFACE_2 });
+            rrect_lines(rr, 3.0 * s, 1.0, if on { ACCENT } else { BORDER });
+            text_centered(label, rr.x + rr.w / 2.0, rr.y + rr.h / 2.0 + s, 6.5 * s, if on { TEXT } else { TEXT_MUTED });
         }
 
         // Volume and seek bars.

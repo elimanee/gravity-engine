@@ -3,6 +3,7 @@
 //! streamed to cpal through a lock-free ring buffer.
 
 use super::analyzer::Tap;
+use super::eq::{EqParams, Equalizer};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex};
@@ -35,6 +36,8 @@ pub struct TrackerInfo {
     /// Seconds played and song length.
     pub position: f64,
     pub duration: f64,
+    /// Played to the end (modules play once; the playlist moves on).
+    pub ended: bool,
 }
 
 pub struct TrackerPlayer {
@@ -44,11 +47,11 @@ pub struct TrackerPlayer {
 }
 
 impl TrackerPlayer {
-    pub fn start(tap: Arc<Tap>) -> Self {
+    pub fn start(tap: Arc<Tap>, eq: Arc<EqParams>) -> Self {
         let (tx, rx) = std::sync::mpsc::sync_channel::<Cmd>(4);
         let info = Arc::new(Mutex::new(TrackerInfo::default()));
         let info2 = Arc::clone(&info);
-        let thread = std::thread::spawn(move || audio_thread(rx, info2, tap));
+        let thread = std::thread::spawn(move || audio_thread(rx, info2, tap, eq));
         Self { tx, info, _thread: thread }
     }
 
@@ -84,7 +87,7 @@ impl TrackerPlayer {
     }
 }
 
-fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>, tap: Arc<Tap>) {
+fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>, tap: Arc<Tap>, eq: Arc<EqParams>) {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use openmpt::module::metadata::MetadataKey;
     use openmpt::module::{Logger, Module};
@@ -105,6 +108,7 @@ fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>, tap: Arc<Tap>)
     // heard immediately; the visualizer tap sees the pre-volume signal.
     let volume = Arc::new(AtomicU32::new(1.0f32.to_bits()));
     let out_volume = Arc::clone(&volume);
+    let mut equalizer = Equalizer::new(eq);
 
     let stream = match device.build_output_stream::<f32, _, _>(
         &cfg,
@@ -118,6 +122,9 @@ fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>, tap: Arc<Tap>)
                     }
                     None => 0.0,
                 };
+            }
+            if played {
+                equalizer.process(out, CH as usize, SR);
             }
             // Only feed the visualizer while a module is actually playing, so
             // this idle stream never mixes silence into another player's audio.
@@ -157,7 +164,7 @@ fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>, tap: Arc<Tap>)
                 Ok(Cmd::Load { mut data, name }) => {
                     // create_from_memory sizes its read from buf.capacity().
                     if let Ok(mut m) = Module::create_from_memory(&mut data, Logger::None, &[]) {
-                        m.set_repeat_count(-1);
+                        m.set_repeat_count(0);
                         let title = m.get_metadata(MetadataKey::ModuleTitle).unwrap_or_default();
                         let fmt = m.get_metadata(MetadataKey::TypeExt).unwrap_or_default().to_uppercase();
                         let orders = m.get_num_orders();
@@ -173,6 +180,7 @@ fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>, tap: Arc<Tap>)
                                 orders,
                                 position: 0.0,
                                 duration,
+                                ended: false,
                             }
                         });
                         playing = true;
@@ -226,6 +234,14 @@ fn audio_thread(rx: Receiver<Cmd>, info: Arc<Mutex<TrackerInfo>>, tap: Arc<Tap>)
                     let got = m.read_interleaved_float_stereo(SR as i32, &mut buf);
                     for &s in &buf[..got * CH as usize] {
                         prod.push(s).ok();
+                    }
+                    // The end of the song: wait for the buffer to drain.
+                    if got == 0 && prod.is_empty() {
+                        playing = false;
+                        set(&|i| {
+                            i.playing = false;
+                            i.ended = true;
+                        });
                     }
                 }
             }

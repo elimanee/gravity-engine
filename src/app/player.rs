@@ -1,8 +1,43 @@
 //! The classic player window: its skin and what its buttons do.
 
 use super::*;
+use crate::audio::NowPlaying;
 use crate::skin::{self, Skin};
+use crate::ui::skin_player::{EqView, PlayerView};
 use crate::ui::PlayerCmd;
+
+/// Equalizer presets: name, preamp, bands (dB).
+const EQ_PRESETS: [(&str, f32, [f32; 10]); 8] = [
+    ("Flat", 0.0, [0.0; 10]),
+    ("Rock", -1.0, [5.0, 3.0, -2.0, -4.0, -1.5, 2.0, 5.0, 6.0, 6.0, 6.0]),
+    ("Pop", 0.0, [-1.0, 3.0, 5.0, 5.5, 3.5, -1.0, -1.5, -1.5, -1.0, -1.0]),
+    ("Dance", -1.0, [7.0, 5.5, 2.0, 0.0, 0.0, -3.5, -4.5, -4.5, 0.0, 0.0]),
+    ("Classical", 0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -4.5, -4.5, -4.5, -6.0]),
+    ("Full bass", -3.0, [7.0, 7.0, 7.0, 4.0, 1.0, -3.5, -5.5, -6.5, -7.0, -7.0]),
+    ("Full treble", -3.0, [-7.0, -7.0, -7.0, -3.0, 1.5, 7.0, 10.0, 10.0, 10.0, 10.5]),
+    ("Headphones", 0.0, [3.5, 8.0, 4.0, -2.5, -2.0, 1.0, 3.5, 7.0, 9.0, 10.0]),
+];
+
+/// What the player windows show.
+pub(super) fn view<'a>(
+    s: &'a crate::settings::Settings,
+    skin: Option<&'a Skin>,
+    audio: &'a Audio,
+    now: Option<&'a NowPlaying>,
+) -> PlayerView<'a> {
+    PlayerView {
+        skin,
+        now,
+        volume: s.volume,
+        double: s.player_double,
+        playlist: &audio.playlist,
+        eq: EqView { on: s.eq_on, preamp: s.eq_preamp, bands: s.eq_bands },
+        show_eq: s.player_eq,
+        show_playlist: s.player_playlist,
+        shuffle: s.shuffle,
+        repeat: s.repeat,
+    }
+}
 
 impl App {
     /// Load the saved skin (or the first installed one) the first time the
@@ -87,6 +122,7 @@ impl App {
                     self.audio.toggle_pause();
                 }
                 Some(_) => self.audio.seek(0.0),
+                None if self.audio.resume() => {}
                 None => self.apply(Action::LoadAudio, Vec2::ZERO),
             },
             PlayerCmd::Pause => {
@@ -100,6 +136,52 @@ impl App {
             PlayerCmd::DoubleSize => self.s.player_double = !self.s.player_double,
             PlayerCmd::Seek(f) => self.audio.seek(f as f64),
             PlayerCmd::Volume(v) => self.s.volume = v.clamp(0.0, 1.0),
+            PlayerCmd::ToggleEq => self.s.player_eq = !self.s.player_eq,
+            PlayerCmd::TogglePlaylist => self.s.player_playlist = !self.s.player_playlist,
+            PlayerCmd::Shuffle => {
+                self.s.shuffle = !self.s.shuffle;
+                self.toasts.status("player", format!("Shuffle {}", if self.s.shuffle { "on" } else { "off" }));
+            }
+            PlayerCmd::Repeat => {
+                self.s.repeat = !self.s.repeat;
+                self.toasts.status("player", format!("Repeat {}", if self.s.repeat { "on" } else { "off" }));
+            }
+            PlayerCmd::EqOn => self.s.eq_on = !self.s.eq_on,
+            PlayerCmd::EqGain(0, g) => self.s.eq_preamp = g,
+            PlayerCmd::EqGain(i, g) => {
+                if let Some(b) = self.s.eq_bands.get_mut(i - 1) {
+                    *b = g;
+                }
+                self.s.eq_on = true;
+            }
+            PlayerCmd::EqPreset => {
+                // The preset after the one matching the sliders (Flat when none does).
+                let current = EQ_PRESETS.iter().position(|(_, p, b)| *p == self.s.eq_preamp && *b == self.s.eq_bands);
+                let (name, preamp, bands) = EQ_PRESETS[current.map_or(0, |i| (i + 1) % EQ_PRESETS.len())];
+                self.s.eq_preamp = preamp;
+                self.s.eq_bands = bands;
+                self.s.eq_on = true;
+                self.toasts.status("player", format!("Equalizer preset: {name}"));
+            }
+            PlayerCmd::PlayEntry(i) => {
+                if let Err(e) = self.audio.play_index(i) {
+                    self.toasts.error(format!("Audio: {e}"));
+                }
+            }
+            PlayerCmd::RemoveEntry(i) => self.audio.remove_entries(&[i]),
+            PlayerCmd::MoveEntry(from, to) => self.audio.move_entry(from, to),
+            PlayerCmd::AddFiles => {
+                let mut exts: Vec<&str> = crate::config::AUDIO_EXT.to_vec();
+                exts.extend(crate::config::TRACKER_EXT);
+                exts.extend(crate::config::PLAYLIST_EXT);
+                if let Some(files) = FileDialog::new().add_filter("Music", &exts).pick_files() {
+                    let paths: Vec<String> = files.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+                    let n = self.audio.add(&paths);
+                    self.toasts.status("player", format!("Added {n} songs to the playlist"));
+                }
+            }
+            PlayerCmd::SortPlaylist => self.audio.sort_playlist(),
+            PlayerCmd::ClearPlaylist => self.audio.clear_playlist(),
         }
     }
 }

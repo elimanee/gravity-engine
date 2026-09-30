@@ -26,6 +26,8 @@ pub enum Sound {
     Snap,
     /// Grains poured.
     Pour,
+    /// The knife slicing something.
+    Slice,
     /// Challenge solved.
     Win,
 }
@@ -190,6 +192,17 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
             );
             out
         }
+        Sound::Slice => {
+            // A quick swish: noise sweeping down from very high.
+            let mut out = secs(0.22);
+            add_noise(
+                &mut out,
+                &mut n,
+                |t| (9000.0 * (-t / 0.05).exp() + 900.0) * p,
+                |t| 0.9 * (t / 0.01).min(1.0) * (-t / 0.05).exp(),
+            );
+            out
+        }
         Sound::Win => {
             let mut out = secs(1.6);
             // C major arpeggio of soft bells.
@@ -210,7 +223,7 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
 mod tests {
     use super::*;
 
-    const ALL: [Sound; 8] = [
+    const ALL: [Sound; 9] = [
         Sound::Hit { size: 80.0, hard: 0.2 },
         Sound::Hit { size: 20.0, hard: 1.0 },
         Sound::Shatter,
@@ -218,6 +231,7 @@ mod tests {
         Sound::Pop,
         Sound::Snap,
         Sound::Pour,
+        Sound::Slice,
         Sound::Win,
     ];
 

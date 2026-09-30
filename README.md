@@ -4,13 +4,24 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
-![Version](https://img.shields.io/badge/version-2.5-8b78ff)
+![Version](https://img.shields.io/badge/version-2.6-8b78ff)
 
 ![Title screen](docs/screenshots/title.png)
 
 | Sandbox | Settings drawer (Space) | Tool picker (Tab) |
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
+
+## What's new in 2.6
+
+| Playlist and equalizer | Ragdolls and the knife |
+|---|---|
+| ![Player with equalizer and playlist](docs/screenshots/player-stack.png) | ![Ragdolls](docs/screenshots/ragdolls.png) |
+
+- **Playlist and equalizer** — the classic player gets Winamp's playlist window (reorder, remove, sort, shuffle, repeat; kept between sessions, `.m3u` too) and a working 10-band equalizer with presets, both skinned.
+- **Rewind** — hold `←` to play the last 8 seconds backwards, then let go to change what happens.
+- **Knife** (`C`) — cut ropes, springs and joints, and slice objects in two.
+- **Ragdolls** (`O`) — floppy characters; press `O` over an image to make it the head.
 
 ## What's new in 2.5
 
@@ -82,7 +93,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Shape spawner** (`N`) — Circle, Box, Triangle, Pentagon, Hexagon, Star, Capsule; pick a colour (or random) and size, click or hold to spawn
 - **88×31 button fetcher** (`F`) — 20 random classic web buttons scraped from 8 galleries (animated GIFs supported)
 - **Game logo fetcher** (`L`) — 20 random logos from [SteamGridDB](https://www.steamgriddb.com/) (needs an API key, see below)
-- **14 tools** — `Tab`, `1`–`9`, `0`, `J`, `Z`, `S` or `K`:
+- **15 tools** — `Tab`, `1`–`9`, `0`, `J`, `Z`, `S`, `K` or `C`:
 
   | # | Tool | Description |
   |---|------|-------------|
@@ -100,6 +111,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | Z | Zone | Wind, float and portal areas |
   | S | Select | Select objects (click, `Shift`+click, box), move them, copy / paste, duplicate, pin, delete, glue |
   | K | Pour | Pour sand, liquid or beads; right-drag erases |
+  | C | Knife | Cut ropes, springs and joints; slice objects in two |
 
   The tool card (bottom left) holds each tool's settings: radius / strength for area tools (mouse wheel: radius, `Shift`+wheel: strength), thickness, colour and pinning for Draw, the kind of link (and motor speed) for Link, the kind of zone for Zone, the selection commands for Select and the kind of grain for Pour.
 - **7 border modes** — `B` to cycle (`Shift+B` backwards):
@@ -126,7 +138,9 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Trails** (`T`) — motion-blur ghost trail with length and fade settings
 - **Audio visualizer** — `V` cycles a spectrum layer behind the objects (Bars / Wave / Radial); `Shift+V` drops a visualizer *screen* that is a real physics object (throw it, pin it, resize it). Sensitivity and an optional "objects jump on the beat" mode live in the settings drawer
 - **Audio player** (`M`) — tracker modules (.mod/.xm/.it/.s3m/…), common formats (.mp3/.flac/.wav/.ogg/…), `.pls` playlists including HTTP radio streams
-- **Classic player** (`X`) — Winamp-style window with play / pause / stop / next / previous / seek / volume, skinned with Winamp 2 `.wsz` or Audacious skins (found automatically in Audacious's skin folders, `~/.config/gravity_engine/skins/`, or dropped on the window)
+- **Classic player** (`X`) — Winamp-style window with play / pause / stop / next / previous / seek / volume, a playlist window (shuffle, repeat, reorder, `.m3u` / `.pls`) and a 10-band equalizer, skinned with Winamp 2 `.wsz` or Audacious skins (found automatically in Audacious's skin folders, `~/.config/gravity_engine/skins/`, or dropped on the window)
+- **Rewind** (hold `←`) — play the last 8 seconds backwards
+- **Ragdolls** (`O`) — floppy characters with limited joints (over an image: it becomes the head)
 - **Screenshots** (`F12`) and **GIF recording** (`F11`, up to 30 s) of the scene, without the interface
 - **Debug overlay** (`D`) — FPS, collider outlines, velocities and details of the object under the cursor
 
@@ -138,7 +152,9 @@ Press **F1** in the app for the full list.
 |-------------|--------|
 | Left-drag | Use the current tool |
 | Right-click | Object menu (Resize, Duplicate, Resize all, Properties, Pin, Detach links, Delete) |
-| `Tab` / `1`–`9`, `0`, `J`, `Z`, `S`, `K` | Tool picker / select a tool |
+| `Tab` / `1`–`9`, `0`, `J`, `Z`, `S`, `K`, `C` | Tool picker / select a tool |
+| `←` (hold) | Rewind time |
+| `O` | Drop a ragdoll (over an image: it becomes the head) |
 | `E` / `Shift+E` | Examples & challenges / challenge editor |
 | `Ctrl`+Wheel, `+` / `-`, `Home` | Zoom at the pointer, zoom in / out, fit the world |
 | Middle-drag | Pan the view |
