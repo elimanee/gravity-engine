@@ -32,7 +32,7 @@ use crate::ui::hud::{Hud, HudState};
 use crate::ui::inspector::{Inspector, Props};
 use crate::ui::library::{Library, LibraryData};
 use crate::ui::now_playing::NowPlayingPill;
-use crate::ui::skin_player::{PlayerView, SkinPlayer};
+use crate::ui::skin_player::SkinPlayer;
 use crate::ui::spawner::{spawn_color, Spawner};
 use crate::ui::title::{self, PixelOut};
 use crate::ui::toasts::Toasts;
@@ -51,8 +51,11 @@ mod build;
 mod editor;
 mod impacts;
 mod juice;
+mod knife;
 mod library;
 mod player;
+mod ragdoll;
+mod rewind;
 mod select;
 mod verify;
 
@@ -123,6 +126,8 @@ pub struct App {
     recording: Option<Recording>,
     finishing: Option<Finishing>,
     slow: juice::SlowMo,
+    rewind: rewind::Rewind,
+    knife: knife::Knife,
     grains: Grains,
     /// The Pour tool is pouring.
     pouring: bool,
@@ -198,6 +203,8 @@ impl App {
             pan_last: None,
             selection: Vec::new(),
             slow: Default::default(),
+            rewind: Default::default(),
+            knife: Default::default(),
             grains: Grains::default(),
             pouring: false,
             pour_sound: 0.0,
@@ -250,11 +257,16 @@ impl App {
             app.open_path(&path, at);
         }
         app.history.clear();
+        if app.audio.playlist.is_empty() {
+            let saved = app.s.playlist.clone();
+            app.audio.restore_playlist(&saved);
+        }
         app
     }
 
     fn save_settings(&mut self) {
         self.s.volume = self.s.volume.clamp(0.0, 1.0);
+        self.s.playlist = self.audio.playlist.iter().map(|e| e.path.clone()).collect();
         if let Err(e) = self.s.save() {
             eprintln!("could not save settings: {e}");
         }
@@ -311,7 +323,10 @@ impl App {
         self.audio.tick();
         self.audio.analyze(dt, self.s.vis_gain);
         self.tick_slow(dt);
-        self.simulate(dt, input.world);
+        let holding = is_key_down(KeyCode::Left) && !in_transition && !self.editor_bar.typing();
+        if !self.rewind_tick(holding) {
+            self.simulate(dt, input.world);
+        }
         self.update_challenge(dt);
         if !self.selection.is_empty() {
             let objects = &self.objects;
@@ -335,6 +350,11 @@ impl App {
         let pressed = |k| is_key_pressed(k);
         let (shift, ctrl) = (input.shift, input.ctrl);
         if self.editor_bar.typing() {
+            return;
+        }
+        // Over the player windows, Del / Enter act on the playlist.
+        let over_player = self.s.player && self.player.hovered();
+        if over_player && [KeyCode::Delete, KeyCode::Backspace, KeyCode::Enter].into_iter().any(pressed) {
             return;
         }
 
@@ -459,6 +479,7 @@ impl App {
             KeyCode::Z,
             KeyCode::S,
             KeyCode::K,
+            KeyCode::C,
         ];
         for (i, k) in digits.iter().enumerate() {
             if pressed(*k) {
@@ -471,6 +492,9 @@ impl App {
         }
         if pressed(KeyCode::X) {
             actions.push(Action::TogglePlayer);
+        }
+        if pressed(KeyCode::O) {
+            actions.push(Action::SpawnRagdoll);
         }
         if pressed(KeyCode::F11) {
             actions.push(Action::ToggleRecording);
@@ -583,12 +607,7 @@ impl App {
         if self.s.player {
             self.ensure_skin();
             self.player.animate(dt, &self.audio.analyzer.bands);
-            let view = PlayerView {
-                skin: self.skin.as_ref(),
-                now: np.as_ref(),
-                volume: self.s.volume,
-                double: self.s.player_double,
-            };
+            let view = player::view(&self.s, self.skin.as_ref(), &self.audio, np.as_ref());
             self.player.update(&view, input, actions);
         }
         let hud_state = self.hud_state();
@@ -711,6 +730,8 @@ impl App {
                     self.select_press(m, input.shift);
                 } else if tool == Tool::Pour {
                     self.pouring = true;
+                } else if tool == Tool::Knife {
+                    self.knife_press(m);
                 } else if tool.is_field() {
                     self.field_active = true;
                 } else if tool == Tool::Bomb {
@@ -756,6 +777,9 @@ impl App {
         if input.left_down && self.select_drag.is_some() {
             self.select_drag_to(m);
         }
+        if input.left_down {
+            self.knife_drag(m);
+        }
 
         if input.left_released || !input.left_down {
             if self.select_drag.is_some() {
@@ -763,6 +787,7 @@ impl App {
             }
             self.pouring = false;
             self.editor_release(m);
+            self.knife_release(m);
             if let Some(g) = self.grab.take() {
                 g.release(&mut self.world.bodies, to_phys(m.x, m.y));
             }
@@ -810,8 +835,21 @@ impl App {
         if n > 0 {
             self.record("Drop files");
         }
+        // Music dropped on the playlist window is added to it.
+        let on_playlist = self.s.player && {
+            let np = self.audio.now_playing();
+            let view = player::view(&self.s, self.skin.as_ref(), &self.audio, np.as_ref());
+            self.player.playlist_rect(&view).is_some_and(|r| r.contains(mouse_position().into()))
+        };
         for (i, f) in files.into_iter().enumerate() {
             let at = mouse + vec2((i as f32 - n as f32 / 2.0) * 30.0, -(i as f32) * 10.0);
+            if let (true, Some(p)) = (on_playlist, f.path.as_ref()) {
+                let p = p.to_string_lossy().into_owned();
+                if Audio::is_audio_file(&p) {
+                    self.audio.add(&[p]);
+                    continue;
+                }
+            }
             match (f.path, f.bytes) {
                 (Some(p), _) => self.open_path(&p.to_string_lossy(), at),
                 (None, Some(bytes)) => {
@@ -975,6 +1013,12 @@ impl App {
             Action::Undo => self.undo(false),
             Action::Redo => self.undo(true),
             Action::ToggleRecording => self.toggle_recording(),
+            Action::SpawnRagdoll if self.challenge.is_some() => {}
+            Action::SpawnRagdoll => {
+                // From the drawer the pointer is over the panel: drop it mid-screen instead.
+                let at = if self.paused { self.view().to_world(vec2(screen_width() * 0.4, 160.0)) } else { mouse };
+                self.spawn_ragdoll(at);
+            }
             Action::TogglePlayer => {
                 self.s.player = !self.s.player;
                 if self.s.player {
@@ -1204,6 +1248,7 @@ impl App {
         self.menu.close();
         self.inspector.close();
         self.zone_drag = None;
+        self.rewind.clear();
         self.selection.clear();
         self.select_drag = None;
         self.zones.clear();
@@ -1428,6 +1473,9 @@ impl App {
         }
         self.shaker.set_enabled(self.s.window_shake);
         self.audio.set_volume(self.s.volume);
+        self.audio.set_eq(self.s.eq_on, self.s.eq_preamp, &self.s.eq_bands);
+        self.audio.shuffle = self.s.shuffle;
+        self.audio.repeat = self.s.repeat;
     }
 
     fn simulate(&mut self, dt: f32, mouse: Vec2) {
@@ -1491,6 +1539,7 @@ impl App {
             } else {
                 self.world.step_frame(dt, time_scale);
             }
+            self.rewind_record(step);
 
             let dead = self.world.border.apply_positions(&mut self.world, &handles);
             let mut dead_grains = HashSet::new();
@@ -1680,6 +1729,7 @@ impl App {
             debug::draw_world(&self.world, &self.objects);
         }
         self.draw_selection(input.world);
+        self.draw_knife();
         camera::end_world();
         self.draw_slow_vignette();
 
@@ -1698,12 +1748,7 @@ impl App {
         let np = self.audio.now_playing();
         self.now_playing.draw(np.as_ref(), m);
         if self.s.player {
-            let view = PlayerView {
-                skin: self.skin.as_ref(),
-                now: np.as_ref(),
-                volume: self.s.volume,
-                double: self.s.player_double,
-            };
+            let view = player::view(&self.s, self.skin.as_ref(), &self.audio, np.as_ref());
             self.player.draw(&view, m);
         }
         self.spawner.draw(&self.s, m);
@@ -1733,6 +1778,7 @@ impl App {
         }
         self.help.draw();
         self.draw_rec_indicator(top);
+        self.draw_rewind(top);
     }
 
     fn draw_rec_indicator(&self, top: f32) {

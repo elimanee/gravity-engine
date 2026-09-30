@@ -133,6 +133,8 @@ pub enum Action {
     StartCustom(usize),
     CycleWorldSize(i32),
     Selection(SelectionCmd),
+    /// Drop a ragdoll at the pointer.
+    SpawnRagdoll,
     /// Show / hide the classic player window.
     TogglePlayer,
     Player(PlayerCmd),
@@ -165,6 +167,22 @@ pub enum PlayerCmd {
     /// Jump to this fraction of the song.
     Seek(f32),
     Volume(f32),
+    ToggleEq,
+    TogglePlaylist,
+    Shuffle,
+    Repeat,
+    /// Equalizer on / off.
+    EqOn,
+    /// Slider `i` (0 = preamp, 1‥10 = bands) to this many dB.
+    EqGain(usize, f32),
+    /// Next equalizer preset.
+    EqPreset,
+    PlayEntry(usize),
+    RemoveEntry(usize),
+    MoveEntry(usize, usize),
+    AddFiles,
+    SortPlaylist,
+    ClearPlaylist,
 }
 
 /// Challenge editor commands.

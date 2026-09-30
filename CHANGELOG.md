@@ -4,6 +4,23 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [2.6.0]
+
+### Added
+- **Playlist window** (the *PL* button of the classic player): every song with its length, the current one highlighted. Double-click or Enter plays a song, drag to reorder, Del removes, and the bottom buttons add files, remove, select all, sort and clear. Drop music on it to add it. The playlist is kept between sessions, `.m3u` playlists open too, and it plays through, with **shuffle** and **repeat** buttons
+- **Equalizer** (the *EQ* button): ten bands from 60 Hz to 16 kHz and a preamp, ±12 dB, applied to all music (files, radios and tracker modules), with presets (Rock, Pop, Dance, Classical, Full bass, Full treble, Headphones…). Both windows use the skin's `pledit` / `eqmain` sheets and colours, stack under the player like Winamp's, and have a built-in look without a skin
+- **Rewind** (hold `←`): the last 8 seconds of the simulation play backwards at double speed; let go to carry on from there
+- **Knife tool** (`C`): drag across the scene to cut ropes and springs, pull hinges, motors and glue apart, and slice objects in two (images, shapes and drawings)
+- **Ragdolls** (`O`, or *Ragdoll* in the settings): floppy characters with limited joints. Press `O` over an image and it becomes the ragdoll's head. The knife cuts their joints
+
+### Changed
+- 15 tools
+- Songs play once and the playlist moves on (tracker modules too); with *Repeat* off, playback stops after the last song
+
+### Downloads
+- `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
+- `gravity_engine-windows-x86_64.zip` — Windows build: unzip and run `gravity_engine.exe` (keep the DLLs next to it)
+
 ## [2.5.0]
 
 ### Added

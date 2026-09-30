@@ -123,6 +123,58 @@ impl App {
         }
     }
 
+    /// Replace object `i` by `pieces` of its sprite, moving like it did.
+    /// They fly apart from its centre, or along ±`apart` (a screen
+    /// direction) when given.
+    pub(super) fn replace_with_pieces(&mut self, i: usize, pieces: Vec<fracture::Piece>, apart: Option<Vec2>) {
+        let o = &self.objects[i];
+        let Some(b) = self.world.bodies.get(o.body) else { return };
+        let (pos, angle) = o.screen_pos(&self.world);
+        let (v, w) = (*b.linvel(), b.angvel());
+        let size = o.size;
+        let material = o.material;
+        let base = o.name();
+        let name = format!("{} (piece)", base.trim_end_matches(" (piece)"));
+        self.remove_object(i);
+
+        let (sin, cos) = (-angle).sin_cos();
+        let now = get_time();
+        for p in pieces {
+            let (x, y) = (p.offset.0 * size.x, p.offset.1 * size.y);
+            let at = pos + vec2(x * cos - y * sin, x * sin + y * cos);
+            let piece_size = (p.scale.0 * size.x, p.scale.1 * size.y);
+            // Rigid-body velocity at the piece plus a small kick.
+            let r = ((at.x - pos.x) / PPM, -(at.y - pos.y) / PPM);
+            let kick = match apart {
+                Some(n) => {
+                    let side = if (at - pos).dot(n) >= 0.0 { 1.0 } else { -1.0 };
+                    (n.x * side * 0.8, -n.y * side * 0.8)
+                }
+                None => {
+                    let len = (r.0 * r.0 + r.1 * r.1).sqrt().max(0.05);
+                    (r.0 / len * 1.2, r.1 / len * 1.2)
+                }
+            };
+            let linvel = (v.x - w * r.1 + kick.0, v.y + w * r.0 + kick.1);
+            let breakable = material.breakable && piece_size.0.min(piece_size.1) > 40.0;
+            let Some(png) = fracture::to_png(&p.image) else { continue };
+            let placement = Placement {
+                pos_px: (at.x, at.y),
+                angle,
+                linvel,
+                angvel: w,
+                size_px: Some(piece_size),
+                material: Material { breakable, ..material },
+                ..Default::default()
+            };
+            let source = Source::Memory { name: name.clone(), data: Arc::new(png) };
+            if let Some(piece) = Object::load(&mut self.world, source, placement) {
+                self.fresh.insert(piece.body, now);
+                self.objects.push(piece);
+            }
+        }
+    }
+
     /// Break an object into pieces around `point` (world metres). Returns
     /// whether it broke.
     pub(super) fn shatter(&mut self, body: RigidBodyHandle, point: Point<f32>) -> bool {
@@ -144,43 +196,9 @@ impl App {
             return false;
         }
 
-        let (pos, angle) = o.screen_pos(&self.world);
-        let (v, w) = (*b.linvel(), b.angvel());
         let size = o.size;
-        let material = o.material;
-        let base = o.name();
-        let name = format!("{} (piece)", base.trim_end_matches(" (piece)"));
         let colour = average_colour(img);
-        self.remove_object(i);
-
-        let (sin, cos) = (-angle).sin_cos();
-        let now = get_time();
-        for p in pieces {
-            let (x, y) = (p.offset.0 * size.x, p.offset.1 * size.y);
-            let at = pos + vec2(x * cos - y * sin, x * sin + y * cos);
-            let piece_size = (p.scale.0 * size.x, p.scale.1 * size.y);
-            // Rigid-body velocity at the piece plus a small kick away from the centre.
-            let r = ((at.x - pos.x) / PPM, -(at.y - pos.y) / PPM);
-            let len = (r.0 * r.0 + r.1 * r.1).sqrt().max(0.05);
-            let kick = 1.2;
-            let linvel = (v.x - w * r.1 + r.0 / len * kick, v.y + w * r.0 + r.1 / len * kick);
-            let breakable = material.breakable && piece_size.0.min(piece_size.1) > 40.0;
-            let Some(png) = fracture::to_png(&p.image) else { continue };
-            let placement = Placement {
-                pos_px: (at.x, at.y),
-                angle,
-                linvel,
-                angvel: w,
-                size_px: Some(piece_size),
-                material: Material { breakable, ..material },
-                ..Default::default()
-            };
-            let source = Source::Memory { name: name.clone(), data: Arc::new(png) };
-            if let Some(piece) = Object::load(&mut self.world, source, placement) {
-                self.fresh.insert(piece.body, now);
-                self.objects.push(piece);
-            }
-        }
+        self.replace_with_pieces(i, pieces, None);
         if self.s.effects {
             self.effects.debris(to_screen(point.x, point.y), size.x.max(size.y) / 2.0, colour);
         }
@@ -198,7 +216,7 @@ fn vector_to(x0: f32, y0: f32, x1: f32, y1: f32) -> (f32, f32) {
 }
 
 /// Mean colour of the opaque pixels (for debris).
-fn average_colour(img: &image::RgbaImage) -> Color {
+pub(super) fn average_colour(img: &image::RgbaImage) -> Color {
     let (mut r, mut g, mut b, mut n) = (0u64, 0u64, 0u64, 0u64);
     for p in img.pixels().filter(|p| p[3] > 128) {
         r += p[0] as u64;

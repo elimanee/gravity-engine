@@ -172,6 +172,19 @@ pub fn tool(tool: Tool, c: Vec2, size: f32, color: Color, t: f32) {
             draw_triangle(tip, tip + vec2(0.0, 18.0 * s), tip + vec2(12.0 * s, 12.0 * s), color);
             draw_line(tip.x + 5.0 * s, tip.y + 13.0 * s, tip.x + 9.0 * s, tip.y + 20.0 * s, th * 1.4, color);
         }
+        Tool::Knife => {
+            // A blade with a slash behind it.
+            let a = vec2(c.x - 14.0 * s, c.y + 12.0 * s);
+            let b = vec2(c.x + 14.0 * s, c.y - 14.0 * s);
+            let n = vec2(0.72, 0.69) * 4.0 * s;
+            draw_triangle(b, b.lerp(a, 0.62) + n, b.lerp(a, 0.62) - n * 0.3, color);
+            let handle = b.lerp(a, 0.62);
+            draw_line(handle.x, handle.y, a.x, a.y, th * 2.2, soft);
+            let t2 = (t * 1.3) % 1.0;
+            let (p, q) = (vec2(c.x - 16.0 * s, c.y - 4.0 * s), vec2(c.x + 10.0 * s, c.y + 14.0 * s));
+            let (p0, p1) = (p.lerp(q, (t2 - 0.3).max(0.0)), p.lerp(q, t2));
+            draw_line(p0.x, p0.y, p1.x, p1.y, th * 0.8, soft);
+        }
         Tool::Pour => {
             // A tilted cup pouring a stream onto a heap.
             let cup = [
@@ -336,7 +349,7 @@ pub fn link_kind(kind: crate::physics::links::LinkKind, c: Vec2, size: f32, colo
             }
             return;
         }
-        LinkKind::Hinge => {
+        LinkKind::Hinge | LinkKind::Limb => {
             draw_rectangle_ex(
                 c.x,
                 c.y,

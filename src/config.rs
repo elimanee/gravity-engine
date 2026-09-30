@@ -41,7 +41,7 @@ pub const IMAGE_EXT: &[&str] = &[
 ];
 pub const TRACKER_EXT: &[&str] = &["mod", "xm", "it", "s3m", "mptm", "mo3", "okt", "umx", "669", "far", "mtm"];
 pub const AUDIO_EXT: &[&str] = &["mp3", "flac", "wav", "ogg", "opus", "aac", "m4a"];
-pub const PLAYLIST_EXT: &[&str] = &["pls"];
+pub const PLAYLIST_EXT: &[&str] = &["pls", "m3u", "m3u8"];
 pub const SCENE_EXT: &str = "gscene";
 pub const CHALLENGE_EXT: &str = "gchallenge";
 

@@ -13,10 +13,49 @@ use std::path::{Path, PathBuf};
 pub const SKIN_EXT: [&str; 2] = ["wsz", "zip"];
 
 /// Sprite sheets a skin may have; only `main` is required.
-const SHEETS: [&str; 12] = [
+const SHEETS: [&str; 14] = [
     "main", "titlebar", "cbuttons", "text", "numbers", "playpaus", "monoster", "posbar", "volume", "balance",
-    "shufrep", "nums_ex",
+    "shufrep", "nums_ex", "pledit", "eqmain",
 ];
+
+/// Colours of the playlist window (`pledit.txt`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlaylistColors {
+    pub normal: [u8; 3],
+    pub current: [u8; 3],
+    pub normal_bg: [u8; 3],
+    pub selected_bg: [u8; 3],
+}
+
+impl Default for PlaylistColors {
+    fn default() -> Self {
+        PlaylistColors { normal: [0, 255, 0], current: [255, 255, 255], normal_bg: [0, 0, 0], selected_bg: [0, 0, 198] }
+    }
+}
+
+/// Parse `pledit.txt` (`Normal=#00FF00`, …); missing keys keep Winamp's colours.
+pub fn parse_pledit(s: &str) -> PlaylistColors {
+    let mut c = PlaylistColors::default();
+    for line in s.lines() {
+        let Some((k, v)) = line.split_once('=') else { continue };
+        let hex = v.trim().trim_start_matches('#');
+        let Some(rgb) = (hex.len() >= 6)
+            .then(|| (0..3).map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()).collect::<Option<Vec<u8>>>())
+            .flatten()
+        else {
+            continue;
+        };
+        let rgb = [rgb[0], rgb[1], rgb[2]];
+        match k.trim().to_ascii_lowercase().as_str() {
+            "normal" => c.normal = rgb,
+            "current" => c.current = rgb,
+            "normalbg" => c.normal_bg = rgb,
+            "selectedbg" => c.selected_bg = rgb,
+            _ => {}
+        }
+    }
+    c
+}
 
 /// Where the widgets of the main window are, in skin pixels.
 #[derive(Debug, Clone, PartialEq)]
@@ -241,6 +280,7 @@ pub struct SkinData {
     pub sheets: HashMap<&'static str, RgbaImage>,
     pub layout: Layout,
     pub vis: [[u8; 3]; 24],
+    pub playlist: PlaylistColors,
 }
 
 impl SkinData {
@@ -278,7 +318,8 @@ impl SkinData {
             layout = layout.with_hints(&h);
         }
         let vis = text("viscolor.txt").map_or(DEFAULT_VIS, |s| parse_viscolor(&s));
-        Ok(SkinData { name, sheets, layout, vis })
+        let playlist = text("pledit.txt").map_or_else(PlaylistColors::default, |s| parse_pledit(&s));
+        Ok(SkinData { name, sheets, layout, vis, playlist })
     }
 }
 
@@ -328,6 +369,7 @@ pub struct Skin {
     sheets: HashMap<&'static str, Texture2D>,
     pub layout: Layout,
     pub vis: [Color; 24],
+    pub playlist: PlaylistColors,
 }
 
 impl Skin {
@@ -342,7 +384,7 @@ impl Skin {
             })
             .collect();
         let vis = data.vis.map(|[r, g, b]| Color::from_rgba(r, g, b, 255));
-        Skin { name: data.name, path, sheets, layout: data.layout, vis }
+        Skin { name: data.name, path, sheets, layout: data.layout, vis, playlist: data.playlist }
     }
 
     pub fn load(path: &Path) -> Result<Self, String> {
@@ -460,6 +502,15 @@ mod tests {
         let v = parse_viscolor("0,0,0\t// background\n 1, 2 ,3\nnot a colour\n255,128,64 // high\n");
         assert_eq!(&v[..3], &[[0, 0, 0], [1, 2, 3], [255, 128, 64]]);
         assert_eq!(v[23], DEFAULT_VIS[23]);
+    }
+
+    #[test]
+    fn pledit_colours() {
+        let c =
+            parse_pledit("[Text]\nNormal=#00FF00\nCurrent=#ffffff\nNormalBG=#000000\nSelectedBG=#0000C6\nFont=Arial\n");
+        assert_eq!(c.selected_bg, [0, 0, 198]);
+        assert_eq!(c.current, [255, 255, 255]);
+        assert_eq!(parse_pledit("NormalBG=zz\n").normal_bg, PlaylistColors::default().normal_bg);
     }
 
     #[test]
