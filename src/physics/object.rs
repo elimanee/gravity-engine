@@ -161,6 +161,8 @@ pub struct Material {
     pub magnet: f32,
     /// Conveyor surface speed (m/s); positive moves things clockwise around it.
     pub conveyor: f32,
+    /// Catches fire when heated (otherwise it only glows).
+    pub flammable: bool,
 }
 
 impl Default for Material {
@@ -178,13 +180,19 @@ impl Material {
         strength: 9.0,
         magnet: 0.0,
         conveyor: 0.0,
+        flammable: true,
     };
     pub const RUBBER: Material = Material { bounce: 0.92, friction: 0.9, ..Material::DEFAULT };
-    pub const ICE: Material = Material { bounce: 0.05, friction: 0.0, ..Material::DEFAULT };
+    pub const ICE: Material = Material { bounce: 0.05, friction: 0.0, flammable: false, ..Material::DEFAULT };
     pub const BALLOON: Material = Material { bounce: 0.6, friction: 0.4, gravity: -0.25, ..Material::DEFAULT };
     pub const GLASS: Material =
-        Material { bounce: 0.2, friction: 0.4, breakable: true, strength: 6.0, ..Material::DEFAULT };
-    pub const MAGNET: Material = Material { magnet: 1.0, friction: 0.8, ..Material::DEFAULT };
+        Material { bounce: 0.2, friction: 0.4, breakable: true, strength: 6.0, flammable: false, ..Material::DEFAULT };
+    pub const MAGNET: Material = Material { magnet: 1.0, friction: 0.8, flammable: false, ..Material::DEFAULT };
+
+    /// The Ice preset (or close to it): melts instead of burning.
+    pub fn is_ice(&self) -> bool {
+        self.friction < 0.05 && self.bounce < 0.2 && !self.flammable
+    }
 }
 
 /// Impact reporting, conveyor behaviour and physical coefficients of a collider.
@@ -450,11 +458,53 @@ impl Object {
         );
     }
 
-    pub fn draw(&self, world: &PhysWorld) {
+    /// Draw with the sprite multiplied by `tint` (charring, heat glow).
+    pub fn draw_tinted(&self, world: &PhysWorld, tint: Color) {
         let (pos, angle) = self.screen_pos(world);
         // Soft contact shadow.
         self.draw_sprite(self.texture(), pos + vec2(3.0, 4.0), angle, Color::new(0.0, 0.0, 0.0, 0.22));
-        self.draw_sprite(self.texture(), pos, angle, WHITE);
+        self.draw_sprite(self.texture(), pos, angle, tint);
+    }
+
+    /// The collider's outline as a polygon, normalised to the sprite box
+    /// ([-0.5, 0.5]², v up), in order around it.
+    pub fn outline_polygon(&self) -> Vec<[f32; 2]> {
+        let (w, h) = (self.size.x.max(1.0), self.size.y.max(1.0));
+        let rect = vec![[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
+        // Rounded corners: arcs of radius (ru, rv) around the inner corners.
+        let rounded = |ru: f32, rv: f32| -> Vec<[f32; 2]> {
+            let mut pts = vec![];
+            for (k, (cx, cy)) in
+                [(0.5 - ru, 0.5 - rv), (-0.5 + ru, 0.5 - rv), (-0.5 + ru, -0.5 + rv), (0.5 - ru, -0.5 + rv)]
+                    .into_iter()
+                    .enumerate()
+            {
+                for i in 0..=6 {
+                    let a = (k as f32 + i as f32 / 6.0) * std::f32::consts::FRAC_PI_2;
+                    pts.push([cx + a.cos() * ru, cy + a.sin() * rv]);
+                }
+            }
+            pts
+        };
+        match &self.outline {
+            Outline::Box | Outline::Stroke { .. } => rect,
+            Outline::RoundBox => {
+                let r = (w * BOX_ROUNDING).min(w * 0.45).min(h * 0.45);
+                rounded(r / w, r / h)
+            }
+            Outline::Ball => {
+                let r = w.min(h) / 2.0;
+                (0..32)
+                    .map(|i| {
+                        let a = i as f32 / 32.0 * std::f32::consts::TAU;
+                        [a.cos() * r / w, a.sin() * r / h]
+                    })
+                    .collect()
+            }
+            Outline::Capsule => rounded((h / 2.0).min(w / 2.0) / w, 0.5),
+            Outline::Hull(pts) => convex_hull(pts),
+            Outline::Concave(pts) => pts.clone(),
+        }
     }
 
     /// Four corners of the sprite box in screen space.
@@ -556,6 +606,31 @@ impl Object {
     }
 }
 
+/// Convex hull of a point cloud, counter-clockwise (monotone chain).
+pub fn convex_hull(pts: &[[f32; 2]]) -> Vec<[f32; 2]> {
+    let mut p = pts.to_vec();
+    p.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+    p.dedup();
+    if p.len() < 3 {
+        return p;
+    }
+    let cross = |o: [f32; 2], a: [f32; 2], b: [f32; 2]| (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    let chain = |points: &mut dyn Iterator<Item = [f32; 2]>| {
+        let mut h: Vec<[f32; 2]> = vec![];
+        for q in points {
+            while h.len() >= 2 && cross(h[h.len() - 2], h[h.len() - 1], q) <= 0.0 {
+                h.pop();
+            }
+            h.push(q);
+        }
+        h.pop();
+        h
+    };
+    let mut hull = chain(&mut p.iter().copied());
+    hull.extend(chain(&mut p.iter().rev().copied()));
+    hull
+}
+
 /// Index of the top-most object under the given screen point.
 pub fn object_at(objects: &[Object], world: &PhysWorld, px: f32, py: f32) -> Option<usize> {
     objects.iter().rposition(|o| o.contains_px(world, px, py))
@@ -564,4 +639,14 @@ pub fn object_at(objects: &[Object], world: &PhysWorld, px: f32, py: f32) -> Opt
 /// Indices of every object under the given screen point, top-most first.
 pub fn objects_at(objects: &[Object], world: &PhysWorld, px: f32, py: f32) -> Vec<usize> {
     (0..objects.len()).rev().filter(|&i| objects[i].contains_px(world, px, py)).collect()
+}
+
+#[cfg(test)]
+mod hull_tests {
+    #[test]
+    fn hull_of_a_square_with_inner_points() {
+        let pts = [[0.0, 0.0], [1.0, 0.0], [0.5, 0.5], [1.0, 1.0], [0.0, 1.0], [0.2, 0.7]];
+        let h = super::convex_hull(&pts);
+        assert_eq!(h, vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+    }
 }

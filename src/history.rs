@@ -6,6 +6,7 @@
 use crate::config::PPM;
 use crate::physics::links::{Link, LinkSpec};
 use crate::physics::object::{Object, Placement, Source, Visual};
+use crate::physics::soft::SoftState;
 use crate::physics::zones::Zone;
 use crate::physics::PhysWorld;
 use macroquad::prelude::Vec2;
@@ -32,6 +33,8 @@ pub struct Snapshot {
     objects: Vec<ObjectState>,
     links: Vec<LinkState>,
     zones: Vec<Zone>,
+    /// Jellies and cloths (filled in by the app).
+    pub softs: Vec<SoftState>,
 }
 
 /// What a snapshot brings back.
@@ -75,6 +78,7 @@ impl Snapshot {
                 })
                 .collect(),
             zones: zones.to_vec(),
+            softs: vec![],
         }
     }
 

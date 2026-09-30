@@ -23,6 +23,7 @@ pub enum Tool {
     Select,
     Pour,
     Knife,
+    Fire,
 }
 
 /// What the bottom-left tool card shows for a tool.
@@ -64,6 +65,7 @@ impl Tool {
         Tool::Select,
         Tool::Pour,
         Tool::Knife,
+        Tool::Fire,
     ];
 
     /// Keyboard shortcut.
@@ -84,6 +86,7 @@ impl Tool {
             Tool::Select => "S",
             Tool::Pour => "K",
             Tool::Knife => "C",
+            Tool::Fire => "Y",
         }
     }
 
@@ -104,6 +107,7 @@ impl Tool {
             Tool::Select => "Select",
             Tool::Pour => "Pour",
             Tool::Knife => "Knife",
+            Tool::Fire => "Fire",
         }
     }
 
@@ -124,6 +128,7 @@ impl Tool {
             Tool::Select => "Select, move, copy and glue",
             Tool::Pour => "Pour sand, liquid and beads",
             Tool::Knife => "Cut ropes, joints and objects",
+            Tool::Fire => "Set things on fire, melt ice",
         }
     }
 
@@ -144,6 +149,7 @@ impl Tool {
             Tool::Select => (235, 235, 245),
             Tool::Pour => (232, 196, 120),
             Tool::Knife => (220, 235, 255),
+            Tool::Fire => (255, 128, 40),
         };
         Color::from_rgba(r, g, b, 255)
     }

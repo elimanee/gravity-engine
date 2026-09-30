@@ -4,13 +4,26 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
-![Version](https://img.shields.io/badge/version-2.6-8b78ff)
+![Version](https://img.shields.io/badge/version-2.7-8b78ff)
 
 ![Title screen](docs/screenshots/title.png)
 
 | Sandbox | Settings drawer (Space) | Tool picker (Tab) |
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
+
+## What's new in 2.7
+
+| Fire (Y) | Jelly and cloth (U, Shift+U) |
+|---|---|
+| ![Fire spreading through a domino run](docs/screenshots/fire.png) | ![Jellies and a flag in the wind](docs/screenshots/jelly-cloth.png) |
+
+- **Fire** (`Y`) — set things alight: fire spreads to whatever touches it (faster upwards), burns ropes through and leaves ash. Ice melts into water, glass cracks, metal glows, and water or poured liquid puts it out. Explosions start fires too.
+- **Jelly** (`U`) — squashy, wobbly blobs; press `U` over any image or shape to turn it into jelly.
+- **Cloth** (`Shift+U`) — pinned fabric that drapes, flaps in wind zones, tears when pulled too hard, and can be cut with the knife or burnt. Right-click an image → *Hang it as a flag*.
+- **Physical player** (`Shift+X`) — the Winamp player becomes a real object: it falls, tumbles, gets blown up and carries things, while all its buttons still work. Grab a title bar to throw it.
+
+![Physical player on a pile of jellies](docs/screenshots/player-physics.png)
 
 ## What's new in 2.6
 
@@ -93,7 +106,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Shape spawner** (`N`) — Circle, Box, Triangle, Pentagon, Hexagon, Star, Capsule; pick a colour (or random) and size, click or hold to spawn
 - **88×31 button fetcher** (`F`) — 20 random classic web buttons scraped from 8 galleries (animated GIFs supported)
 - **Game logo fetcher** (`L`) — 20 random logos from [SteamGridDB](https://www.steamgriddb.com/) (needs an API key, see below)
-- **15 tools** — `Tab`, `1`–`9`, `0`, `J`, `Z`, `S`, `K` or `C`:
+- **16 tools** — `Tab`, `1`–`9`, `0`, `J`, `Z`, `S`, `K`, `C` or `Y`:
 
   | # | Tool | Description |
   |---|------|-------------|
@@ -111,7 +124,8 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | Z | Zone | Wind, float and portal areas |
   | S | Select | Select objects (click, `Shift`+click, box), move them, copy / paste, duplicate, pin, delete, glue |
   | K | Pour | Pour sand, liquid or beads; right-drag erases |
-  | C | Knife | Cut ropes, springs and joints; slice objects in two |
+  | C | Knife | Cut ropes, springs, joints and cloth; slice objects in two |
+  | Y | Fire | Set things on fire, melt ice |
 
   The tool card (bottom left) holds each tool's settings: radius / strength for area tools (mouse wheel: radius, `Shift`+wheel: strength), thickness, colour and pinning for Draw, the kind of link (and motor speed) for Link, the kind of zone for Zone, the selection commands for Select and the kind of grain for Pour.
 - **7 border modes** — `B` to cycle (`Shift+B` backwards):
@@ -127,7 +141,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | Portal | No floor — every edge is a portal, animated rainbow borders |
 - **7 backgrounds** — `G` to cycle: Dark, Space, Grid, Sunset, Ocean, Aurora, Custom (`Shift+G` picks an image)
 - **Water** (`H`) — a pool with buoyancy and drag; level and density in the settings drawer, waves react to splashes and to the music
-- **Object properties** — bounce, friction, mass, gravity, breakable, magnet and conveyor per object (right-click → *Properties…*, or `I`)
+- **Object properties** — bounce, friction, mass, gravity, breakable, flammable, magnet and conveyor per object (right-click → *Properties…*, or `I`)
 - **Library** (`E`) — example scenes, fifteen challenges with star ratings, and your own challenges
 - **Challenge editor** (`Shift+E`) — make levels and share them as `.gchallenge` files
 - **Camera** — zoom (`Ctrl`+wheel, `+` / `-`, `Home` to fit) and pan (middle mouse button); *World size* makes the arena up to 3× the window
@@ -138,9 +152,11 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Trails** (`T`) — motion-blur ghost trail with length and fade settings
 - **Audio visualizer** — `V` cycles a spectrum layer behind the objects (Bars / Wave / Radial); `Shift+V` drops a visualizer *screen* that is a real physics object (throw it, pin it, resize it). Sensitivity and an optional "objects jump on the beat" mode live in the settings drawer
 - **Audio player** (`M`) — tracker modules (.mod/.xm/.it/.s3m/…), common formats (.mp3/.flac/.wav/.ogg/…), `.pls` playlists including HTTP radio streams
-- **Classic player** (`X`) — Winamp-style window with play / pause / stop / next / previous / seek / volume, a playlist window (shuffle, repeat, reorder, `.m3u` / `.pls`) and a 10-band equalizer, skinned with Winamp 2 `.wsz` or Audacious skins (found automatically in Audacious's skin folders, `~/.config/gravity_engine/skins/`, or dropped on the window)
+- **Classic player** (`X`) — Winamp-style window with play / pause / stop / next / previous / seek / volume, a playlist window (shuffle, repeat, reorder, `.m3u` / `.pls`) and a 10-band equalizer, skinned with Winamp 2 `.wsz` or Audacious skins (found automatically in Audacious's skin folders, `~/.config/gravity_engine/skins/`, or dropped on the window). `Shift+X` turns it into a physical object you can throw around
 - **Rewind** (hold `←`) — play the last 8 seconds backwards
 - **Ragdolls** (`O`) — floppy characters with limited joints (over an image: it becomes the head)
+- **Fire and heat** (`Y`) — burning, spreading fire, ash, melting ice, cracking glass; water puts it out
+- **Jelly and cloth** (`U` / `Shift+U`) — soft bodies from any image or shape, and fabric that drapes, flaps in the wind and tears
 - **Screenshots** (`F12`) and **GIF recording** (`F11`, up to 30 s) of the scene, without the interface
 - **Debug overlay** (`D`) — FPS, collider outlines, velocities and details of the object under the cursor
 
@@ -151,10 +167,11 @@ Press **F1** in the app for the full list.
 | Key / Input | Action |
 |-------------|--------|
 | Left-drag | Use the current tool |
-| Right-click | Object menu (Resize, Duplicate, Resize all, Properties, Pin, Detach links, Delete) |
-| `Tab` / `1`–`9`, `0`, `J`, `Z`, `S`, `K`, `C` | Tool picker / select a tool |
+| Right-click | Object menu (Resize, Duplicate, Resize all, Properties, Pin, Make it jelly, Hang it as a flag, Detach links, Delete) |
+| `Tab` / `1`–`9`, `0`, `J`, `Z`, `S`, `K`, `C`, `Y` | Tool picker / select a tool |
 | `←` (hold) | Rewind time |
 | `O` | Drop a ragdoll (over an image: it becomes the head) |
+| `U` / `Shift+U` | Jelly / cloth (over an object: it turns to jelly / is hung as a flag) |
 | `E` / `Shift+E` | Examples & challenges / challenge editor |
 | `Ctrl`+Wheel, `+` / `-`, `Home` | Zoom at the pointer, zoom in / out, fit the world |
 | Middle-drag | Pan the view |
@@ -175,7 +192,7 @@ Press **F1** in the app for the full list.
 | `Shift+G` | Background from an image |
 | `W` / `T` / `H` | Toggle window shake / trails / water |
 | `M` / `P` | Load music / play-pause |
-| `X` | Classic player (Winamp / Audacious skins) |
+| `X` / `Shift+X` | Classic player (Winamp / Audacious skins) / make it a physical object |
 | `V` / `Shift+V` | Visualizer behind objects / spawn a visualizer screen |
 | `Ctrl+S` / `Ctrl+O` | Save a scene / open a scene or a challenge |
 | `F12` / `F11` | Screenshot / start or stop a GIF recording (scene only, without UI) |
@@ -230,8 +247,9 @@ Screenshots and GIFs go to `~/Pictures/gravity_engine/` (or `~/.config/gravity_e
 src/
 ├── main.rs            entry point, window config, CLI
 ├── app/               app state and frame loop (input → UI → actions → simulation → render),
-│                      building tools, selection, impacts and shattering, sounds and slow
-│                      motion, challenge mode, challenge editor and verifier
+│                      building tools, selection, impacts and shattering, fire, jelly and
+│                      cloth, the physical player, sounds and slow motion, challenge mode,
+│                      challenge editor and verifier
 ├── camera.rs          zoom / pan and the world ↔ screen mapping
 ├── config.rs          constants and paths          settings.rs   persisted preferences
 ├── skin.rs            Winamp 2 / Audacious skins (.wsz, folders, skin.hints)
@@ -242,11 +260,11 @@ src/
 ├── effects.rs         particles                    library/      example scenes and challenges
 ├── window_tracker.rs  window shake
 ├── audio/             tracker modules, streams, playlists, the visualizer's analyzer, sound effects
-├── physics/           world, objects, tools, links, zones, water, grains, magnets, fracture, border modes
+├── physics/           world, objects, tools, links, zones, water, grains, soft bodies, magnets, fracture, border modes
 └── ui/                theme, widgets, HUD, drawer, tool card, menus, properties panel, overlays, title screen
 ```
 
-`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
+`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, jelly, cloth, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
 
 `gravity_engine --verify-challenges` (needs a display) checks that every built-in challenge can be solved.
 

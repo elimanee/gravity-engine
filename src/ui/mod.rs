@@ -135,6 +135,12 @@ pub enum Action {
     Selection(SelectionCmd),
     /// Drop a ragdoll at the pointer.
     SpawnRagdoll,
+    /// The player windows become a physical object (or stop being one).
+    TogglePlayerPhysics,
+    /// A jelly (or the object under the pointer turned to jelly).
+    SpawnJelly,
+    /// A cloth (or the object under the pointer hung as a flag).
+    SpawnCloth,
     /// Show / hide the classic player window.
     TogglePlayer,
     Player(PlayerCmd),
@@ -217,6 +223,10 @@ pub enum ObjectCmd {
     TogglePin,
     Properties,
     Unlink,
+    /// Turn it into a jelly.
+    Jelly,
+    /// Turn it into a cloth hung by its top edge.
+    Flag,
     Delete,
 }
 

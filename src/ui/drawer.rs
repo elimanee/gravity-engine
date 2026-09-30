@@ -34,6 +34,7 @@ enum ToggleId {
     Sfx,
     SlowMo,
     Player,
+    PlayerPhysics,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -69,7 +70,8 @@ impl Row {
 const WORLD_BUTTONS: &[(&str, Action)] = &[("Image…", Action::PickBackground), ("Reset all", Action::ResetSettings)];
 const AUDIO_BUTTONS: &[(&str, Action)] = &[("Load…", Action::LoadAudio), ("Play / Pause", Action::ToggleAudio)];
 const ADD_BUTTONS: &[(&str, Action)] = &[("Images…", Action::AddImages), ("Shapes", Action::ToggleSpawner)];
-const RAGDOLL_BUTTONS: &[(&str, Action)] = &[("Ragdoll  (O)", Action::SpawnRagdoll)];
+const RAGDOLL_BUTTONS: &[(&str, Action)] =
+    &[("Ragdoll (O)", Action::SpawnRagdoll), ("Jelly (U)", Action::SpawnJelly), ("Cloth", Action::SpawnCloth)];
 const WEB_BUTTONS: &[(&str, Action)] = &[("88×31 buttons", Action::FetchButtons), ("Game logos", Action::FetchLogos)];
 const SCENE_BUTTONS: &[(&str, Action)] = &[("Save…", Action::SaveScene), ("Open…", Action::LoadScene)];
 const VIS_BUTTONS: &[(&str, Action)] = &[("Spawn visualizer  (Shift+V)", Action::SpawnVisualizer)];
@@ -174,6 +176,7 @@ impl Drawer {
             Row::Toggle(ToggleId::Player),
         ]);
         if s.player {
+            rows.push(Row::Toggle(ToggleId::PlayerPhysics));
             rows.push(Row::Stepper(StepperId::Skin));
             rows.push(Row::Buttons(SKIN_BUTTONS));
         }
@@ -277,6 +280,7 @@ impl Drawer {
                             ToggleId::Effects => actions.push(Action::ToggleEffects),
                             ToggleId::Sfx => s.sfx = !s.sfx,
                             ToggleId::Player => actions.push(Action::TogglePlayer),
+                            ToggleId::PlayerPhysics => actions.push(Action::TogglePlayerPhysics),
                             ToggleId::SlowMo => s.slow_motion = !s.slow_motion,
                         }
                     }
@@ -352,6 +356,7 @@ impl Drawer {
                         ToggleId::Effects => ("Sparks, dust and splashes", s.effects),
                         ToggleId::Sfx => ("Sound effects", s.sfx),
                         ToggleId::Player => ("Classic player  (X)", s.player),
+                        ToggleId::PlayerPhysics => ("Physical player  (Shift+X)", s.player_physics),
                         ToggleId::SlowMo => ("Slow motion on big hits", s.slow_motion),
                     };
                     draw_toggle_row(r, label, on, hov, f);

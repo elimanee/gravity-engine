@@ -141,6 +141,12 @@ pub struct SkinPlayer {
     pl_selected: BTreeSet<usize>,
     /// Row of the last click (for double-clicks and Shift ranges), and when.
     pl_last_click: Option<(usize, f64)>,
+    /// Physical player: the windows are drawn at `pos` (not kept on
+    /// screen), in their own frame, and dragging the title bar asks the
+    /// app to throw them instead of moving them.
+    pub free: bool,
+    /// The title bar was grabbed at this point (free mode).
+    pub throw: Option<Vec2>,
 }
 
 /// Equalizer settings (dB).
@@ -197,6 +203,9 @@ impl PlayerView<'_> {
 
 impl SkinPlayer {
     fn origin(&self, size: Vec2) -> Vec2 {
+        if self.free {
+            return self.pos.unwrap_or(Vec2::ZERO);
+        }
         let (sw, sh) = (screen_width(), screen_height());
         let p = self.pos.unwrap_or(vec2(sw - size.x - 16.0, sh - WALL_T * PPM - size.y - 16.0));
         vec2(p.x.clamp(0.0, (sw - size.x).max(0.0)), p.y.clamp(0.0, (sh - size.y).max(0.0)))
@@ -223,6 +232,17 @@ impl SkinPlayer {
             pl_size,
             s,
         }
+    }
+
+    /// The windows shown (main, equalizer, playlist), where they are.
+    pub fn rects(&self, v: &PlayerView) -> Vec<Rect> {
+        let st = self.stack(v);
+        [Some(st.main), st.eq, st.playlist].into_iter().flatten().collect()
+    }
+
+    /// Put the windows' top-left corner at `p` (screen px).
+    pub fn place(&mut self, p: Vec2) {
+        self.pos = Some(p);
     }
 
     /// The pointer is over one of the windows (last frame).
@@ -272,6 +292,10 @@ impl SkinPlayer {
         }
 
         match self.drag {
+            Some(Drag::Window(_)) if self.free => {
+                self.throw = Some(input.mouse);
+                self.drag = None;
+            }
             Some(Drag::Window(grab)) if input.left_down => self.pos = Some(input.mouse - grab),
             Some(Drag::Volume) if input.left_down => {
                 let frac = ((local.x - l.volume.x - 7.0) / (68.0 - 14.0)).clamp(0.0, 1.0);

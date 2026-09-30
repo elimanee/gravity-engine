@@ -108,6 +108,10 @@ impl App {
         }
         let blast = to_phys(at.x, at.y);
         let mut broken = 0;
+        // Close to the blast things catch fire; further away they only warm up.
+        for &(body, speed) in &hits {
+            self.fire.warm(body, if speed > 6.0 { 1.0 } else { 0.4 });
+        }
         for (body, speed) in hits {
             let Some(o) = self.objects.iter().find(|o| o.body == body) else { continue };
             if broken < BREAKS_PER_FRAME && o.material.breakable && speed > o.material.strength {

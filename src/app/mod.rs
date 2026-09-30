@@ -49,14 +49,17 @@ use std::sync::Arc;
 
 mod build;
 mod editor;
+mod fire;
 mod impacts;
 mod juice;
 mod knife;
 mod library;
 mod player;
+mod player_body;
 mod ragdoll;
 mod rewind;
 mod select;
+mod soft;
 mod verify;
 
 const TIME_STEPS: &[f32] = &[0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
@@ -128,6 +131,9 @@ pub struct App {
     slow: juice::SlowMo,
     rewind: rewind::Rewind,
     knife: knife::Knife,
+    fire: fire::Fire,
+    /// Jellies and cloths.
+    softs: Vec<crate::physics::soft::Soft>,
     grains: Grains,
     /// The Pour tool is pouring.
     pouring: bool,
@@ -150,6 +156,8 @@ pub struct App {
     editor_bar: EditorBar,
     /// Classic player window and its skin (loaded when first shown).
     player: SkinPlayer,
+    /// The player windows as a physical object (Shift+X).
+    player_body: Option<player_body::PlayerBody>,
     skin: Option<crate::skin::Skin>,
     skin_tried: bool,
     /// "My challenges", read from the challenge folder.
@@ -205,6 +213,8 @@ impl App {
             slow: Default::default(),
             rewind: Default::default(),
             knife: Default::default(),
+            fire: Default::default(),
+            softs: Vec::new(),
             grains: Grains::default(),
             pouring: false,
             pour_sound: 0.0,
@@ -239,6 +249,7 @@ impl App {
             editor: None,
             editor_bar: EditorBar::default(),
             player: SkinPlayer::default(),
+            player_body: None,
             skin: None,
             skin_tried: false,
             custom: Vec::new(),
@@ -480,6 +491,7 @@ impl App {
             KeyCode::S,
             KeyCode::K,
             KeyCode::C,
+            KeyCode::Y,
         ];
         for (i, k) in digits.iter().enumerate() {
             if pressed(*k) {
@@ -491,10 +503,13 @@ impl App {
             actions.push(Action::ToggleWater);
         }
         if pressed(KeyCode::X) {
-            actions.push(Action::TogglePlayer);
+            actions.push(if shift { Action::TogglePlayerPhysics } else { Action::TogglePlayer });
         }
         if pressed(KeyCode::O) {
             actions.push(Action::SpawnRagdoll);
+        }
+        if pressed(KeyCode::U) {
+            actions.push(if shift { Action::SpawnCloth } else { Action::SpawnJelly });
         }
         if pressed(KeyCode::F11) {
             actions.push(Action::ToggleRecording);
@@ -556,6 +571,9 @@ impl App {
             if let Some(i) = object_at(&self.objects, &self.world, input.world.x, input.world.y) {
                 let h = self.objects[i].body;
                 actions.push(Action::Object(ObjectCmd::Delete, h));
+            } else if let Some(i) = self.soft_at(input.world) {
+                self.record("Delete");
+                self.remove_soft(i);
             } else {
                 self.remove_zone_at(input.world);
             }
@@ -606,9 +624,22 @@ impl App {
         self.now_playing.update(dt, np.as_ref(), self.paused, input, actions);
         if self.s.player {
             self.ensure_skin();
+        }
+        self.sync_player_body();
+        if self.s.player {
             self.player.animate(dt, &self.audio.analyzer.bands);
+            // A physical player sees the pointer in its own, turned frame.
+            let local = self.player_local(input.world);
+            let screen_mouse = input.mouse;
+            if let Some(l) = local {
+                input.mouse = l;
+            }
             let view = player::view(&self.s, self.skin.as_ref(), &self.audio, np.as_ref());
             self.player.update(&view, input, actions);
+            input.mouse = screen_mouse;
+            if self.player.throw.take().is_some() {
+                self.throw_player(input.world);
+            }
         }
         let hud_state = self.hud_state();
         let grabbing = self.grab.is_some()
@@ -732,6 +763,8 @@ impl App {
                     self.pouring = true;
                 } else if tool == Tool::Knife {
                     self.knife_press(m);
+                } else if tool == Tool::Fire {
+                    self.fire.lit = true;
                 } else if tool.is_field() {
                     self.field_active = true;
                 } else if tool == Tool::Bomb {
@@ -748,6 +781,8 @@ impl App {
                 } else if tool.grabs() {
                     if let Some(i) = object_at(&self.objects, &self.world, m.x, m.y) {
                         self.grab = Some(Grab::new(&self.world.bodies, self.objects[i].body, to_phys(m.x, m.y), tool));
+                    } else {
+                        self.grab_soft(m, tool);
                     }
                 }
             }
@@ -786,6 +821,7 @@ impl App {
                 self.select_release(m);
             }
             self.pouring = false;
+            self.fire.lit = false;
             self.editor_release(m);
             self.knife_release(m);
             if let Some(g) = self.grab.take() {
@@ -837,9 +873,10 @@ impl App {
         }
         // Music dropped on the playlist window is added to it.
         let on_playlist = self.s.player && {
+            let at = self.player_local(mouse).unwrap_or(mouse_position().into());
             let np = self.audio.now_playing();
             let view = player::view(&self.s, self.skin.as_ref(), &self.audio, np.as_ref());
-            self.player.playlist_rect(&view).is_some_and(|r| r.contains(mouse_position().into()))
+            self.player.playlist_rect(&view).is_some_and(|r| r.contains(at))
         };
         for (i, f) in files.into_iter().enumerate() {
             let at = mouse + vec2((i as f32 - n as f32 / 2.0) * 30.0, -(i as f32) * 10.0);
@@ -1019,6 +1056,15 @@ impl App {
                 let at = if self.paused { self.view().to_world(vec2(screen_width() * 0.4, 160.0)) } else { mouse };
                 self.spawn_ragdoll(at);
             }
+            Action::SpawnJelly | Action::SpawnCloth if self.challenge.is_some() => {}
+            Action::SpawnJelly | Action::SpawnCloth => {
+                let at = if self.paused { self.view().to_world(vec2(screen_width() * 0.4, 160.0)) } else { mouse };
+                if action == Action::SpawnJelly {
+                    self.jelly_at(at);
+                } else {
+                    self.cloth_at(at);
+                }
+            }
             Action::TogglePlayer => {
                 self.s.player = !self.s.player;
                 if self.s.player {
@@ -1028,6 +1074,16 @@ impl App {
                         "player",
                         format!("Classic player ({skin})  ·  X hides it, drop a .wsz to change the skin"),
                     );
+                }
+            }
+            Action::TogglePlayerPhysics => {
+                self.s.player_physics = !self.s.player_physics;
+                if self.s.player_physics {
+                    self.s.player = true;
+                    self.toasts
+                        .status("player", "Physical player  ·  drag a title bar to throw it  ·  Shift+X puts it back");
+                } else {
+                    self.toasts.status("player", "Player back on the screen");
                 }
             }
             Action::Player(cmd) => self.player_cmd(cmd),
@@ -1098,6 +1154,8 @@ impl App {
             ObjectCmd::SizeAll(_) => Some("Resize all"),
             ObjectCmd::TogglePin => Some("Pin"),
             ObjectCmd::Unlink => Some("Detach links"),
+            ObjectCmd::Jelly => Some("Make jelly"),
+            ObjectCmd::Flag => Some("Make flag"),
             ObjectCmd::Properties => None,
         };
         if let Some(label) = label {
@@ -1105,6 +1163,8 @@ impl App {
         }
         match cmd {
             ObjectCmd::Delete => self.remove_object(i),
+            ObjectCmd::Jelly => self.make_jelly(i),
+            ObjectCmd::Flag => self.make_flag(i),
             ObjectCmd::Properties => {
                 let o = &self.objects[i];
                 let (p, _) = o.screen_pos(&self.world);
@@ -1237,8 +1297,15 @@ impl App {
         links::prune(&mut self.links, &self.world);
     }
 
-    /// Every body the tools and zones act on: objects and grains.
+    /// Every body the tools act on: objects, grains, jelly and cloth.
     fn dynamic_bodies(&self) -> Vec<RigidBodyHandle> {
+        let player = self.player_body.as_ref().map(|p| p.body);
+        self.rigid_bodies().into_iter().chain(self.soft_bodies()).chain(player).collect()
+    }
+
+    /// Objects and grains: the bodies that wrap around the borders and go
+    /// through portals (a jelly or cloth ball on its own cannot).
+    fn rigid_bodies(&self) -> Vec<RigidBodyHandle> {
         self.objects.iter().map(|o| o.body).chain(self.grains.bodies()).collect()
     }
 
@@ -1249,6 +1316,7 @@ impl App {
         self.inspector.close();
         self.zone_drag = None;
         self.rewind.clear();
+        self.fire.clear();
         self.selection.clear();
         self.select_drag = None;
         self.zones.clear();
@@ -1259,6 +1327,9 @@ impl App {
         for o in self.objects.drain(..) {
             o.destroy(&mut self.world);
         }
+        for s in self.softs.drain(..) {
+            s.remove(&mut self.world);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1267,12 +1338,19 @@ impl App {
     /// Remember the scene before an edit, so it can be undone.
     fn record(&mut self, label: &str) {
         self.editor_touched();
-        let snap = Snapshot::capture(&self.world, &self.objects, &self.links, &self.zones);
+        let snap = self.snapshot();
         self.history.record(label, snap);
     }
 
+    /// The whole scene, jelly and cloth included.
+    fn snapshot(&self) -> Snapshot {
+        let mut snap = Snapshot::capture(&self.world, &self.objects, &self.links, &self.zones);
+        snap.softs = self.softs.iter().map(|s| s.state(&self.world)).collect();
+        snap
+    }
+
     fn undo(&mut self, redo: bool) {
-        let current = Snapshot::capture(&self.world, &self.objects, &self.links, &self.zones);
+        let current = self.snapshot();
         let step = if redo { self.history.redo(current) } else { self.history.undo(current) };
         let Some((label, snap)) = step else {
             self.toasts.status("undo", if redo { "Nothing to redo" } else { "Nothing to undo" });
@@ -1284,6 +1362,8 @@ impl App {
         self.objects = restored.objects;
         self.links = restored.links;
         self.zones = restored.zones;
+        self.softs =
+            snap.softs.iter().map(|s| s.restore(&mut self.world, rapier2d::prelude::Vector::zeros())).collect();
         self.toasts.status("undo", format!("{}: {label}", if redo { "Redo" } else { "Undo" }));
     }
 
@@ -1509,8 +1589,12 @@ impl App {
             }
             self.world.border.apply_forces(&mut self.world, &handles);
             links::apply_springs(&self.links, &mut self.world);
+            self.soft_forces();
             magnets::apply(&mut self.world, &self.objects);
-            let teleports = zones::apply(&self.zones, &mut self.portals, &mut self.world, &handles);
+            let rigid = self.rigid_bodies();
+            let mut zoned = rigid.clone();
+            zoned.extend(self.player_body.as_ref().map(|p| p.body));
+            let teleports = zones::apply(&self.zones, &mut self.portals, &mut self.world, &zoned);
             if self.s.effects {
                 for t in teleports.into_iter().take(6) {
                     self.effects.splash(crate::physics::to_screen(t.from.x, t.from.y), 0.6);
@@ -1541,7 +1625,7 @@ impl App {
             }
             self.rewind_record(step);
 
-            let dead = self.world.border.apply_positions(&mut self.world, &handles);
+            let dead = self.world.border.apply_positions(&mut self.world, &rigid);
             let mut dead_grains = HashSet::new();
             for h in dead {
                 if let Some(i) = self.objects.iter().position(|o| o.body == h) {
@@ -1554,6 +1638,8 @@ impl App {
                 self.grains.remove(&mut self.world, &dead_grains);
             }
             self.process_impacts();
+            self.update_fire(step, mouse);
+            self.soft_after_step(step, mouse);
             links::prune(&mut self.links, &self.world);
 
             let (len, fade) = (self.s.trail_length as usize, self.s.trail_fade);
@@ -1578,8 +1664,9 @@ impl App {
     /// Make resting objects hop on a beat, harder with more bass.
     fn dance(&mut self) {
         let kick = 2.0 + self.audio.analyzer.bass * 3.5;
-        for o in &self.objects {
-            let Some(b) = self.world.bodies.get_mut(o.body) else { continue };
+        let player = self.player_body.as_ref().map(|p| p.body);
+        for h in self.objects.iter().map(|o| o.body).chain(player) {
+            let Some(b) = self.world.bodies.get_mut(h) else { continue };
             if !b.is_dynamic() || b.linvel().y.abs() > 1.5 {
                 continue;
             }
@@ -1593,6 +1680,9 @@ impl App {
     // Rendering
     // ═══════════════════════════════════════════════════════════
     fn draw(&mut self, dt: f32, input: &Input) {
+        if self.player_body.is_some() {
+            self.render_player_body(input.world);
+        }
         let (sw, sh) = (screen_width(), screen_height());
         let screen = vec2(sw, sh);
         let (aw, ah) = self.arena();
@@ -1616,14 +1706,18 @@ impl App {
                 o.draw_trail(self.s.trail_fade);
             }
         }
+        for s in &self.softs {
+            s.draw(&self.world);
+        }
         for o in &self.objects {
             if o.is_visualizer() {
                 let (p, angle) = o.screen_pos(&self.world);
                 visualizer::draw_object(self.s.vis_object, &self.audio.analyzer, p, angle, o.size, 1.0);
             } else {
-                o.draw(&self.world);
+                o.draw_tinted(&self.world, self.fire.tint(o.body));
             }
         }
+        self.draw_player_body();
         self.grains.draw(&self.world);
         for l in &self.links {
             l.draw(&self.world);
@@ -1715,6 +1809,7 @@ impl App {
                         cursor::draw_pen_cursor(m, self.s.draw_thickness, c);
                     }
                     Tool::Link if self.link_drag.is_none() => cursor::draw_link_cursor(m, self.s.link_kind),
+                    Tool::Fire => self.draw_fire_cursor(m),
                     Tool::Zone if self.zone_drag.is_none() => {
                         draw_line(m.x - 8.0, m.y, m.x + 8.0, m.y, 1.2, self.s.zone_kind.accent());
                         draw_line(m.x, m.y - 8.0, m.x, m.y + 8.0, 1.2, self.s.zone_kind.accent());
@@ -1747,7 +1842,7 @@ impl App {
         }
         let np = self.audio.now_playing();
         self.now_playing.draw(np.as_ref(), m);
-        if self.s.player {
+        if self.s.player && self.player_body.is_none() {
             let view = player::view(&self.s, self.skin.as_ref(), &self.audio, np.as_ref());
             self.player.draw(&view, m);
         }

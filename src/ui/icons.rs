@@ -185,6 +185,25 @@ pub fn tool(tool: Tool, c: Vec2, size: f32, color: Color, t: f32) {
             let (p0, p1) = (p.lerp(q, (t2 - 0.3).max(0.0)), p.lerp(q, t2));
             draw_line(p0.x, p0.y, p1.x, p1.y, th * 0.8, soft);
         }
+        Tool::Fire => {
+            // A flickering flame on a match.
+            let flick = (t * 9.0).sin() * 1.5 * s;
+            let base = vec2(c.x, c.y + 6.0 * s);
+            let tip = vec2(c.x + flick, c.y - 18.0 * s);
+            let w = 10.0 * s;
+            draw_circle(base.x, base.y, w, color);
+            draw_triangle(vec2(base.x - w, base.y), vec2(base.x + w, base.y), tip, color);
+            let core = Color::new(1.0, 0.95, 0.7, color.a);
+            let ctip = vec2(c.x + flick * 0.5, c.y - 6.0 * s);
+            draw_circle(base.x, base.y + 2.0 * s, w * 0.5, core);
+            draw_triangle(
+                vec2(base.x - w * 0.5, base.y + 2.0 * s),
+                vec2(base.x + w * 0.5, base.y + 2.0 * s),
+                ctip,
+                core,
+            );
+            draw_line(c.x, c.y + 16.0 * s, c.x + 10.0 * s, c.y + 22.0 * s, th * 1.6, soft);
+        }
         Tool::Pour => {
             // A tilted cup pouring a stream onto a heap.
             let cup = [

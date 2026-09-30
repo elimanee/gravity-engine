@@ -4,6 +4,19 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [2.7.0]
+
+### Added
+- **Fire tool** (`Y`): hold it on something to heat it up. Flammable things catch fire, burn for a while (bigger ones longer), set fire to what they touch — above all what is above them — and crumble to ash; ropes and springs tied to them burn through. Things that do not burn glow and cool down again, **glass** cracks, **ice** melts into water, and the water pool or poured liquid puts fires out. Explosions set things alight. A new *Flammable* switch in the properties panel (the Ice, Glass and Magnet presets turn it off)
+- **Jelly** (`U`, or *Jelly* in the settings): squashy blobs that wobble, squash under weight and spring back. Press `U` over any image, shape or drawing (or right-click → *Make it jelly*) to turn it into jelly
+- **Cloth** (`Shift+U`, or *Cloth* in the settings): a piece of fabric pinned along its top edge. It drapes over things, flaps in wind zones, tears when pulled too hard, can be cut with the knife and burns away. Right-click an image → *Hang it as a flag* to turn it into cloth. The Spring tool can grab jelly and cloth, and moves cloth pins
+- **Physical player** (`Shift+X`, or *Physical player* in the settings): the classic player windows become an object in the world. They fall, tumble, carry what lands on them and react to the tools and explosions, while every button, slider and the playlist keep working. Drag a title bar to throw them; `Shift+X` puts them back on the screen
+- Sounds for catching fire, crackling and hissing
+
+### Changed
+- 16 tools
+- Jelly and cloth are part of undo / redo (they are not saved in scene files)
+
 ## [2.6.0]
 
 ### Added

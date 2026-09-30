@@ -28,6 +28,12 @@ pub enum Sound {
     Pour,
     /// The knife slicing something.
     Slice,
+    /// Something catching fire.
+    Ignite,
+    /// Wood crackling in a fire.
+    Crackle,
+    /// A fire put out by water.
+    Hiss,
     /// Challenge solved.
     Win,
 }
@@ -203,6 +209,34 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
             );
             out
         }
+        Sound::Ignite => {
+            // A soft whoosh: low noise swelling then dying away.
+            let mut out = secs(0.5);
+            add_noise(
+                &mut out,
+                &mut n,
+                |t| (600.0 + 2200.0 * (t / 0.12).min(1.0)) * p,
+                |t| 0.9 * (t / 0.08).min(1.0) * (-t / 0.12).exp(),
+            );
+            out
+        }
+        Sound::Crackle => {
+            // A few sharp pops at random moments.
+            let mut out = secs(0.3);
+            let pops = 3 + (n.next().abs() * 4.0) as usize;
+            for _ in 0..pops {
+                let at = n.range(0.0, 0.2);
+                let f = n.range(1800.0, 4200.0) * p;
+                add_partials(&mut out, &[Partial(f, n.range(0.12, 0.3), 0.004, at)]);
+            }
+            add_noise(&mut out, &mut n, |_| 3000.0, |t| 0.25 * (-t / 0.01).exp());
+            out
+        }
+        Sound::Hiss => {
+            let mut out = secs(0.7);
+            add_noise(&mut out, &mut n, |_| 9000.0 * p, |t| 0.55 * (t / 0.02).min(1.0) * (-t / 0.14).exp());
+            out
+        }
         Sound::Win => {
             let mut out = secs(1.6);
             // C major arpeggio of soft bells.
@@ -223,7 +257,7 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
 mod tests {
     use super::*;
 
-    const ALL: [Sound; 9] = [
+    const ALL: [Sound; 12] = [
         Sound::Hit { size: 80.0, hard: 0.2 },
         Sound::Hit { size: 20.0, hard: 1.0 },
         Sound::Shatter,
@@ -232,6 +266,9 @@ mod tests {
         Sound::Snap,
         Sound::Pour,
         Sound::Slice,
+        Sound::Ignite,
+        Sound::Crackle,
+        Sound::Hiss,
         Sound::Win,
     ];
 
