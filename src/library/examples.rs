@@ -19,6 +19,11 @@ pub const ALL: &[Example] = &[
     Example {
         name: "Grapple swing", about: "↑ hooks at the pointer and reels in  ·  ← → push", build: grapple_swing
     },
+    Example {
+        name: "Sonic loop",
+        about: "← → run  ·  ↓ roll  ·  Space jump  ·  ↓ + Space spin dash",
+        build: sonic_loop,
+    },
 ];
 
 const FLOOR: f32 = 690.0;
@@ -265,5 +270,32 @@ fn grapple_swing(b: &mut Builder) {
     for (trigger, deg, at) in [(Trigger::Right, 0.0, 84.0), (Trigger::Left, 180.0, 136.0)] {
         let push = GadgetSpec { kind: GadgetKind::Thruster, trigger, power: 0.8, ..GadgetSpec::default() };
         b.gadget(Some(hero), (at, FLOOR - 30.0), deg, push);
+    }
+}
+
+fn sonic_loop(b: &mut Builder) {
+    b.sonic(130.0, FLOOR - 40.0);
+    // A loop on the floor.
+    let (cx, r) = (560.0, 120.0);
+    b.sonic_loop(cx, FLOOR - r, r, STONE);
+    // A spring before it, and rings along the way and round the loop.
+    let spring = Material { bounce: 1.0, flammable: false, ..Material::DEFAULT };
+    // Behind him: a spring to bounce up to a column of rings.
+    b.stroke(&dense(&[(45.0, FLOOR - 4.0), (90.0, FLOOR - 4.0)]), 10.0, CORAL, true, spring);
+    for k in 0..5 {
+        b.ring(190.0 + k as f32 * 40.0, FLOOR - 40.0);
+        b.ring(68.0, FLOOR - 150.0 - k as f32 * 45.0);
+    }
+    for k in 0..10 {
+        let a = (k as f32 / 10.0 * 360.0).to_radians();
+        b.ring(cx + a.cos() * (r - 40.0), FLOOR - r + a.sin() * (r - 40.0));
+    }
+    // A ramp to jump off, and crates to bowl over.
+    b.wall(&[(760.0, FLOOR), (900.0, FLOOR - 70.0)], STONE);
+    for k in 0..3 {
+        b.ring(840.0 + k as f32 * 40.0, FLOOR - 160.0 - k as f32 * 20.0);
+    }
+    for (x, row) in [(980.0, 0), (1030.0, 0), (1005.0, 1)] {
+        b.shape(Shape::Box, WOOD, x, FLOOR - 24.0 - row as f32 * 48.0, 46.0);
     }
 }

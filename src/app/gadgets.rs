@@ -145,7 +145,9 @@ impl App {
 
     /// Something is driven with ← (so holding it does not rewind).
     pub(super) fn listens_to_left(&self) -> bool {
-        self.gadgets.iter().any(|g| g.spec.trigger == Trigger::Left) || self.links.iter().any(|l| l.drive)
+        self.gadgets.iter().any(|g| g.spec.trigger == Trigger::Left)
+            || self.links.iter().any(|l| l.drive)
+            || self.sonic.is_some()
     }
 
     /// Once per frame before the physics step: which gadgets work, thrust,

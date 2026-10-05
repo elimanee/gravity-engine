@@ -4,6 +4,21 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [2.10.0]
+
+### Added
+- **Playable Sonic** (`Shift+O`, or *Sonic* in the settings): `←` `→` run, `↓` crouch / roll, `Space` jump (hold for a higher jump), `↓` + `Space` spin dash, `↑` look up; `Shift+Space` pauses while he is in the scene. He moves after the Sonic Physics Guide: ground speed with the games' acceleration, braking and friction, slope factor, floor sensors that follow walls and ceilings so he runs round loops, slipping off walls when too slow, rolling, the spin dash, variable jumps, air drag and underwater physics
+- Sonic pushes objects (curled up he bowls them over), stands and rides on them, bounces off springs (any bouncy surface), slides on ice, is blown away by bombs and can be thrown with the Spring tool. The camera follows him
+- Rings to collect, with a counter, and the example scene *Sonic loop*. Sonic and the rings are saved in scenes
+- Sounds for jumping, the spin dash, braking, springs and rings
+
+### Changed
+- While Sonic is in the scene, `Space` is his jump button and `←` does not rewind (`Shift+←` still does)
+
+### Downloads
+- `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
+- `gravity_engine-windows-x86_64.zip` — Windows build: unzip and run `gravity_engine.exe` (keep the DLLs next to it)
+
 ## [2.9.0]
 
 ### Added

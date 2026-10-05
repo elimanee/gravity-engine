@@ -64,6 +64,11 @@ impl App {
             self.s.water_density = w.density;
             self.s = self.s.clone().sanitized();
         }
+        self.sonic = None;
+        if let Some([x, y]) = sc.sonic {
+            self.spawn_sonic(crate::physics::to_screen(x, y));
+        }
+        self.rings = sc.rings.iter().map(|&[x, y]| crate::physics::to_screen(x, y)).collect();
         if let Some(night) = sc.night {
             self.s.night = night;
         }

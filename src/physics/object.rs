@@ -167,6 +167,9 @@ pub struct Material {
     pub mirror: bool,
     /// Planet: gravity at its surface (m/s²) pulling everything else in; 0: none.
     pub planet: f32,
+    /// For Sonic's loops: 0 always solid, 1 only on the way in, 2 only on
+    /// the way out, 3 the top that switches between them.
+    pub layer: u8,
 }
 
 impl Default for Material {
@@ -187,6 +190,7 @@ impl Material {
         flammable: true,
         mirror: false,
         planet: 0.0,
+        layer: 0,
     };
     pub const RUBBER: Material = Material { bounce: 0.92, friction: 0.9, ..Material::DEFAULT };
     pub const ICE: Material = Material { bounce: 0.05, friction: 0.0, flammable: false, ..Material::DEFAULT };

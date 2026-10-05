@@ -65,6 +65,8 @@ impl Builder {
                 gadgets: vec![],
                 night: None,
                 weather: None,
+                sonic: None,
+                rings: vec![],
             },
         }
     }
@@ -169,6 +171,36 @@ impl Builder {
     pub fn drive_last(&mut self) {
         if let Some(l) = self.scene.links.last_mut() {
             l.drive = true;
+        }
+    }
+
+    /// Sonic starts at design point (x, y).
+    pub fn sonic(&mut self, x: f32, y: f32) {
+        self.scene.sonic = Some(self.phys(x, y));
+    }
+
+    /// A ring to collect at design point (x, y).
+    pub fn ring(&mut self, x: f32, y: f32) {
+        let p = self.phys(x, y);
+        self.scene.rings.push(p);
+    }
+
+    /// A loop Sonic can run round: centre (x, y), inner radius `r`, on
+    /// three pinned planks (the way in, the top, the way out).
+    pub fn sonic_loop(&mut self, x: f32, y: f32, r: f32, rgb: [u8; 3]) {
+        let t = 16.0;
+        let rc = r + t / 2.0;
+        // Screen angles: 90° is the bottom, 0° the right, -90° the top.
+        for (from, to, layer) in [(90.0f32, -60.0f32, 1u8), (-60.0, -120.0, 3), (-120.0, -270.0, 2)] {
+            let n = 36;
+            let pts: Vec<(f32, f32)> = (0..=n)
+                .map(|k| {
+                    let a = (from + (to - from) * k as f32 / n as f32).to_radians();
+                    (x + a.cos() * rc, y + a.sin() * rc)
+                })
+                .collect();
+            let m = Material { layer, flammable: false, bounce: 0.1, ..Material::DEFAULT };
+            self.stroke(&pts, t, rgb, true, m);
         }
     }
 

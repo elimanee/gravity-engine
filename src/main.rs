@@ -28,6 +28,7 @@ mod scene;
 mod settings;
 mod shapes;
 mod skin;
+mod sonic;
 mod ui;
 mod util;
 mod weather;

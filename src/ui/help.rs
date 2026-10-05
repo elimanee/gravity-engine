@@ -18,6 +18,7 @@ const COLUMNS: &[&[(&str, &str)]] = &[
         ("O", "Drop a ragdoll (over an image: its head)"),
         ("U", "Jelly (over an object: it turns to jelly)"),
         ("Shift+U", "Cloth (over an image: a flag)"),
+        ("Shift+O", "Sonic: ← → ↓, Space jumps"),
         ("#", "TOOLS"),
         ("Left-drag", "Use the current tool"),
         ("Tab", "Tool picker"),

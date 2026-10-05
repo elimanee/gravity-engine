@@ -104,6 +104,12 @@ impl Camera {
         self.clamp(screen);
     }
 
+    /// Glide towards `target` (world px) by the fraction `k`.
+    pub fn follow(&mut self, target: Vec2, screen: Vec2, k: f32) {
+        self.center += (target - self.center) * k.clamp(0.0, 1.0);
+        self.clamp(screen);
+    }
+
     /// Move the view by a screen-space drag.
     pub fn pan(&mut self, delta: Vec2, screen: Vec2) {
         self.center -= delta / self.zoom;

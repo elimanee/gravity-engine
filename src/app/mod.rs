@@ -65,6 +65,7 @@ mod ragdoll;
 mod rewind;
 mod select;
 mod soft;
+mod sonic;
 mod verify;
 mod weather;
 
@@ -151,6 +152,9 @@ pub struct App {
     grains: Grains,
     /// Rain, snow and lightning: their look, and what they do.
     sky: Sky,
+    /// Sonic (Shift+O) and the rings left to collect (world px).
+    sonic: Option<sonic::SonicRun>,
+    rings: Vec<Vec2>,
     /// The night's light map.
     lights: crate::lighting::Lights,
     climate: weather::Climate,
@@ -242,6 +246,8 @@ impl App {
             grains: Grains::default(),
             sky: Sky::default(),
             lights: Default::default(),
+            sonic: None,
+            rings: Vec::new(),
             climate: Default::default(),
             pouring: false,
             pour_sound: 0.0,
@@ -472,7 +478,12 @@ impl App {
             self.quit = true;
         }
         let challenge = self.challenge.as_ref().map(|r| (r.started, r.won));
-        if pressed(KeyCode::Space) {
+        if pressed(KeyCode::Space) && self.sonic.is_some() && !shift {
+            // Sonic's jump button (Shift+Space pauses).
+            if let Some(run) = &mut self.sonic {
+                run.jump = true;
+            }
+        } else if pressed(KeyCode::Space) {
             actions.push(match challenge {
                 Some((false, _)) => Action::ChallengeGo,
                 _ => Action::TogglePause,
@@ -536,7 +547,7 @@ impl App {
             actions.push(if shift { Action::TogglePlayerPhysics } else { Action::TogglePlayer });
         }
         if pressed(KeyCode::O) {
-            actions.push(Action::SpawnRagdoll);
+            actions.push(if shift { Action::ToggleSonic } else { Action::SpawnRagdoll });
         }
         if pressed(KeyCode::U) {
             actions.push(if shift { Action::SpawnCloth } else { Action::SpawnJelly });
@@ -808,7 +819,10 @@ impl App {
                         self.s.tool_strength,
                     );
                     self.bomb_hits(m, hits);
+                    self.blast_sonic(m, self.s.tool_radius, self.s.tool_strength);
                     self.blasts.push(Blast::new(m, self.s.tool_radius));
+                } else if tool.grabs() && self.grab_sonic(m) {
+                    // Picked Sonic up.
                 } else if tool.grabs() {
                     if let Some(i) = object_at(&self.objects, &self.world, m.x, m.y) {
                         self.grab = Some(Grab::new(&self.world.bodies, self.objects[i].body, to_phys(m.x, m.y), tool));
@@ -840,6 +854,7 @@ impl App {
             }
         }
 
+        self.drag_sonic(m, input.left_down, dt);
         if input.left_down && self.select_drag.is_some() {
             self.select_drag_to(m);
         }
@@ -1090,6 +1105,10 @@ impl App {
                     Weather::Storm => "Storm  ·  gusts of wind and lightning that starts fires",
                 };
                 self.toasts.status("weather", hint);
+            }
+            Action::ToggleSonic => {
+                let at = if self.paused { self.spawn_point(screen_width() / 2.0) } else { mouse };
+                self.toggle_sonic(at);
             }
             Action::ToggleNight => {
                 self.s.night = !self.s.night;
@@ -1403,6 +1422,7 @@ impl App {
         self.zone_drag = None;
         self.rewind.clear();
         self.fire.clear();
+        self.rings.clear();
         self.selection.clear();
         self.select_drag = None;
         self.zones.clear();
@@ -1609,6 +1629,18 @@ impl App {
         let mut scene = scene::capture(&self.world, &self.objects, &self.links, &self.zones, water);
         scene.gadgets = scene::capture_gadgets(&self.objects, &self.gadgets);
         scene.night = Some(self.s.night);
+        scene.sonic = self.sonic.as_ref().map(|r| {
+            let (x, y) = to_phys(r.sonic.pos.x, r.sonic.pos.y);
+            [x, y]
+        });
+        scene.rings = self
+            .rings
+            .iter()
+            .map(|r| {
+                let (x, y) = to_phys(r.x, r.y);
+                [x, y]
+            })
+            .collect();
         scene.weather = Some(self.s.weather);
         match scene::write(&path, &scene) {
             Ok(()) => self.toasts.success(format!(
@@ -1740,6 +1772,7 @@ impl App {
             }
             self.process_impacts();
             self.update_fire(step, mouse);
+            self.update_sonic(step);
             self.soft_after_step(step, mouse);
             links::prune(&mut self.links, &self.world);
 
@@ -1827,6 +1860,7 @@ impl App {
             }
         }
         self.draw_player_body();
+        self.draw_sonic();
         self.draw_gadgets();
         self.grains.draw(&self.world);
         for l in &self.links {
@@ -1836,7 +1870,7 @@ impl App {
         for o in &self.objects {
             let (p, _) = o.screen_pos(&self.world);
             let mut badges = vec![];
-            if o.pinned {
+            if o.pinned && o.material.layer == 0 {
                 badges.push(0);
             }
             if o.material.magnet != 0.0 {
@@ -1974,6 +2008,7 @@ impl App {
         if let Some(v) = self.challenge_view() {
             self.challenge_bar.draw(&v, top, m);
         }
+        self.draw_sonic_hud(top);
         if let (Some(v), Some(ed)) = (self.editor_view(), self.editor.as_ref()) {
             self.editor_bar.draw(&v, &ed.name, top, m);
         }
