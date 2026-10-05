@@ -5,10 +5,15 @@ use crate::physics::zones::{self, Zone, ZoneKind};
 
 impl App {
     pub(super) fn finish_stroke(&mut self, stroke: Stroke, shift: bool) {
-        let Some(placed) = drawing::from_stroke(&stroke.points, self.s.draw_thickness, stroke.rgb) else { return };
+        // In laser levels the lines are mirrors, and look silvery.
+        let light = self.light_challenge();
+        let rgb = if light { [214, 228, 246] } else { stroke.rgb };
+        let Some(placed) = drawing::from_stroke(&stroke.points, self.s.draw_thickness, rgb) else { return };
         // In challenges drawings stay put unless Shift is held.
         let pinned = if self.challenge.is_some() { !shift } else { self.s.draw_pinned != shift };
-        let placement = Placement { pos_px: placed.center, size_px: Some(placed.size), pinned, ..Default::default() };
+        let material = if light { Material::MIRROR } else { Material::DEFAULT };
+        let placement =
+            Placement { pos_px: placed.center, size_px: Some(placed.size), pinned, material, ..Default::default() };
         self.record("Draw");
         match Object::load(&mut self.world, Source::Drawing(Arc::new(placed.drawing)), placement) {
             Some(o) => self.objects.push(o),
@@ -89,7 +94,12 @@ impl App {
     ) {
         self.record(kind.label());
         let speed = if kind == LinkKind::Motor { self.s.motor_speed } else { 0.0 };
-        if let Some(l) = Link::new(&mut self.world, kind, a, b, pa, pb, speed) {
+        if let Some(mut l) = Link::new(&mut self.world, kind, a, b, pa, pb, speed) {
+            if kind == LinkKind::Motor && self.s.motor_drive {
+                // Rebuilt as a driven motor (it coasts until ← or → is held).
+                l.remove(&mut self.world);
+                l = Link::restore(&mut self.world, links::LinkSpec { drive: true, ..l.spec() });
+            }
             self.links.push(l);
             let p = crate::physics::to_screen(pa.x, pa.y);
             self.sound(crate::audio::sfx::Sound::Snap, p, 0.6);

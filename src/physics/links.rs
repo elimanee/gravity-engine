@@ -82,6 +82,8 @@ pub struct LinkSpec {
     pub length: f32,
     /// Motor speed (rad/s, positive = clockwise on screen).
     pub speed: f32,
+    /// Motor driven with the arrow keys (it coasts when none is held).
+    pub drive: bool,
 }
 
 pub struct Link {
@@ -98,6 +100,8 @@ pub struct Link {
     /// Motor speed (rad/s, positive = clockwise on screen). Glue: angle of the
     /// joint frame on `b`.
     pub speed: f32,
+    /// Motor driven with ← / → (see [`LinkSpec::drive`]).
+    pub drive: bool,
     pub joint: ImpulseJointHandle,
 }
 
@@ -124,18 +128,19 @@ impl Link {
         } else {
             ((pa - pb).norm().max(0.05), speed)
         };
-        Some(Self::restore(world, LinkSpec { kind, a, b, la, lb, length, speed }))
+        Some(Self::restore(world, LinkSpec { kind, a, b, la, lb, length, speed, drive: false }))
     }
 
     pub fn spec(&self) -> LinkSpec {
-        let (kind, a, b, la, lb, length, speed) =
-            (self.kind, self.a, self.b, self.la, self.lb, self.length, self.speed);
-        LinkSpec { kind, a, b, la, lb, length, speed }
+        let (kind, a, b, la, lb, length, speed, drive) =
+            (self.kind, self.a, self.b, self.la, self.lb, self.length, self.speed, self.drive);
+        LinkSpec { kind, a, b, la, lb, length, speed, drive }
     }
 
     /// Recreate a link from its local anchors (scenes, undo).
     pub fn restore(world: &mut PhysWorld, spec: LinkSpec) -> Self {
-        let LinkSpec { kind, a, b, la, lb, length, speed } = spec;
+        let LinkSpec { kind, a, b, la, lb, length, speed, drive } = spec;
+        let drive = drive && kind == LinkKind::Motor;
         let data: GenericJoint = match kind {
             LinkKind::Rope => RopeJointBuilder::new(length).local_anchor1(la).local_anchor2(lb).build().into(),
             // Rapier's spring joint ignores its rest length, so springs are
@@ -154,7 +159,8 @@ impl Link {
                 .local_anchor2(lb)
                 .contacts_enabled(false)
                 .motor_model(MotorModel::AccelerationBased)
-                .motor_velocity(speed, MOTOR_GAIN)
+                // A driven motor coasts until an arrow key is held.
+                .motor_velocity(if drive { 0.0 } else { speed }, if drive { 0.0 } else { MOTOR_GAIN })
                 .build()
                 .into(),
             LinkKind::Limb => RevoluteJointBuilder::new()
@@ -172,7 +178,28 @@ impl Link {
                 .into(),
         };
         let joint = world.impulse_joints.insert(a, b.unwrap_or(world.ground), data, true);
-        Link { kind, a, b, la, lb, length, speed, joint }
+        Link { kind, a, b, la, lb, length, speed, drive, joint }
+    }
+
+    /// Driven motor: turn at its speed one way (`Some(1.0)`), the other
+    /// (`Some(-1.0)`), or coast (`None`).
+    pub fn set_drive(&self, world: &mut PhysWorld, dir: Option<f32>) {
+        if !self.drive {
+            return;
+        }
+        let Some(j) = world.impulse_joints.get_mut(self.joint) else { return };
+        let (v, gain) = match dir {
+            Some(d) => (self.speed.abs() * d, MOTOR_GAIN),
+            None => (0.0, 0.0),
+        };
+        j.data.set_motor_velocity(JointAxis::AngX, v, gain);
+        if dir.is_some() {
+            for h in [Some(self.a), self.b].into_iter().flatten() {
+                if let Some(b) = world.bodies.get_mut(h) {
+                    b.wake_up(true);
+                }
+            }
+        }
     }
 
     /// Both anchors in world space.
@@ -257,6 +284,14 @@ impl Link {
                     let t = -angle + i as f32 * std::f32::consts::TAU / 3.0;
                     let (s, co) = t.sin_cos();
                     draw_line(a.x + co * 4.0, a.y + s * 4.0, a.x + co * 9.0, a.y + s * 9.0, 2.0, c);
+                }
+                if self.drive {
+                    // Little ← → marks: it is driven with the arrows.
+                    for side in [-1.0f32, 1.0] {
+                        let tip = a + vec2(side * 18.0, 0.0);
+                        let back = a + vec2(side * 13.0, 0.0);
+                        draw_triangle(tip, back + vec2(0.0, -3.5), back + vec2(0.0, 3.5), c);
+                    }
                 }
             }
         }

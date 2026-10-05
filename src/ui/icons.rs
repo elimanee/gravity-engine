@@ -185,6 +185,18 @@ pub fn tool(tool: Tool, c: Vec2, size: f32, color: Color, t: f32) {
             let (p0, p1) = (p.lerp(q, (t2 - 0.3).max(0.0)), p.lerp(q, t2));
             draw_line(p0.x, p0.y, p1.x, p1.y, th * 0.8, soft);
         }
+        Tool::Gadget => {
+            // A laser bouncing off a mirror.
+            let em = vec2(c.x - 14.0 * s, c.y + 10.0 * s);
+            draw_rectangle(em.x - 6.0 * s, em.y - 4.0 * s, 12.0 * s, 8.0 * s, color);
+            let m = vec2(c.x + 8.0 * s, c.y + 10.0 * s);
+            let flick = 0.7 + 0.3 * (t * 9.0).sin().abs();
+            let beam = Color { a: color.a * flick, ..color };
+            draw_line(em.x + 6.0 * s, em.y, m.x, m.y, th, beam);
+            draw_line(m.x, m.y, c.x + 16.0 * s, c.y - 16.0 * s, th, beam);
+            draw_line(m.x - 7.0 * s, m.y + 7.0 * s, m.x + 7.0 * s, m.y - 7.0 * s, th * 1.6, soft);
+            draw_circle(c.x + 16.0 * s, c.y - 16.0 * s, 3.0 * s, color);
+        }
         Tool::Fire => {
             // A flickering flame on a match.
             let flick = (t * 9.0).sin() * 1.5 * s;
@@ -568,5 +580,81 @@ pub fn conveyor(c: Vec2, size: f32, speed: f32, t: f32, alpha: f32) {
         let x = c.x + (k as f32 - 1.0) * 5.0 * s + ((t * speed.abs() * 2.0) % 1.0) * 5.0 * s * dir;
         draw_line(x - 2.0 * s * dir, c.y - 3.5 * s, x + 2.0 * s * dir, c.y, 1.8 * s, col);
         draw_line(x + 2.0 * s * dir, c.y, x - 2.0 * s * dir, c.y + 3.5 * s, 1.8 * s, col);
+    }
+}
+
+/// Icon of a gadget kind (tool card).
+pub fn gadget_kind(kind: crate::physics::gadgets::GadgetKind, c: Vec2, size: f32, color: Color, t: f32) {
+    use crate::physics::gadgets::GadgetKind;
+    let s = size / 24.0;
+    let soft = Color { a: color.a * 0.45, ..color };
+    match kind {
+        GadgetKind::Laser => {
+            draw_rectangle(c.x - 10.0 * s, c.y - 3.5 * s, 9.0 * s, 7.0 * s, color);
+            let reach = 4.0 + 7.0 * ((t * 2.0) % 1.0);
+            draw_line(c.x - 1.0 * s, c.y, c.x + reach * s, c.y, 1.6 * s, color);
+            draw_circle(c.x + reach * s, c.y, 1.8 * s, soft);
+        }
+        GadgetKind::Thruster => {
+            draw_triangle(
+                vec2(c.x - 2.0 * s, c.y - 6.0 * s),
+                vec2(c.x + 4.0 * s, c.y - 3.0 * s),
+                vec2(c.x + 4.0 * s, c.y + 3.0 * s),
+                color,
+            );
+            draw_triangle(
+                vec2(c.x - 2.0 * s, c.y - 6.0 * s),
+                vec2(c.x - 2.0 * s, c.y + 6.0 * s),
+                vec2(c.x + 4.0 * s, c.y + 3.0 * s),
+                color,
+            );
+            let k = 0.7 + 0.3 * (t * 20.0).sin();
+            draw_triangle(
+                vec2(c.x - 2.0 * s, c.y - 4.0 * s),
+                vec2(c.x - 2.0 * s, c.y + 4.0 * s),
+                vec2(c.x - (2.0 + 9.0 * k) * s, c.y),
+                soft,
+            );
+        }
+        GadgetKind::Cannon => {
+            draw_circle(c.x - 4.0 * s, c.y + 3.0 * s, 5.0 * s, color);
+            let d = vec2(0.8, -0.6);
+            let n = vec2(-d.y, d.x) * 3.0 * s;
+            let (a, b) = (vec2(c.x - 4.0 * s, c.y + 3.0 * s), vec2(c.x - 4.0 * s, c.y + 3.0 * s) + d * 13.0 * s);
+            draw_triangle(a + n, a - n, b + n, color);
+            draw_triangle(a - n, b - n, b + n, color);
+            let u = (t * 1.5) % 1.0;
+            let ball = b + d * u * 8.0 * s;
+            draw_circle(ball.x, ball.y, 2.0 * s, Color { a: color.a * (1.0 - u), ..color });
+        }
+    }
+}
+
+/// Glyph of a gadget trigger: an arrow, a dot (always) or a note (beat).
+pub fn trigger(trigger: crate::physics::gadgets::Trigger, c: Vec2, size: f32, color: Color) {
+    use crate::physics::gadgets::Trigger;
+    let s = size / 16.0;
+    match trigger.arrow() {
+        Some(d) => {
+            let n = vec2(-d.y, d.x);
+            draw_line(
+                c.x - d.x * 6.0 * s,
+                c.y - d.y * 6.0 * s,
+                c.x + d.x * 2.0 * s,
+                c.y + d.y * 2.0 * s,
+                2.0 * s,
+                color,
+            );
+            draw_triangle(c + d * 7.0 * s, c + d * 1.0 * s + n * 5.0 * s, c + d * 1.0 * s - n * 5.0 * s, color);
+        }
+        None if trigger == Trigger::Beat => {
+            draw_circle(c.x - 2.5 * s, c.y + 4.0 * s, 3.0 * s, color);
+            draw_line(c.x + 0.3 * s, c.y + 4.0 * s, c.x + 0.3 * s, c.y - 6.0 * s, 1.6 * s, color);
+            draw_line(c.x + 0.3 * s, c.y - 6.0 * s, c.x + 5.0 * s, c.y - 3.5 * s, 1.6 * s, color);
+        }
+        None => {
+            draw_circle_lines(c.x, c.y, 5.5 * s, 1.6 * s, color);
+            draw_circle(c.x, c.y, 2.2 * s, color);
+        }
     }
 }

@@ -4,13 +4,27 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
-![Version](https://img.shields.io/badge/version-2.7-8b78ff)
+![Version](https://img.shields.io/badge/version-2.8-8b78ff)
 
 ![Title screen](docs/screenshots/title.png)
 
 | Sandbox | Settings drawer (Space) | Tool picker (Tab) |
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
+
+## What's new in 2.8
+
+| Lasers and mirrors | Rocket car (← → drive, ↑ thruster, ↓ cannon) |
+|---|---|
+| ![A laser bent by mirrors through glass, setting wood on fire](docs/screenshots/laser-lab.png) | ![A car driven with the arrows, its thruster and cannon firing](docs/screenshots/rocket-car.png) |
+
+- **Gadget tool** (`L`) — attach a **laser**, **thruster** or **cannon** to any object (or fix it in the world), aimed by dragging. Each one works all the time, while an arrow key is held, or on the music's beat.
+- **Lasers** — beams bounce off mirrors (a new *Mirror* property and preset), pass through glass and take its colour, and push and set fire to what they hit.
+- **Thrusters** push their object with a jet of flame; fixed in the world they blow like a fan. **Cannons** fire balls, shapes, grains or copies of your last image, with recoil.
+- **Driven motors** — a motor can be driven with `←` / `→` (Link tool → Motor → *Drive it with ← →*): build a car and drive it. Example scenes *Laser lab* and *Rocket car*.
+- **Three laser challenges** — your lines are mirrors: bend the beam into the target.
+
+![Laser challenge: two mirrors bend the beam around the shelf](docs/screenshots/laser-challenge.png)
 
 ## What's new in 2.7
 
@@ -106,7 +120,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Shape spawner** (`N`) — Circle, Box, Triangle, Pentagon, Hexagon, Star, Capsule; pick a colour (or random) and size, click or hold to spawn
 - **88×31 button fetcher** (`F`) — 20 random classic web buttons scraped from 8 galleries (animated GIFs supported)
 - **Game logo fetcher** (`L`) — 20 random logos from [SteamGridDB](https://www.steamgriddb.com/) (needs an API key, see below)
-- **16 tools** — `Tab`, `1`–`9`, `0`, `J`, `Z`, `S`, `K`, `C` or `Y`:
+- **17 tools** — `Tab`, `1`–`9`, `0`, `J`, `Z`, `S`, `K`, `C`, `Y` or `L`:
 
   | # | Tool | Description |
   |---|------|-------------|
@@ -126,6 +140,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | K | Pour | Pour sand, liquid or beads; right-drag erases |
   | C | Knife | Cut ropes, springs, joints and cloth; slice objects in two |
   | Y | Fire | Set things on fire, melt ice |
+  | L | Gadgets | Lasers, thrusters (or fans) and cannons, always on, on an arrow key or on the beat |
 
   The tool card (bottom left) holds each tool's settings: radius / strength for area tools (mouse wheel: radius, `Shift`+wheel: strength), thickness, colour and pinning for Draw, the kind of link (and motor speed) for Link, the kind of zone for Zone, the selection commands for Select and the kind of grain for Pour.
 - **7 border modes** — `B` to cycle (`Shift+B` backwards):
@@ -141,8 +156,8 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | Portal | No floor — every edge is a portal, animated rainbow borders |
 - **7 backgrounds** — `G` to cycle: Dark, Space, Grid, Sunset, Ocean, Aurora, Custom (`Shift+G` picks an image)
 - **Water** (`H`) — a pool with buoyancy and drag; level and density in the settings drawer, waves react to splashes and to the music
-- **Object properties** — bounce, friction, mass, gravity, breakable, flammable, magnet and conveyor per object (right-click → *Properties…*, or `I`)
-- **Library** (`E`) — example scenes, fifteen challenges with star ratings, and your own challenges
+- **Object properties** — bounce, friction, mass, gravity, breakable, flammable, mirror, magnet and conveyor per object (right-click → *Properties…*, or `I`)
+- **Library** (`E`) — example scenes, eighteen challenges (three with a laser) with star ratings, and your own challenges
 - **Challenge editor** (`Shift+E`) — make levels and share them as `.gchallenge` files
 - **Camera** — zoom (`Ctrl`+wheel, `+` / `-`, `Home` to fit) and pan (middle mouse button); *World size* makes the arena up to 3× the window
 - **Sound effects and slow motion** — procedural sounds for hits, glass, explosions and wins; a moment of slow motion on big impacts (both can be turned off)
@@ -157,6 +172,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Ragdolls** (`O`) — floppy characters with limited joints (over an image: it becomes the head)
 - **Fire and heat** (`Y`) — burning, spreading fire, ash, melting ice, cracking glass; water puts it out
 - **Jelly and cloth** (`U` / `Shift+U`) — soft bodies from any image or shape, and fabric that drapes, flaps in the wind and tears
+- **Gadgets** (`L`) — lasers that reflect off mirrors and cross glass, thrusters, fans and cannons; motors driven with the arrow keys
 - **Screenshots** (`F12`) and **GIF recording** (`F11`, up to 30 s) of the scene, without the interface
 - **Debug overlay** (`D`) — FPS, collider outlines, velocities and details of the object under the cursor
 
@@ -168,8 +184,9 @@ Press **F1** in the app for the full list.
 |-------------|--------|
 | Left-drag | Use the current tool |
 | Right-click | Object menu (Resize, Duplicate, Resize all, Properties, Pin, Make it jelly, Hang it as a flag, Detach links, Delete) |
-| `Tab` / `1`–`9`, `0`, `J`, `Z`, `S`, `K`, `C`, `Y` | Tool picker / select a tool |
-| `←` (hold) | Rewind time |
+| `Tab` / `1`–`9`, `0`, `J`, `Z`, `S`, `K`, `C`, `Y`, `L` | Tool picker / select a tool |
+| `←` (hold) | Rewind time (`Shift+←` when `←` drives something) |
+| `←` `↑` `→` `↓` | Drive motors, fire thrusters, cannons and lasers set to an arrow |
 | `O` | Drop a ragdoll (over an image: it becomes the head) |
 | `U` / `Shift+U` | Jelly / cloth (over an object: it turns to jelly / is hung as a flag) |
 | `E` / `Shift+E` | Examples & challenges / challenge editor |
@@ -182,7 +199,7 @@ Press **F1** in the app for the full list.
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
 | `A` | Add images |
 | `N` | Shape spawner |
-| `F` / `L` | Fetch 88×31 buttons / game logos |
+| `F` / `Shift+F` | Fetch 88×31 buttons / game logos |
 | `Del` | Delete the object under the cursor |
 | `R` | Clear all objects |
 | `Space` | Pause and open the settings drawer |
@@ -248,8 +265,8 @@ src/
 ├── main.rs            entry point, window config, CLI
 ├── app/               app state and frame loop (input → UI → actions → simulation → render),
 │                      building tools, selection, impacts and shattering, fire, jelly and
-│                      cloth, the physical player, sounds and slow motion, challenge mode,
-│                      challenge editor and verifier
+│                      cloth, gadgets, the physical player, sounds and slow motion, challenge
+│                      mode, challenge editor and verifier
 ├── camera.rs          zoom / pan and the world ↔ screen mapping
 ├── config.rs          constants and paths          settings.rs   persisted preferences
 ├── skin.rs            Winamp 2 / Audacious skins (.wsz, folders, skin.hints)
@@ -260,11 +277,12 @@ src/
 ├── effects.rs         particles                    library/      example scenes and challenges
 ├── window_tracker.rs  window shake
 ├── audio/             tracker modules, streams, playlists, the visualizer's analyzer, sound effects
-├── physics/           world, objects, tools, links, zones, water, grains, soft bodies, magnets, fracture, border modes
+├── physics/           world, objects, tools, links, zones, water, grains, soft bodies, gadgets, magnets,
+│                      fracture, border modes
 └── ui/                theme, widgets, HUD, drawer, tool card, menus, properties panel, overlays, title screen
 ```
 
-`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, jelly, cloth, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
+`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, jelly, cloth, laser beams, gadgets, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
 
 `gravity_engine --verify-challenges` (needs a display) checks that every built-in challenge can be solved.
 

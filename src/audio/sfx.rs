@@ -34,6 +34,10 @@ pub enum Sound {
     Crackle,
     /// A fire put out by water.
     Hiss,
+    /// A thruster's roar (played over and over while it works).
+    Thrust,
+    /// A cannon shot.
+    Shot,
     /// Challenge solved.
     Win,
 }
@@ -237,6 +241,28 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
             add_noise(&mut out, &mut n, |_| 9000.0 * p, |t| 0.55 * (t / 0.02).min(1.0) * (-t / 0.14).exp());
             out
         }
+        Sound::Thrust => {
+            let mut out = secs(0.3);
+            add_noise(
+                &mut out,
+                &mut n,
+                |_| 700.0 * p,
+                |t| 0.6 * (t / 0.03).min(1.0) * ((0.3 - t) / 0.08).clamp(0.0, 1.0),
+            );
+            out
+        }
+        Sound::Shot => {
+            let mut out = secs(0.45);
+            add_noise(&mut out, &mut n, |t| (3000.0 * (-t / 0.03).exp() + 200.0) * p, |t| 1.1 * (-t / 0.06).exp());
+            let dt = 1.0 / RATE as f32;
+            let mut phase = 0.0;
+            for (k, s) in out.iter_mut().enumerate() {
+                let t = k as f32 * dt;
+                phase += std::f32::consts::TAU * (60.0 + 120.0 * (-t / 0.04).exp()) * p * dt;
+                *s += phase.sin() * 0.7 * (-t / 0.08).exp();
+            }
+            out
+        }
         Sound::Win => {
             let mut out = secs(1.6);
             // C major arpeggio of soft bells.
@@ -257,7 +283,7 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
 mod tests {
     use super::*;
 
-    const ALL: [Sound; 12] = [
+    const ALL: [Sound; 14] = [
         Sound::Hit { size: 80.0, hard: 0.2 },
         Sound::Hit { size: 20.0, hard: 1.0 },
         Sound::Shatter,
@@ -269,6 +295,8 @@ mod tests {
         Sound::Ignite,
         Sound::Crackle,
         Sound::Hiss,
+        Sound::Thrust,
+        Sound::Shot,
         Sound::Win,
     ];
 

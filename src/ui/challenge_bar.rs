@@ -25,6 +25,8 @@ pub struct ChallengeView<'a> {
     pub stars: u8,
     /// Testing a level from the editor: the exit button goes back to it.
     pub testing: bool,
+    /// A laser level: no ball to release, the beam is always on.
+    pub light: bool,
 }
 
 #[derive(Default)]
@@ -51,7 +53,7 @@ impl ChallengeBar {
         if button(l.main, input) {
             actions.push(if v.won && v.has_next {
                 Action::ChallengeNext
-            } else if v.won || v.started {
+            } else if v.won || v.started || v.light {
                 Action::ChallengeRetry
             } else {
                 Action::ChallengeGo
@@ -82,7 +84,8 @@ impl ChallengeBar {
         } else if v.started {
             "Watch it go…".to_string()
         } else {
-            let full = format!("{}  ·  drawings stay put (Shift: loose)", v.goal);
+            let hint = if v.light { "lines are mirrors" } else { "drawings stay put (Shift: loose)" };
+            let full = format!("{}  ·  {hint}", v.goal);
             if measure(&full, 12.0) < l.main.x - p.x - 24.0 {
                 full
             } else {
@@ -107,7 +110,7 @@ impl ChallengeBar {
 
         let (label, active) = if v.won && v.has_next {
             ("Next  (Enter)", true)
-        } else if v.won || v.started {
+        } else if v.won || v.started || v.light {
             ("Retry  (R)", false)
         } else {
             ("Go  (Space)", true)

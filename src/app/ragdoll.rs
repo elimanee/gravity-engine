@@ -148,7 +148,16 @@ impl App {
         let (Some(ba), Some(bb)) = (self.world.bodies.get(a), self.world.bodies.get(b)) else { return };
         let (la, lb) = (ba.position().inverse_transform_point(&p), bb.position().inverse_transform_point(&p));
         let rest = bb.rotation().angle() - ba.rotation().angle();
-        let spec = LinkSpec { kind: LinkKind::Limb, a, b: Some(b), la, lb, length: rest + min, speed: rest + max };
+        let spec = LinkSpec {
+            kind: LinkKind::Limb,
+            a,
+            b: Some(b),
+            la,
+            lb,
+            length: rest + min,
+            speed: rest + max,
+            drive: false,
+        };
         let link = Link::restore(&mut self.world, spec);
         self.links.push(link);
     }

@@ -4,6 +4,29 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [2.8.0]
+
+### Added
+- **Gadget tool** (`L`): attach a **laser**, a **thruster** or a **cannon** to an object, or fix it in the world, and drag to aim it. Each gadget works all the time, while an arrow key is held (`↑` `↓` `←` `→`), or on the beats of the music. Right-click a gadget to remove it
+- **Lasers**: the beam bounces off mirrors, goes through glass and takes its colour, and pushes and heats what it hits (wood catches fire, ice melts)
+- **Mirrors**: a new *Mirror* switch and preset in the properties panel
+- **Thrusters** push their object with a jet of flame (and warm what is behind them); fixed in the world, a thruster is a fan that blows on what is in front of it. **Cannons** fire balls, shapes from the spawner, grains or copies of the last image added, at the chosen speed and rate, and recoil
+- **Driven motors**: Link tool → Motor → *Drive it with ← →*, then drive with the arrow keys (the wheels coast when no key is held)
+- **Three laser challenges** (*Bank shot*, *Periscope*, *Stained glass*): the lines you draw are mirrors; bend the beam into the target
+- Example scenes *Laser lab* and *Rocket car*
+- Gadgets and driven motors are saved in scenes and undo; the library scrolls with the mouse wheel
+
+### Changed
+- 17 tools. Game logos are fetched with `Shift+F` (`L` is the Gadget tool)
+- `←` still rewinds, unless something is driven with it; `Shift+←` always rewinds
+
+### Fixed
+- Forces applied off-centre (springs, the Swing tool…) left a turning force behind that never went away
+
+### Downloads
+- `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
+- `gravity_engine-windows-x86_64.zip` — Windows build: unzip and run `gravity_engine.exe` (keep the DLLs next to it)
+
 ## [2.7.0]
 
 ### Added
@@ -16,6 +39,10 @@ described on the [releases page](https://github.com/elimanee/gravity-engine/rele
 ### Changed
 - 16 tools
 - Jelly and cloth are part of undo / redo (they are not saved in scene files)
+
+### Downloads
+- `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
+- `gravity_engine-windows-x86_64.zip` — Windows build: unzip and run `gravity_engine.exe` (keep the DLLs next to it)
 
 ## [2.6.0]
 

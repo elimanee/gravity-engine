@@ -5,19 +5,21 @@
 
 use crate::drawing::Drawing;
 use crate::physics::borders::BorderMode;
+use crate::physics::gadgets::{Gadget, GadgetSpec};
 use crate::physics::links::{Link, LinkKind, LinkSpec};
 use crate::physics::object::{Material, Object, Placement, Source};
 use crate::physics::zones::Zone;
 use crate::physics::{to_phys, to_screen, PhysWorld};
 use crate::shapes::Shape;
 use base64::Engine;
-use rapier2d::prelude::Point;
+use rapier2d::prelude::{Point, RigidBodyHandle};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 /// 2: drawings, links, object properties and water. 3: motors and zones.
-const VERSION: u32 = 3;
+/// 4: gadgets and driven motors.
+const VERSION: u32 = 4;
 const EMBED_LIMIT: u64 = 4 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -33,6 +35,18 @@ pub struct SceneFile {
     pub water: Option<SceneWater>,
     #[serde(default)]
     pub zones: Vec<Zone>,
+    #[serde(default)]
+    pub gadgets: Vec<SceneGadget>,
+}
+
+/// A laser, thruster or cannon.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct SceneGadget {
+    #[serde(flatten)]
+    pub spec: GadgetSpec,
+    /// Index into `objects`; `None`: fixed in the world.
+    #[serde(default)]
+    pub host: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
@@ -55,6 +69,9 @@ pub struct SceneLink {
     /// Motor speed (rad/s).
     #[serde(default)]
     pub speed: f32,
+    /// Motor driven with the arrow keys.
+    #[serde(default)]
+    pub drive: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -148,6 +165,7 @@ pub fn capture(
                 lb: [l.lb.x, l.lb.y],
                 length: l.length,
                 speed: l.speed,
+                drive: l.drive,
             })
         })
         .collect();
@@ -180,7 +198,38 @@ pub fn capture(
         links,
         water,
         zones: zones.to_vec(),
+        gadgets: vec![],
     }
+}
+
+/// The gadgets, with their objects as indices into `objects`.
+pub fn capture_gadgets(objects: &[Object], gadgets: &[Gadget]) -> Vec<SceneGadget> {
+    let index: HashMap<_, _> = objects.iter().enumerate().map(|(i, o)| (o.body, i)).collect();
+    gadgets
+        .iter()
+        .filter_map(|g| {
+            let host = match g.host {
+                Some(h) => Some(*index.get(&h)?),
+                None => None,
+            };
+            Some(SceneGadget { spec: g.spec, host })
+        })
+        .collect()
+}
+
+/// Rebuild gadgets for objects whose bodies are `bodies` (by index; `None`
+/// for objects that failed to load).
+pub fn restore_gadgets(gadgets: &[SceneGadget], bodies: &[Option<RigidBodyHandle>]) -> Vec<Gadget> {
+    gadgets
+        .iter()
+        .filter_map(|g| {
+            let host = match g.host {
+                Some(i) => Some(bodies.get(i).copied().flatten()?),
+                None => None,
+            };
+            Some(Gadget::new(g.spec.sanitized(), host))
+        })
+        .collect()
 }
 
 pub fn write(path: &std::path::Path, scene: &SceneFile) -> Result<(), String> {
@@ -197,8 +246,17 @@ pub fn read(path: &std::path::Path) -> Result<SceneFile, String> {
     Ok(scene)
 }
 
-/// Spawn every object and link of `scene`. Returns them and how many objects failed.
-pub fn instantiate(scene: &SceneFile, world: &mut PhysWorld) -> (Vec<Object>, Vec<Link>, usize) {
+/// What a scene spawned.
+pub struct Instantiated {
+    pub objects: Vec<Object>,
+    pub links: Vec<Link>,
+    pub gadgets: Vec<Gadget>,
+    /// Objects that could not be loaded.
+    pub failed: usize,
+}
+
+/// Spawn every object, link and gadget of `scene`.
+pub fn instantiate(scene: &SceneFile, world: &mut PhysWorld) -> Instantiated {
     let mut out = Vec::with_capacity(scene.objects.len());
     let mut handles = Vec::with_capacity(scene.objects.len());
     let mut failed = 0;
@@ -238,10 +296,11 @@ pub fn instantiate(scene: &SceneFile, world: &mut PhysWorld) -> (Vec<Object>, Ve
             let length = if l.length.is_finite() { l.length.max(0.05) } else { 1.0 };
             let speed = if l.speed.is_finite() { l.speed.clamp(-50.0, 50.0) } else { 0.0 };
             let (la, lb) = (Point::new(l.la[0], l.la[1]), Point::new(l.lb[0], l.lb[1]));
-            Some(Link::restore(world, LinkSpec { kind: l.kind, a, b, la, lb, length, speed }))
+            Some(Link::restore(world, LinkSpec { kind: l.kind, a, b, la, lb, length, speed, drive: l.drive }))
         })
         .collect();
-    (out, links, failed)
+    let gadgets = restore_gadgets(&scene.gadgets, &handles);
+    Instantiated { objects: out, links, gadgets, failed }
 }
 
 #[cfg(test)]
@@ -276,6 +335,7 @@ mod tests {
                 lb: [1.0, 5.0],
                 length: 2.0,
                 speed: 3.0,
+                drive: true,
             }],
             water: Some(SceneWater { level: 0.4, density: 2.0 }),
             zones: vec![Zone {
@@ -286,14 +346,16 @@ mod tests {
                 strength: 12.0,
                 pair: None,
             }],
+            gadgets: vec![SceneGadget { spec: GadgetSpec { power: 7.0, ..GadgetSpec::default() }, host: Some(0) }],
         };
         let json = serde_json::to_string(&scene).unwrap();
         assert!(json.contains("\"type\":\"embedded\""));
         let back: SceneFile = serde_json::from_str(&json).unwrap();
         assert_eq!(back.border, BorderMode::Portal);
         assert_eq!(back.objects[0].material, Material::ICE);
-        assert_eq!((back.links[0].kind, back.links[0].speed), (LinkKind::Motor, 3.0));
+        assert_eq!((back.links[0].kind, back.links[0].speed, back.links[0].drive), (LinkKind::Motor, 3.0, true));
         assert_eq!(back.zones[0].strength, 12.0);
+        assert_eq!(back.gadgets, scene.gadgets);
         assert_eq!(back.water, Some(SceneWater { level: 0.4, density: 2.0 }));
         match back.objects[0].source.to_source() {
             Some(Source::Memory { data, .. }) => assert_eq!(*data, vec![1, 2, 3]),

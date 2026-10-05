@@ -28,8 +28,10 @@ impl App {
             let used = self.challenge.as_ref().map_or(0.0, |r| 1.0 - r.ink_left / c.ink);
             let ok = solved.won && !idle.won;
             all_ok &= ok;
+            // Where the ball ended (laser levels have none).
+            let at = |p: Vec2| if p.x.is_nan() { "laser".to_string() } else { format!("({:.0}, {:.0})", p.x, p.y) };
             println!(
-                "{:>2} {:<18} {}  solution: {} in {:>4.1}s, ink {:>3.0}% ({} stars), ball ends at ({:.0}, {:.0})  ·  no drawing: {} ({:.0}, {:.0})",
+                "{:>2} {:<18} {}  solution: {} in {:>4.1}s, ink {:>3.0}% ({} stars), ball ends at {}  ·  no drawing: {} {}",
                 i + 1,
                 c.name,
                 if ok { "ok  " } else { "FAIL" },
@@ -37,11 +39,9 @@ impl App {
                 solved.time,
                 used * 100.0,
                 crate::library::custom::stars(used),
-                solved.end.x,
-                solved.end.y,
+                at(solved.end),
                 if idle.won { "WON" } else { "lost" },
-                idle.end.x,
-                idle.end.y,
+                at(idle.end),
             );
         }
         all_ok

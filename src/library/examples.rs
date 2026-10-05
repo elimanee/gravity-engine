@@ -11,6 +11,8 @@ pub const ALL: &[Example] = &[
     Example { name: "Magnet field", about: "Magnets gather, repulsors keep away", build: magnets },
     Example { name: "Parcel factory", about: "Conveyor belts sort falling parcels", build: factory },
     Example { name: "Portal loop", about: "Endless fall through a pair of portals", build: portals },
+    Example { name: "Laser lab", about: "Mirrors bend the beam, glass tints it, wood burns", build: laser_lab },
+    Example { name: "Rocket car", about: "← → drive  ·  ↑ thruster  ·  ↓ cannon", build: rocket_car },
 ];
 
 const FLOOR: f32 = 690.0;
@@ -153,4 +155,47 @@ fn portals(b: &mut Builder) {
         let shape = [Shape::Circle, Shape::Star, Shape::Box][i % 3];
         b.shape(shape, [CORAL, SKY, LEAF][i % 3], 470.0 + (i % 3) as f32 * 70.0, 200.0 + (i / 3) as f32 * 70.0, 40.0);
     }
+}
+
+fn laser_lab(b: &mut Builder) {
+    b.laser((80.0, 120.0), 0.0);
+    let mirror = |b: &mut Builder, pts: &[(f32, f32)]| {
+        b.stroke(&dense(pts), 14.0, SNOW, true, Material::MIRROR);
+    };
+    // Right, down, then back to the left through a glass pane.
+    mirror(b, &[(670.0, 90.0), (730.0, 150.0)]);
+    mirror(b, &[(670.0, 590.0), (730.0, 530.0)]);
+    b.stroke(&dense(&[(480.0, 470.0), (480.0, 650.0)]), 18.0, GLASS, true, Material::GLASS);
+    for y in [666.0, 618.0, 570.0] {
+        b.shape(Shape::Box, WOOD, 200.0, y, 48.0);
+    }
+    b.shape(Shape::Box, WOOD, 250.0, 666.0, 48.0);
+}
+
+fn rocket_car(b: &mut Builder) {
+    // A ramp to jump and a tower to shoot at.
+    b.wall(&[(560.0, FLOOR), (720.0, 610.0)], STONE);
+    for row in 0..4 {
+        for k in 0..2 {
+            let x = 930.0 + k as f32 * 50.0;
+            b.shape(Shape::Box, SKY, x, FLOOR - 26.0 - row as f32 * 50.0, 48.0);
+        }
+    }
+    let body = b.stroke(&dense(&[(110.0, 600.0), (280.0, 600.0)]), 20.0, CORAL, false, Material::DEFAULT);
+    let grip = Material { friction: 1.5, bounce: 0.1, ..Material::DEFAULT };
+    for x in [130.0, 260.0] {
+        let wheel = b.shape_with(Shape::Circle, STONE, x, 632.0, 58.0, false, grip);
+        b.link(LinkKind::Motor, wheel, (x, 632.0), Some(body), (x, 632.0), 8.0);
+        b.drive_last();
+    }
+    let thruster = GadgetSpec { kind: GadgetKind::Thruster, trigger: Trigger::Up, power: 4.0, ..GadgetSpec::default() };
+    b.gadget(Some(body), (112.0, 600.0), 0.0, thruster);
+    let cannon = GadgetSpec {
+        kind: GadgetKind::Cannon,
+        trigger: Trigger::Down,
+        power: 16.0,
+        rate: 3.0,
+        ..GadgetSpec::default()
+    };
+    b.gadget(Some(body), (240.0, 588.0), 25.0, cannon);
 }

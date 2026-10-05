@@ -1,13 +1,14 @@
 //! Bottom-left card with the current tool's settings: radius and strength
 //! for area tools, thickness / colour / pinning for Draw, the kind of link
-//! (and motor speed) for Link, the kind of zone for Zone, and the
-//! selection commands for Select.
+//! (and motor speed) for Link, the kind of zone for Zone, the selection
+//! commands for Select, and the gadget, its trigger and settings for Gadget.
 
 use super::spawner::spawn_color;
 use super::theme::*;
 use super::widgets::*;
 use super::{icons, Action, Input, SelectionCmd};
 use crate::config::{PPM, WALL_T};
+use crate::physics::gadgets::{Ammo, GadgetKind, Trigger};
 use crate::physics::grains::GrainKind;
 use crate::physics::links::LinkKind;
 use crate::physics::tools::Card;
@@ -28,13 +29,16 @@ enum SliderId {
     Thickness,
     MotorSpeed,
     ZoneStrength,
+    Thrust,
+    CannonSpeed,
+    CannonRate,
 }
 
 pub struct ToolCard {
     shown: f32,
     /// Card kept on screen while sliding out.
     card: Card,
-    sliders: [SliderState; 5],
+    sliders: [SliderState; 8],
     /// Objects currently selected (set by the app each frame).
     pub selected: usize,
     /// Grains in the world (set by the app each frame).
@@ -72,6 +76,11 @@ struct Layout {
     commands: Vec<Rect>,
     /// Pour card: "clear grains" button.
     clear: Option<Rect>,
+    /// Link card: "drive the motor with the arrows" switch.
+    drive: Option<Rect>,
+    /// Gadget card: trigger and ammunition buttons.
+    triggers: Vec<Rect>,
+    ammo: Vec<Rect>,
     /// Two hint lines at the bottom.
     hint: Option<[&'static str; 2]>,
 }
@@ -107,6 +116,21 @@ impl ToolCard {
                 add(50.0, 6.0);
                 if s.link_kind == LinkKind::Motor {
                     add(SLIDER_ROW_H, 8.0);
+                    add(28.0, 4.0);
+                }
+                add(30.0, 6.0);
+            }
+            Card::Gadget => {
+                add(50.0, 6.0);
+                add(26.0, 18.0);
+                match s.gadget_kind {
+                    GadgetKind::Thruster => add(SLIDER_ROW_H, 8.0),
+                    GadgetKind::Cannon => {
+                        add(SLIDER_ROW_H, 8.0);
+                        add(SLIDER_ROW_H, 2.0);
+                        add(26.0, 6.0);
+                    }
+                    GadgetKind::Laser => {}
                 }
                 add(30.0, 6.0);
             }
@@ -156,9 +180,25 @@ impl ToolCard {
                 l.kinds = row_of(next(), LinkKind::ALL.len(), 5.0);
                 if s.link_kind == LinkKind::Motor {
                     l.sliders.push((SliderId::MotorSpeed, next()));
+                    l.drive = Some(next());
                 }
                 next();
                 l.hint = Some(s.link_kind.hint());
+            }
+            Card::Gadget => {
+                l.kinds = row_of(next(), GadgetKind::ALL.len(), 6.0);
+                l.triggers = row_of(next(), Trigger::ALL.len(), 4.0);
+                match s.gadget_kind {
+                    GadgetKind::Thruster => l.sliders.push((SliderId::Thrust, next())),
+                    GadgetKind::Cannon => {
+                        l.sliders.push((SliderId::CannonSpeed, next()));
+                        l.sliders.push((SliderId::CannonRate, next()));
+                        l.ammo = row_of(next(), Ammo::ALL.len(), 4.0);
+                    }
+                    GadgetKind::Laser => {}
+                }
+                next();
+                l.hint = Some(s.gadget_kind.hint());
             }
             Card::Zone => {
                 l.kinds = row_of(next(), ZoneKind::TOOL.len(), 6.0);
@@ -201,6 +241,9 @@ impl ToolCard {
             SliderId::Thickness => (&mut s.draw_thickness, DRAW_THICKNESS_RANGE),
             SliderId::MotorSpeed => (&mut s.motor_speed, MOTOR_SPEED_RANGE),
             SliderId::ZoneStrength => (&mut s.zone_strength, ZONE_STRENGTH_RANGE),
+            SliderId::Thrust => (&mut s.thrust, THRUST_RANGE),
+            SliderId::CannonSpeed => (&mut s.cannon_speed, CANNON_SPEED_RANGE),
+            SliderId::CannonRate => (&mut s.cannon_rate, CANNON_RATE_RANGE),
         }
     }
 
@@ -222,6 +265,13 @@ impl ToolCard {
             SliderId::ZoneStrength => {
                 let label = if s.zone_kind == ZoneKind::Float { "Lift" } else { "Strength" };
                 (label, s.zone_strength, format!("{:.0}", s.zone_strength), ZONE_STRENGTH_RANGE)
+            }
+            SliderId::Thrust => ("Thrust", s.thrust, format!("×{:.1} its weight", s.thrust), THRUST_RANGE),
+            SliderId::CannonSpeed => {
+                ("Speed", s.cannon_speed, format!("{:.0} m/s", s.cannon_speed), CANNON_SPEED_RANGE)
+            }
+            SliderId::CannonRate => {
+                ("Rate", s.cannon_rate, format!("{:.1} shots / s", s.cannon_rate), CANNON_RATE_RANGE)
             }
         };
         (SliderSpec { label, value_text: text, min: range.0, max: range.1, accent }, value)
@@ -256,11 +306,25 @@ impl ToolCard {
         if l.pin.is_some_and(|r| toggle_row(r, input)) {
             s.draw_pinned = !s.draw_pinned;
         }
+        if l.drive.is_some_and(|r| toggle_row(r, input)) {
+            s.motor_drive = !s.motor_drive;
+        }
+        for (i, r) in l.triggers.iter().enumerate() {
+            if button(*r, input) {
+                s.gadget_trigger = Trigger::ALL[i];
+            }
+        }
+        for (i, r) in l.ammo.iter().enumerate() {
+            if button(*r, input) {
+                s.cannon_ammo = Ammo::ALL[i];
+            }
+        }
         for (i, r) in l.kinds.iter().enumerate() {
             if button(*r, input) {
                 match self.card {
                     Card::Link => s.link_kind = LinkKind::ALL[i],
                     Card::Pour => s.grain_kind = GrainKind::ALL[i],
+                    Card::Gadget => s.gadget_kind = GadgetKind::ALL[i],
                     _ => s.zone_kind = ZoneKind::TOOL[i],
                 }
             }
@@ -325,12 +389,44 @@ impl ToolCard {
         if let Some(r) = l.pin {
             draw_toggle_row(r, "Pin drawings  (Shift inverts)", s.draw_pinned, r.contains(mouse), f);
         }
+        if let Some(r) = l.drive {
+            draw_toggle_row(r, "Drive it with ← →", s.motor_drive, r.contains(mouse), f);
+        }
+        let small_button = |r: Rect, active: bool| {
+            let hov = r.contains(mouse);
+            let bg = if active {
+                alpha(accent, 0.3)
+            } else if hov {
+                SURFACE_HI
+            } else {
+                SURFACE_2
+            };
+            rrect(r, 6.0, fade(bg, f));
+            rrect_lines(r, 6.0, 1.0, fade(if active { accent } else { BORDER }, f));
+            fade(if active { TEXT } else { TEXT_DIM }, f)
+        };
+        for (i, r) in l.triggers.iter().enumerate() {
+            let col = small_button(*r, Trigger::ALL[i] == s.gadget_trigger);
+            icons::trigger(Trigger::ALL[i], vec2(r.x + r.w / 2.0, r.y + r.h / 2.0), 16.0, col);
+        }
+        if let Some(r) = l.triggers.first() {
+            let label = format!("Works {}", s.gadget_trigger.label());
+            text(&label, r.x, r.y - 3.0, 10.0, fade(TEXT_MUTED, f));
+        }
+        for (i, r) in l.ammo.iter().enumerate() {
+            let col = small_button(*r, Ammo::ALL[i] == s.cannon_ammo);
+            text_centered(Ammo::ALL[i].label(), r.x + r.w / 2.0, r.y + r.h / 2.0, 11.0, col);
+        }
         for (i, r) in l.kinds.iter().enumerate() {
             let (label, kind_accent, active) = match self.card {
                 Card::Link => (LinkKind::ALL[i].label(), LinkKind::ALL[i].accent(), LinkKind::ALL[i] == s.link_kind),
                 Card::Pour => {
                     let k = GrainKind::ALL[i];
                     (k.label(), k.accent(), k == s.grain_kind)
+                }
+                Card::Gadget => {
+                    let k = GadgetKind::ALL[i];
+                    (k.label(), k.accent(), k == s.gadget_kind)
                 }
                 _ => (ZoneKind::TOOL[i].label(), ZoneKind::TOOL[i].accent(), ZoneKind::TOOL[i] == s.zone_kind),
             };
@@ -349,6 +445,7 @@ impl ToolCard {
             match self.card {
                 Card::Link => icons::link_kind(LinkKind::ALL[i], c, 24.0, col),
                 Card::Pour => icons::grain_kind(GrainKind::ALL[i], c, 24.0, col, t),
+                Card::Gadget => icons::gadget_kind(GadgetKind::ALL[i], c, 24.0, col, t),
                 _ => icons::zone_kind(ZoneKind::TOOL[i], c, 24.0, col, t),
             }
             text_centered(label, r.x + r.w / 2.0, r.y + 39.0, 12.0, fade(TEXT, f));

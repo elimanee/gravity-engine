@@ -1,5 +1,5 @@
 //! Object properties panel (right-click → Properties, or `I`): bounce,
-//! friction, mass, gravity, breakability, flammability, magnetism and conveyor speed of
+//! friction, mass, gravity, breakability, flammability, mirrors, magnetism and conveyor speed of
 //! one object, with a few presets.
 
 use super::theme::*;
@@ -14,7 +14,7 @@ const W: f32 = 268.0;
 const PAD: f32 = 14.0;
 const ROW: f32 = SLIDER_ROW_H + 2.0;
 /// Tallest the panel gets (used to keep it on screen).
-const MAX_H: f32 = 504.0;
+const MAX_H: f32 = 572.0;
 
 pub const BOUNCE_RANGE: (f32, f32) = (0.0, 1.2);
 pub const FRICTION_RANGE: (f32, f32) = (0.0, 2.0);
@@ -34,7 +34,7 @@ pub struct Props {
     pub default_mass: f32,
 }
 
-const PRESETS: &[&str] = &["Rubber", "Ice", "Heavy", "Balloon", "Glass", "Magnet"];
+const PRESETS: &[&str] = &["Rubber", "Ice", "Heavy", "Balloon", "Glass", "Magnet", "Mirror"];
 
 #[derive(Clone, Copy, PartialEq)]
 enum SliderId {
@@ -76,6 +76,7 @@ struct Layout {
     sliders: Vec<(SliderId, Rect)>,
     breakable: Rect,
     flammable: Rect,
+    mirror: Rect,
     presets: Vec<Rect>,
 }
 
@@ -122,6 +123,8 @@ impl Inspector {
         }
         let flammable = Rect::new(x, y + 2.0, W - PAD * 2.0, 28.0);
         y += 34.0;
+        let mirror = Rect::new(x, y + 2.0, W - PAD * 2.0, 28.0);
+        y += 34.0;
         slider(SliderId::Magnet, &mut y);
         slider(SliderId::Conveyor, &mut y);
         y += 20.0;
@@ -129,12 +132,12 @@ impl Inspector {
         let presets = (0..PRESETS.len())
             .map(|i| Rect::new(x + (i % 3) as f32 * (bw + 6.0), y + (i / 3) as f32 * 34.0, bw, 28.0))
             .collect();
-        y += 68.0 + 8.0;
+        y += PRESETS.len().div_ceil(3) as f32 * 34.0 + 8.0;
         let top = self.pos.y + (1.0 - f) * 10.0;
         let panel = Rect::new(self.pos.x, top, W, y - top);
         let close = Rect::new(panel.x + panel.w - 34.0, panel.y + 10.0, 24.0, 24.0);
         let reset = Rect::new(close.x - 62.0, panel.y + 10.0, 56.0, 24.0);
-        Layout { panel, close, reset, sliders, breakable, flammable, presets }
+        Layout { panel, close, reset, sliders, breakable, flammable, mirror, presets }
     }
 
     pub fn dragging(&self) -> bool {
@@ -183,6 +186,9 @@ impl Inspector {
         if toggle_row(l.flammable, input) {
             p.material.flammable = !p.material.flammable;
         }
+        if toggle_row(l.mirror, input) {
+            p.material.mirror = !p.material.mirror;
+        }
         for (i, r) in l.presets.iter().enumerate() {
             if button(*r, input) {
                 match i {
@@ -197,7 +203,8 @@ impl Inspector {
                         p.mass = p.default_mass * 0.2;
                     }
                     4 => p.material = Material::GLASS,
-                    _ => p.material = Material::MAGNET,
+                    5 => p.material = Material::MAGNET,
+                    _ => p.material = Material::MIRROR,
                 }
             }
         }
@@ -272,6 +279,7 @@ impl Inspector {
         }
         draw_toggle_row(l.breakable, "Breakable (shatters)", m.breakable, l.breakable.contains(mouse), f);
         draw_toggle_row(l.flammable, "Flammable (burns)", m.flammable, l.flammable.contains(mouse), f);
+        draw_toggle_row(l.mirror, "Mirror (reflects lasers)", m.mirror, l.mirror.contains(mouse), f);
         let py = l.presets[0].y;
         text("Presets", l.panel.x + PAD, py - 7.0, 11.0, fade(TEXT_MUTED, f));
         for (i, r) in l.presets.iter().enumerate() {

@@ -163,6 +163,8 @@ pub struct Material {
     pub conveyor: f32,
     /// Catches fire when heated (otherwise it only glows).
     pub flammable: bool,
+    /// Reflects laser beams.
+    pub mirror: bool,
 }
 
 impl Default for Material {
@@ -181,6 +183,7 @@ impl Material {
         magnet: 0.0,
         conveyor: 0.0,
         flammable: true,
+        mirror: false,
     };
     pub const RUBBER: Material = Material { bounce: 0.92, friction: 0.9, ..Material::DEFAULT };
     pub const ICE: Material = Material { bounce: 0.05, friction: 0.0, flammable: false, ..Material::DEFAULT };
@@ -188,6 +191,14 @@ impl Material {
     pub const GLASS: Material =
         Material { bounce: 0.2, friction: 0.4, breakable: true, strength: 6.0, flammable: false, ..Material::DEFAULT };
     pub const MAGNET: Material = Material { magnet: 1.0, friction: 0.8, flammable: false, ..Material::DEFAULT };
+
+    pub const MIRROR: Material =
+        Material { bounce: 0.3, friction: 0.3, flammable: false, mirror: true, ..Material::DEFAULT };
+
+    /// Glass (breakable, not flammable): laser beams go through it.
+    pub fn is_glass(&self) -> bool {
+        self.breakable && !self.flammable && !self.mirror
+    }
 
     /// The Ice preset (or close to it): melts instead of burning.
     pub fn is_ice(&self) -> bool {

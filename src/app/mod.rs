@@ -50,6 +50,7 @@ use std::sync::Arc;
 mod build;
 mod editor;
 mod fire;
+mod gadgets;
 mod impacts;
 mod juice;
 mod knife;
@@ -134,6 +135,14 @@ pub struct App {
     fire: fire::Fire,
     /// Jellies and cloths.
     softs: Vec<crate::physics::soft::Soft>,
+    /// Lasers, thrusters and cannons, a Gadget-tool drag, this frame's
+    /// laser beams, and the colour of glass the beams cross.
+    gadgets: Vec<crate::physics::gadgets::Gadget>,
+    gadget_drag: Option<gadgets::GadgetDrag>,
+    beams: Vec<crate::physics::gadgets::Beam>,
+    glass_tints: HashMap<RigidBodyHandle, Color>,
+    /// Seconds until the thrusters' roar is played again.
+    thrust_sound: f32,
     grains: Grains,
     /// The Pour tool is pouring.
     pouring: bool,
@@ -215,6 +224,11 @@ impl App {
             knife: Default::default(),
             fire: Default::default(),
             softs: Vec::new(),
+            gadgets: Vec::new(),
+            gadget_drag: None,
+            beams: Vec::new(),
+            glass_tints: HashMap::new(),
+            thrust_sound: 0.0,
             grains: Grains::default(),
             pouring: false,
             pour_sound: 0.0,
@@ -334,7 +348,9 @@ impl App {
         self.audio.tick();
         self.audio.analyze(dt, self.s.vis_gain);
         self.tick_slow(dt);
-        let holding = is_key_down(KeyCode::Left) && !in_transition && !self.editor_bar.typing();
+        // ← rewinds, unless it drives something (then Shift+← does).
+        let rewind_key = is_key_down(KeyCode::Left) && (input.shift || !self.listens_to_left());
+        let holding = rewind_key && !in_transition && !self.editor_bar.typing();
         if !self.rewind_tick(holding) {
             self.simulate(dt, input.world);
         }
@@ -492,6 +508,7 @@ impl App {
             KeyCode::K,
             KeyCode::C,
             KeyCode::Y,
+            KeyCode::L,
         ];
         for (i, k) in digits.iter().enumerate() {
             if pressed(*k) {
@@ -554,10 +571,7 @@ impl App {
             actions.push(Action::AddImages);
         }
         if pressed(KeyCode::F) {
-            actions.push(Action::FetchButtons);
-        }
-        if pressed(KeyCode::L) {
-            actions.push(Action::FetchLogos);
+            actions.push(if shift { Action::FetchLogos } else { Action::FetchButtons });
         }
         if pressed(KeyCode::R) {
             actions.push(if challenge.is_some() { Action::ChallengeRetry } else { Action::ClearAll });
@@ -765,6 +779,8 @@ impl App {
                     self.knife_press(m);
                 } else if tool == Tool::Fire {
                     self.fire.lit = true;
+                } else if tool == Tool::Gadget {
+                    self.gadget_press(m);
                 } else if tool.is_field() {
                     self.field_active = true;
                 } else if tool == Tool::Bomb {
@@ -822,6 +838,7 @@ impl App {
             }
             self.pouring = false;
             self.fire.lit = false;
+            self.gadget_release(m);
             self.editor_release(m);
             self.knife_release(m);
             if let Some(g) = self.grab.take() {
@@ -851,7 +868,10 @@ impl App {
                 })
                 .flatten();
             let on_zone = self.s.tool == Tool::Zone && object_at(&self.objects, &self.world, m.x, m.y).is_none();
+            let on_gadget = (self.s.tool == Tool::Gadget).then(|| self.gadget_at(m)).flatten();
             if on_zone && self.remove_zone_at(m) {
+            } else if let Some(i) = on_gadget {
+                self.remove_gadget(i);
             } else if let Some((i, _)) = near_link {
                 self.record("Remove link");
                 let l = self.links.remove(i);
@@ -915,6 +935,7 @@ impl App {
                     self.stroke = None;
                     self.link_drag = None;
                     self.select_drag = None;
+                    self.gadget_drag = None;
                     self.spawner.fader.open = false;
                 }
             }
@@ -1330,6 +1351,9 @@ impl App {
         for s in self.softs.drain(..) {
             s.remove(&mut self.world);
         }
+        self.gadgets.clear();
+        self.gadget_drag = None;
+        self.beams.clear();
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1346,6 +1370,7 @@ impl App {
     fn snapshot(&self) -> Snapshot {
         let mut snap = Snapshot::capture(&self.world, &self.objects, &self.links, &self.zones);
         snap.softs = self.softs.iter().map(|s| s.state(&self.world)).collect();
+        snap.gadgets = scene::capture_gadgets(&self.objects, &self.gadgets);
         snap
     }
 
@@ -1364,6 +1389,8 @@ impl App {
         self.zones = restored.zones;
         self.softs =
             snap.softs.iter().map(|s| s.restore(&mut self.world, rapier2d::prelude::Vector::zeros())).collect();
+        let bodies: Vec<Option<RigidBodyHandle>> = self.objects.iter().map(|o| Some(o.body)).collect();
+        self.gadgets = scene::restore_gadgets(&snap.gadgets, &bodies);
         self.toasts.status("undo", format!("{}: {label}", if redo { "Redo" } else { "Undo" }));
     }
 
@@ -1514,7 +1541,8 @@ impl App {
         }
         let water =
             self.s.water.then_some(scene::SceneWater { level: self.s.water_level, density: self.s.water_density });
-        let scene = scene::capture(&self.world, &self.objects, &self.links, &self.zones, water);
+        let mut scene = scene::capture(&self.world, &self.objects, &self.links, &self.zones, water);
+        scene.gadgets = scene::capture_gadgets(&self.objects, &self.gadgets);
         match scene::write(&path, &scene) {
             Ok(()) => self.toasts.success(format!(
                 "Saved {} objects to {}",
@@ -1590,6 +1618,7 @@ impl App {
             self.world.border.apply_forces(&mut self.world, &handles);
             links::apply_springs(&self.links, &mut self.world);
             self.soft_forces();
+            self.update_gadgets(step, true);
             magnets::apply(&mut self.world, &self.objects);
             let rigid = self.rigid_bodies();
             let mut zoned = rigid.clone();
@@ -1650,6 +1679,9 @@ impl App {
                     o.clear_trail();
                 }
             }
+        } else {
+            // Paused: beams still follow what is moved around.
+            self.update_gadgets(0.0, false);
         }
         let dt_ms = dt * 1000.0 * if self.paused { 0.0 } else { 1.0 };
         for o in &mut self.objects {
@@ -1714,10 +1746,14 @@ impl App {
                 let (p, angle) = o.screen_pos(&self.world);
                 visualizer::draw_object(self.s.vis_object, &self.audio.analyzer, p, angle, o.size, 1.0);
             } else {
-                o.draw_tinted(&self.world, self.fire.tint(o.body));
+                let tint = self.fire.tint(o.body);
+                // Mirrors get a cool sheen.
+                let tint = if o.material.mirror { Color::new(tint.r * 0.8, tint.g * 0.95, tint.b, 1.0) } else { tint };
+                o.draw_tinted(&self.world, tint);
             }
         }
         self.draw_player_body();
+        self.draw_gadgets();
         self.grains.draw(&self.world);
         for l in &self.links {
             l.draw(&self.world);
@@ -1810,6 +1846,7 @@ impl App {
                     }
                     Tool::Link if self.link_drag.is_none() => cursor::draw_link_cursor(m, self.s.link_kind),
                     Tool::Fire => self.draw_fire_cursor(m),
+                    Tool::Gadget => self.draw_gadget_cursor(m),
                     Tool::Zone if self.zone_drag.is_none() => {
                         draw_line(m.x - 8.0, m.y, m.x + 8.0, m.y, 1.2, self.s.zone_kind.accent());
                         draw_line(m.x, m.y - 8.0, m.x, m.y + 8.0, 1.2, self.s.zone_kind.accent());
