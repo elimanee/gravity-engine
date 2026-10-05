@@ -14,7 +14,7 @@ const W: f32 = 268.0;
 const PAD: f32 = 14.0;
 const ROW: f32 = SLIDER_ROW_H + 2.0;
 /// Tallest the panel gets (used to keep it on screen).
-const MAX_H: f32 = 572.0;
+const MAX_H: f32 = 640.0;
 
 pub const BOUNCE_RANGE: (f32, f32) = (0.0, 1.2);
 pub const FRICTION_RANGE: (f32, f32) = (0.0, 2.0);
@@ -22,6 +22,7 @@ pub const GRAVITY_RANGE: (f32, f32) = (-1.0, 2.0);
 pub const STRENGTH_RANGE: (f32, f32) = (2.0, 30.0);
 pub const MAGNET_RANGE: (f32, f32) = (-2.0, 2.0);
 pub const CONVEYOR_RANGE: (f32, f32) = (-8.0, 8.0);
+pub const PLANET_RANGE: (f32, f32) = (0.0, 30.0);
 /// Mass slider range, as log10(kg).
 const LOG_MASS_RANGE: (f32, f32) = (-1.3, 2.7);
 
@@ -34,7 +35,7 @@ pub struct Props {
     pub default_mass: f32,
 }
 
-const PRESETS: &[&str] = &["Rubber", "Ice", "Heavy", "Balloon", "Glass", "Magnet", "Mirror"];
+const PRESETS: &[&str] = &["Rubber", "Ice", "Heavy", "Balloon", "Glass", "Magnet", "Mirror", "Planet"];
 
 #[derive(Clone, Copy, PartialEq)]
 enum SliderId {
@@ -45,6 +46,7 @@ enum SliderId {
     Strength,
     Magnet,
     Conveyor,
+    Planet,
 }
 
 pub struct Inspector {
@@ -52,7 +54,7 @@ pub struct Inspector {
     pub target: Option<RigidBodyHandle>,
     title: String,
     pos: Vec2,
-    sliders: [SliderState; 7],
+    sliders: [SliderState; 8],
     log_mass: f32,
 }
 
@@ -127,6 +129,7 @@ impl Inspector {
         y += 34.0;
         slider(SliderId::Magnet, &mut y);
         slider(SliderId::Conveyor, &mut y);
+        slider(SliderId::Planet, &mut y);
         y += 20.0;
         let bw = (W - PAD * 2.0 - 12.0) / 3.0;
         let presets = (0..PRESETS.len())
@@ -169,6 +172,7 @@ impl Inspector {
                 SliderId::Strength => (&mut m.strength, STRENGTH_RANGE),
                 SliderId::Magnet => (&mut m.magnet, MAGNET_RANGE),
                 SliderId::Conveyor => (&mut m.conveyor, CONVEYOR_RANGE),
+                SliderId::Planet => (&mut m.planet, PLANET_RANGE),
             };
             if st.update(r, value, range.0, range.1, input) {
                 match id {
@@ -176,6 +180,7 @@ impl Inspector {
                     SliderId::Gravity => snap(&mut p.material.gravity, &[0.0, 1.0], 0.06),
                     SliderId::Magnet => snap(&mut p.material.magnet, &[0.0], 0.12),
                     SliderId::Conveyor => snap(&mut p.material.conveyor, &[0.0], 0.4),
+                    SliderId::Planet => snap(&mut p.material.planet, &[0.0], 0.8),
                     _ => {}
                 }
             }
@@ -204,7 +209,11 @@ impl Inspector {
                     }
                     4 => p.material = Material::GLASS,
                     5 => p.material = Material::MAGNET,
-                    _ => p.material = Material::MIRROR,
+                    6 => p.material = Material::MIRROR,
+                    _ => {
+                        p.material = Material::PLANET;
+                        p.mass = p.default_mass * 4.0;
+                    }
                 }
             }
         }
@@ -272,6 +281,13 @@ impl Inspector {
                         v => format!("{:.1} m/s anticlockwise", -v),
                     };
                     ("Conveyor", text, CONVEYOR_RANGE, m.conveyor, Color::new(1.0, 0.85, 0.3, 1.0))
+                }
+                SliderId::Planet => {
+                    let text = match m.planet {
+                        0.0 => "off".to_string(),
+                        g => format!("{g:.1} m/s² at its surface"),
+                    };
+                    ("Planet gravity", text, PLANET_RANGE, m.planet, Color::new(0.55, 0.7, 1.0, 1.0))
                 }
             };
             let spec = SliderSpec { label, value_text, min, max, accent };

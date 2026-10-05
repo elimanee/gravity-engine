@@ -8,7 +8,7 @@ use super::theme::*;
 use super::widgets::*;
 use super::{icons, Action, Input, SelectionCmd};
 use crate::config::{PPM, WALL_T};
-use crate::physics::gadgets::{Ammo, GadgetKind, Trigger};
+use crate::physics::gadgets::{Ammo, GadgetKind, Trigger, LAMP_COLOURS};
 use crate::physics::grains::GrainKind;
 use crate::physics::links::LinkKind;
 use crate::physics::tools::Card;
@@ -32,13 +32,14 @@ enum SliderId {
     Thrust,
     CannonSpeed,
     CannonRate,
+    LampReach,
 }
 
 pub struct ToolCard {
     shown: f32,
     /// Card kept on screen while sliding out.
     card: Card,
-    sliders: [SliderState; 8],
+    sliders: [SliderState; 9],
     /// Objects currently selected (set by the app each frame).
     pub selected: usize,
     /// Grains in the world (set by the app each frame).
@@ -81,6 +82,9 @@ struct Layout {
     /// Gadget card: trigger and ammunition buttons.
     triggers: Vec<Rect>,
     ammo: Vec<Rect>,
+    /// Lamp: bulb / spot buttons and colours.
+    lamp_shapes: Vec<Rect>,
+    lamp_colours: Vec<Rect>,
     /// Two hint lines at the bottom.
     hint: Option<[&'static str; 2]>,
 }
@@ -130,7 +134,12 @@ impl ToolCard {
                         add(SLIDER_ROW_H, 2.0);
                         add(26.0, 6.0);
                     }
-                    GadgetKind::Laser => {}
+                    GadgetKind::Lamp => {
+                        add(26.0, 10.0);
+                        add(20.0, 6.0);
+                        add(SLIDER_ROW_H, 6.0);
+                    }
+                    GadgetKind::Laser | GadgetKind::Grapple => {}
                 }
                 add(30.0, 6.0);
             }
@@ -195,7 +204,12 @@ impl ToolCard {
                         l.sliders.push((SliderId::CannonRate, next()));
                         l.ammo = row_of(next(), Ammo::ALL.len(), 4.0);
                     }
-                    GadgetKind::Laser => {}
+                    GadgetKind::Lamp => {
+                        l.lamp_shapes = row_of(next(), 2, 6.0);
+                        l.lamp_colours = row_of(next(), LAMP_COLOURS.len(), 6.0);
+                        l.sliders.push((SliderId::LampReach, next()));
+                    }
+                    GadgetKind::Laser | GadgetKind::Grapple => {}
                 }
                 next();
                 l.hint = Some(s.gadget_kind.hint());
@@ -244,6 +258,7 @@ impl ToolCard {
             SliderId::Thrust => (&mut s.thrust, THRUST_RANGE),
             SliderId::CannonSpeed => (&mut s.cannon_speed, CANNON_SPEED_RANGE),
             SliderId::CannonRate => (&mut s.cannon_rate, CANNON_RATE_RANGE),
+            SliderId::LampReach => (&mut s.lamp_reach, LAMP_REACH_RANGE),
         }
     }
 
@@ -273,6 +288,7 @@ impl ToolCard {
             SliderId::CannonRate => {
                 ("Rate", s.cannon_rate, format!("{:.1} shots / s", s.cannon_rate), CANNON_RATE_RANGE)
             }
+            SliderId::LampReach => ("Reach", s.lamp_reach, format!("{} px", s.lamp_reach as i32), LAMP_REACH_RANGE),
         };
         (SliderSpec { label, value_text: text, min: range.0, max: range.1, accent }, value)
     }
@@ -317,6 +333,16 @@ impl ToolCard {
         for (i, r) in l.ammo.iter().enumerate() {
             if button(*r, input) {
                 s.cannon_ammo = Ammo::ALL[i];
+            }
+        }
+        for (i, r) in l.lamp_shapes.iter().enumerate() {
+            if button(*r, input) {
+                s.lamp_spot = i == 1;
+            }
+        }
+        for (i, r) in l.lamp_colours.iter().enumerate() {
+            if button(*r, input) {
+                s.lamp_colour = i;
             }
         }
         for (i, r) in l.kinds.iter().enumerate() {
@@ -417,6 +443,18 @@ impl ToolCard {
             let col = small_button(*r, Ammo::ALL[i] == s.cannon_ammo);
             text_centered(Ammo::ALL[i].label(), r.x + r.w / 2.0, r.y + r.h / 2.0, 11.0, col);
         }
+        for (i, r) in l.lamp_shapes.iter().enumerate() {
+            let col = small_button(*r, s.lamp_spot == (i == 1));
+            let label = if i == 1 { "Spotlight" } else { "Bulb (all round)" };
+            text_centered(label, r.x + r.w / 2.0, r.y + r.h / 2.0, 11.0, col);
+        }
+        for (i, r) in l.lamp_colours.iter().enumerate() {
+            let [cr, cg, cb] = LAMP_COLOURS[i];
+            rrect(*r, 5.0, fade(Color::from_rgba(cr, cg, cb, 255), f));
+            if i == s.lamp_colour {
+                rrect_lines(Rect::new(r.x - 2.5, r.y - 2.5, r.w + 5.0, r.h + 5.0), 7.0, 1.8, fade(TEXT, f));
+            }
+        }
         for (i, r) in l.kinds.iter().enumerate() {
             let (label, kind_accent, active) = match self.card {
                 Card::Link => (LinkKind::ALL[i].label(), LinkKind::ALL[i].accent(), LinkKind::ALL[i] == s.link_kind),
@@ -448,7 +486,8 @@ impl ToolCard {
                 Card::Gadget => icons::gadget_kind(GadgetKind::ALL[i], c, 24.0, col, t),
                 _ => icons::zone_kind(ZoneKind::TOOL[i], c, 24.0, col, t),
             }
-            text_centered(label, r.x + r.w / 2.0, r.y + 39.0, 12.0, fade(TEXT, f));
+            let size = if l.kinds.len() > 4 { 11.0 } else { 12.0 };
+            text_centered(label, r.x + r.w / 2.0, r.y + 39.0, size, fade(TEXT, f));
         }
         for (i, r) in l.directions.iter().enumerate() {
             let active = (s.zone_angle - DIRECTIONS[i]).abs() < 1.0;

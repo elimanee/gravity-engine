@@ -119,6 +119,10 @@ pub enum Action {
     /// Drop a visualizer object into the scene.
     SpawnVisualizer,
     ToggleWater,
+    /// Next / previous weather (clear, rain, snow, storm).
+    CycleWeather(i32),
+    /// Night on / off.
+    ToggleNight,
     Undo,
     Redo,
     ToggleRecording,
@@ -227,6 +231,8 @@ pub enum ObjectCmd {
     Jelly,
     /// Turn it into a cloth hung by its top edge.
     Flag,
+    /// Give it (or take away) a gravity of its own.
+    Planet,
     Delete,
 }
 

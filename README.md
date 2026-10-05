@@ -4,13 +4,29 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
-![Version](https://img.shields.io/badge/version-2.8-8b78ff)
+![Version](https://img.shields.io/badge/version-2.9-8b78ff)
 
 ![Title screen](docs/screenshots/title.png)
 
 | Sandbox | Settings drawer (Space) | Tool picker (Tab) |
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
+
+## What's new in 2.9
+
+| Night: lamps cast shadows | Storm: lightning sets things on fire |
+|---|---|
+| ![A street lamp, a swinging lantern and a blue spotlight lighting crates in the rain](docs/screenshots/night-lights.png) | ![Lightning strikes a crate in the rain while a wrecking ball swings](docs/screenshots/storm.png) |
+
+| Planets with their own gravity | Grappling hook |
+|---|---|
+| ![Three planets orbiting a sun](docs/screenshots/solar-system.png) | ![A box reeled up to a rock by its grappling hook](docs/screenshots/grapple-swing.png) |
+
+- **Planets** — any object can have its own gravity (right-click → *Make it a planet*, or the *Planet gravity* slider and preset in the properties panel): everything nearby falls towards it and can orbit it. Example scene *Solar system*.
+- **Weather** (`Shift+H`, or *Weather* in the settings) — **rain** falls as real drops that fill containers and put out fires under the open sky, **snow** settles in drifts (and melts near fire; it is also a new kind of grain for the Pour tool), and a **storm** brings gusts of wind, heavy rain and **lightning** that strikes the highest thing around and sets it on fire, with thunder.
+- **Night** (`Shift+T`, darkness in the settings) — the scene goes dark and only light shows it: **lamps** (a new gadget: a bulb all round or a spotlight, in six colours) cast real shadows, and fire, embers, lasers, thrusters, hot objects and lightning glow.
+- **Grappling hook** (a new gadget) — put it on an object and hold its arrow key: the hook shoots at the pointer, catches what it hits and reels in; let go to let go. One set to *always* hangs on where it catches, and one fixed in the world is a winch that pulls things in. The knife cuts its rope. Example scene *Grapple swing*.
+- Night and weather are saved in scene files; example scene *Night lights*.
 
 ## What's new in 2.8
 
@@ -140,7 +156,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | K | Pour | Pour sand, liquid or beads; right-drag erases |
   | C | Knife | Cut ropes, springs, joints and cloth; slice objects in two |
   | Y | Fire | Set things on fire, melt ice |
-  | L | Gadgets | Lasers, thrusters (or fans) and cannons, always on, on an arrow key or on the beat |
+  | L | Gadgets | Lasers, thrusters (or fans), cannons, lamps and grappling hooks, always on, on an arrow key or on the beat |
 
   The tool card (bottom left) holds each tool's settings: radius / strength for area tools (mouse wheel: radius, `Shift`+wheel: strength), thickness, colour and pinning for Draw, the kind of link (and motor speed) for Link, the kind of zone for Zone, the selection commands for Select and the kind of grain for Pour.
 - **7 border modes** — `B` to cycle (`Shift+B` backwards):
@@ -156,7 +172,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
   | Portal | No floor — every edge is a portal, animated rainbow borders |
 - **7 backgrounds** — `G` to cycle: Dark, Space, Grid, Sunset, Ocean, Aurora, Custom (`Shift+G` picks an image)
 - **Water** (`H`) — a pool with buoyancy and drag; level and density in the settings drawer, waves react to splashes and to the music
-- **Object properties** — bounce, friction, mass, gravity, breakable, flammable, mirror, magnet and conveyor per object (right-click → *Properties…*, or `I`)
+- **Object properties** — bounce, friction, mass, gravity, planet gravity, breakable, flammable, mirror, magnet and conveyor per object (right-click → *Properties…*, or `I`)
 - **Library** (`E`) — example scenes, eighteen challenges (three with a laser) with star ratings, and your own challenges
 - **Challenge editor** (`Shift+E`) — make levels and share them as `.gchallenge` files
 - **Camera** — zoom (`Ctrl`+wheel, `+` / `-`, `Home` to fit) and pan (middle mouse button); *World size* makes the arena up to 3× the window
@@ -172,7 +188,9 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Ragdolls** (`O`) — floppy characters with limited joints (over an image: it becomes the head)
 - **Fire and heat** (`Y`) — burning, spreading fire, ash, melting ice, cracking glass; water puts it out
 - **Jelly and cloth** (`U` / `Shift+U`) — soft bodies from any image or shape, and fabric that drapes, flaps in the wind and tears
-- **Gadgets** (`L`) — lasers that reflect off mirrors and cross glass, thrusters, fans and cannons; motors driven with the arrow keys
+- **Gadgets** (`L`) — lasers that reflect off mirrors and cross glass, thrusters, fans, cannons, lamps and grappling hooks; motors driven with the arrow keys
+- **Planets** — objects with their own gravity that others orbit
+- **Weather and night** (`Shift+H` / `Shift+T`) — rain, snow and storms with lightning; a night lit by lamps with shadows, fire and lasers
 - **Screenshots** (`F12`) and **GIF recording** (`F11`, up to 30 s) of the scene, without the interface
 - **Debug overlay** (`D`) — FPS, collider outlines, velocities and details of the object under the cursor
 
@@ -183,10 +201,10 @@ Press **F1** in the app for the full list.
 | Key / Input | Action |
 |-------------|--------|
 | Left-drag | Use the current tool |
-| Right-click | Object menu (Resize, Duplicate, Resize all, Properties, Pin, Make it jelly, Hang it as a flag, Detach links, Delete) |
+| Right-click | Object menu (Resize, Duplicate, Resize all, Properties, Pin, Make it a planet, Make it jelly, Hang it as a flag, Detach links, Delete) |
 | `Tab` / `1`–`9`, `0`, `J`, `Z`, `S`, `K`, `C`, `Y`, `L` | Tool picker / select a tool |
 | `←` (hold) | Rewind time (`Shift+←` when `←` drives something) |
-| `←` `↑` `→` `↓` | Drive motors, fire thrusters, cannons and lasers set to an arrow |
+| `←` `↑` `→` `↓` | Drive motors, work the gadgets set to an arrow (a grappling hook shoots at the pointer) |
 | `O` | Drop a ragdoll (over an image: it becomes the head) |
 | `U` / `Shift+U` | Jelly / cloth (over an object: it turns to jelly / is hung as a flag) |
 | `E` / `Shift+E` | Examples & challenges / challenge editor |
@@ -208,6 +226,7 @@ Press **F1** in the app for the full list.
 | `B` / `G` | Next border mode / background |
 | `Shift+G` | Background from an image |
 | `W` / `T` / `H` | Toggle window shake / trails / water |
+| `Shift+H` / `Shift+T` | Next weather (clear, rain, snow, storm) / night |
 | `M` / `P` | Load music / play-pause |
 | `X` / `Shift+X` | Classic player (Winamp / Audacious skins) / make it a physical object |
 | `V` / `Shift+V` | Visualizer behind objects / spawn a visualizer screen |
@@ -265,8 +284,8 @@ src/
 ├── main.rs            entry point, window config, CLI
 ├── app/               app state and frame loop (input → UI → actions → simulation → render),
 │                      building tools, selection, impacts and shattering, fire, jelly and
-│                      cloth, gadgets, the physical player, sounds and slow motion, challenge
-│                      mode, challenge editor and verifier
+│                      cloth, gadgets, grappling hooks, weather, night lights, the physical
+│                      player, sounds and slow motion, challenge mode, challenge editor and verifier
 ├── camera.rs          zoom / pan and the world ↔ screen mapping
 ├── config.rs          constants and paths          settings.rs   persisted preferences
 ├── skin.rs            Winamp 2 / Audacious skins (.wsz, folders, skin.hints)
@@ -275,14 +294,15 @@ src/
 ├── drawing.rs         Draw-tool strokes → shapes   history.rs    undo / redo
 ├── recorder.rs        GIF recording                net.rs        web fetchers
 ├── effects.rs         particles                    library/      example scenes and challenges
+├── weather.rs         rain, snow and lightning     lighting.rs   the night's light map and shadows
 ├── window_tracker.rs  window shake
 ├── audio/             tracker modules, streams, playlists, the visualizer's analyzer, sound effects
 ├── physics/           world, objects, tools, links, zones, water, grains, soft bodies, gadgets, magnets,
-│                      fracture, border modes
+│                      planets, fracture, border modes
 └── ui/                theme, widgets, HUD, drawer, tool card, menus, properties panel, overlays, title screen
 ```
 
-`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, jelly, cloth, laser beams, gadgets, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
+`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, snow, jelly, cloth, laser beams, gadgets, planets, rope reeling, weather, night light, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
 
 `gravity_engine --verify-challenges` (needs a display) checks that every built-in challenge can be solved.
 

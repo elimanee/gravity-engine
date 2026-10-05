@@ -20,6 +20,7 @@ mod drawing;
 mod effects;
 mod history;
 mod library;
+mod lighting;
 mod net;
 mod physics;
 mod recorder;
@@ -29,6 +30,7 @@ mod shapes;
 mod skin;
 mod ui;
 mod util;
+mod weather;
 mod window_tracker;
 
 use macroquad::prelude::*;

@@ -38,6 +38,8 @@ pub enum Sound {
     Thrust,
     /// A cannon shot.
     Shot,
+    /// Thunder after a lightning strike.
+    Thunder,
     /// Challenge solved.
     Win,
 }
@@ -59,7 +61,7 @@ impl Sfx {
     /// with its pitch scaled by `pitch` (slow motion plays lower).
     pub fn play(&mut self, now: f64, sound: Sound, volume: f32, pan: f32, pitch: f32) {
         self.started.retain(|t| now - *t < WINDOW);
-        let urgent = matches!(sound, Sound::Win | Sound::Boom | Sound::Shatter);
+        let urgent = matches!(sound, Sound::Win | Sound::Boom | Sound::Shatter | Sound::Thunder);
         if volume < 0.01 || (!urgent && self.started.len() >= MAX_VOICES) {
             return;
         }
@@ -263,6 +265,22 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
             }
             out
         }
+        Sound::Thunder => {
+            // A sharp crack, then a long low rumble rolling in waves.
+            let mut out = secs(1.9);
+            add_noise(
+                &mut out,
+                &mut n,
+                |t| (5000.0 * (-t / 0.03).exp() + 120.0) * p,
+                |t| {
+                    let roll = 0.75 + 0.25 * (t * 9.0).sin();
+                    1.3 * (t / 0.003).min(1.0)
+                        * ((-t / 0.05).exp() * 0.8 + 0.6 * (-t / 0.55).exp() * roll)
+                        * ((1.9 - t) / 0.4).clamp(0.0, 1.0)
+                },
+            );
+            out
+        }
         Sound::Win => {
             let mut out = secs(1.6);
             // C major arpeggio of soft bells.
@@ -283,7 +301,7 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
 mod tests {
     use super::*;
 
-    const ALL: [Sound; 14] = [
+    const ALL: [Sound; 15] = [
         Sound::Hit { size: 80.0, hard: 0.2 },
         Sound::Hit { size: 20.0, hard: 1.0 },
         Sound::Shatter,
@@ -297,6 +315,7 @@ mod tests {
         Sound::Hiss,
         Sound::Thrust,
         Sound::Shot,
+        Sound::Thunder,
         Sound::Win,
     ];
 

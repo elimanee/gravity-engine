@@ -202,6 +202,22 @@ impl Link {
         }
     }
 
+    /// A rope's length (m), changed while it hangs.
+    pub fn set_rope_length(&mut self, world: &mut PhysWorld, length: f32) {
+        if self.kind != LinkKind::Rope {
+            return;
+        }
+        self.length = length.max(0.05);
+        if let Some(j) = world.impulse_joints.get_mut(self.joint) {
+            j.data.set_limits(JointAxis::LinX, [0.0, self.length]);
+        }
+        for h in [Some(self.a), self.b].into_iter().flatten() {
+            if let Some(b) = world.bodies.get_mut(h) {
+                b.wake_up(true);
+            }
+        }
+    }
+
     /// Both anchors in world space.
     pub fn ends(&self, world: &PhysWorld) -> Option<(Point<f32>, Point<f32>)> {
         let pa = world.bodies.get(self.a)?.position() * self.la;
@@ -362,6 +378,22 @@ mod tests {
         let h = w.bodies.insert(RigidBodyBuilder::dynamic().translation(vector![10.0, y]));
         w.colliders.insert_with_parent(ColliderBuilder::ball(0.3), h, &mut w.bodies);
         (w, h)
+    }
+
+    #[test]
+    fn a_shortened_rope_pulls_up() {
+        let (mut w, h) = world_with_ball(6.0);
+        let mut link = Link::new(&mut w, LinkKind::Rope, h, None, point![10.0, 6.0], point![10.0, 12.0], 0.0).unwrap();
+        for k in 0..360 {
+            if k % 4 == 0 {
+                let len = (link.length - 0.1).max(1.0);
+                link.set_rope_length(&mut w, len);
+            }
+            w.step_fixed();
+        }
+        assert!((link.length - 1.0).abs() < 1e-4);
+        let y = w.bodies[h].translation().y;
+        assert!((y - 11.0).abs() < 0.15, "reeled up to 1 m under the anchor, got y = {y}");
     }
 
     #[test]

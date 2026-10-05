@@ -135,7 +135,7 @@ impl Tool {
             Tool::Pour => "Pour sand, liquid and beads",
             Tool::Knife => "Cut ropes, joints and objects",
             Tool::Fire => "Set things on fire, melt ice",
-            Tool::Gadget => "Lasers, thrusters and cannons",
+            Tool::Gadget => "Lasers, thrusters, lamps, hooks…",
         }
     }
 

@@ -37,9 +37,14 @@ pub struct SceneFile {
     pub zones: Vec<Zone>,
     #[serde(default)]
     pub gadgets: Vec<SceneGadget>,
+    /// Night and weather to switch to (`None`: leave them as they are).
+    #[serde(default)]
+    pub night: Option<bool>,
+    #[serde(default)]
+    pub weather: Option<crate::weather::Weather>,
 }
 
-/// A laser, thruster or cannon.
+/// A gadget (laser, thruster, cannon, lamp or grappling hook).
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct SceneGadget {
     #[serde(flatten)]
@@ -199,6 +204,8 @@ pub fn capture(
         water,
         zones: zones.to_vec(),
         gadgets: vec![],
+        night: None,
+        weather: None,
     }
 }
 
@@ -347,6 +354,8 @@ mod tests {
                 pair: None,
             }],
             gadgets: vec![SceneGadget { spec: GadgetSpec { power: 7.0, ..GadgetSpec::default() }, host: Some(0) }],
+            night: None,
+            weather: None,
         };
         let json = serde_json::to_string(&scene).unwrap();
         assert!(json.contains("\"type\":\"embedded\""));

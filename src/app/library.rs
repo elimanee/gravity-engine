@@ -64,6 +64,12 @@ impl App {
             self.s.water_density = w.density;
             self.s = self.s.clone().sanitized();
         }
+        if let Some(night) = sc.night {
+            self.s.night = night;
+        }
+        if let Some(w) = sc.weather {
+            self.s.weather = w;
+        }
         self.zones = sanitize_zones(sc.zones.clone());
         let made = scene::instantiate(&sc, &mut self.world);
         let n = made.objects.len();

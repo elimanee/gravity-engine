@@ -1,6 +1,7 @@
 //! Example scenes, opened from the library panel (E).
 
 use super::*;
+use crate::physics::gadgets::{LAMP_COLOURS, SPOT_SPREAD};
 
 pub const ALL: &[Example] = &[
     Example { name: "Newton's cradle", about: "Five steel balls on ropes", build: cradle },
@@ -13,6 +14,11 @@ pub const ALL: &[Example] = &[
     Example { name: "Portal loop", about: "Endless fall through a pair of portals", build: portals },
     Example { name: "Laser lab", about: "Mirrors bend the beam, glass tints it, wood burns", build: laser_lab },
     Example { name: "Rocket car", about: "← → drive  ·  ↑ thruster  ·  ↓ cannon", build: rocket_car },
+    Example { name: "Solar system", about: "Planets orbit a sun with its own gravity", build: solar_system },
+    Example { name: "Night lights", about: "Lamps cast shadows in the rain  ·  Shift+T for day", build: night_lights },
+    Example {
+        name: "Grapple swing", about: "↑ hooks at the pointer and reels in  ·  ← → push", build: grapple_swing
+    },
 ];
 
 const FLOOR: f32 = 690.0;
@@ -198,4 +204,66 @@ fn rocket_car(b: &mut Builder) {
         ..GadgetSpec::default()
     };
     b.gadget(Some(body), (240.0, 588.0), 25.0, cannon);
+}
+
+fn solar_system(b: &mut Builder) {
+    b.scene.gravity = 0.0;
+    let (cx, cy) = (550.0, 360.0);
+    let sun = Material { planet: 14.0, ..Material::PLANET };
+    b.shape_with(Shape::Circle, [255, 190, 60], cx, cy, 110.0, true, sun);
+    let radius = 55.0 / crate::config::PPM;
+    // Planets set off on circular orbits (anticlockwise).
+    for (dist, angle, size, rgb) in [(150.0, 0.0f32, 30.0, SKY), (230.0, 2.2, 40.0, CORAL), (310.0, 4.0, 24.0, LEAF)] {
+        let (x, y) = (cx + dist * angle.cos(), cy - dist * angle.sin());
+        let i = b.shape_with(Shape::Circle, rgb, x, y, size, false, Material { bounce: 0.6, ..Material::DEFAULT });
+        let v = crate::physics::planets::orbit_speed(sun.planet, radius, dist / crate::config::PPM);
+        b.scene.objects[i].vx = -angle.sin() * v;
+        b.scene.objects[i].vy = angle.cos() * v;
+    }
+}
+
+fn night_lights(b: &mut Builder) {
+    b.scene.night = Some(true);
+    b.scene.weather = Some(crate::weather::Weather::Rain);
+    let lamp = |colour: usize, spread: f32, reach: f32| GadgetSpec {
+        kind: GadgetKind::Lamp,
+        power: reach / crate::config::PPM,
+        spread,
+        colour: LAMP_COLOURS[colour],
+        ..GadgetSpec::default()
+    };
+    // A street lamp: a post with an arm, the bulb under its end.
+    b.stroke(&dense(&[(900.0, FLOOR), (900.0, 270.0), (820.0, 270.0)]), 10.0, STONE, true, Material::DEFAULT);
+    b.gadget(None, (820.0, 284.0), -90.0, lamp(0, std::f32::consts::PI, 520.0));
+    // A lantern swinging on a rope.
+    let lantern = b.shape_with(Shape::Circle, WOOD, 420.0, 250.0, 26.0, false, Material::DEFAULT);
+    b.link(LinkKind::Rope, lantern, (420.0, 250.0), None, (420.0, 70.0), 0.0);
+    b.scene.objects[lantern].vx = 3.5;
+    b.gadget(Some(lantern), (420.0, 250.0), 0.0, lamp(0, std::f32::consts::PI, 420.0));
+    // A blue spotlight from the top-left corner.
+    b.gadget(None, (70.0, 110.0), -40.0, lamp(4, SPOT_SPREAD, 760.0));
+    // Crates, a ball and a glass pane to throw shadows.
+    for (x, row) in [(300.0, 0), (352.0, 0), (404.0, 0), (326.0, 1), (378.0, 1), (352.0, 2)] {
+        b.shape(Shape::Box, WOOD, x, FLOOR - 26.0 - row as f32 * 50.0, 48.0);
+    }
+    b.shape(Shape::Circle, CORAL, 620.0, FLOOR - 40.0, 80.0);
+    b.shape_with(Shape::Box, GLASS, 720.0, FLOOR - 60.0, 40.0, false, Material::GLASS);
+}
+
+fn grapple_swing(b: &mut Builder) {
+    // Rocks in the air to hook onto.
+    for (x, y) in [(220.0, 150.0), (470.0, 110.0), (720.0, 160.0), (960.0, 120.0)] {
+        b.shape_with(Shape::Circle, STONE, x, y, 44.0, true, Material::DEFAULT);
+    }
+    // A tower of boxes to swing into.
+    for row in 0..5 {
+        b.shape(Shape::Box, SKY, 1000.0, FLOOR - 26.0 - row as f32 * 50.0, 48.0);
+    }
+    let hero = b.shape(Shape::Box, CORAL, 110.0, FLOOR - 30.0, 54.0);
+    let hook = GadgetSpec { kind: GadgetKind::Grapple, trigger: Trigger::Up, ..GadgetSpec::default() };
+    b.gadget(Some(hero), (110.0, FLOOR - 30.0), 90.0, hook);
+    for (trigger, deg, at) in [(Trigger::Right, 0.0, 84.0), (Trigger::Left, 180.0, 136.0)] {
+        let push = GadgetSpec { kind: GadgetKind::Thruster, trigger, power: 0.8, ..GadgetSpec::default() };
+        b.gadget(Some(hero), (at, FLOOR - 30.0), deg, push);
+    }
 }

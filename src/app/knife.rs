@@ -73,7 +73,13 @@ impl App {
                 && (0..s.edges.len())
                     .any(|e| s.edge_ends(&self.world, e).is_some_and(|(a, b)| segments_cross(last, m, a, b)))
         });
-        if cut.is_empty() && !cloth {
+        let hooked = self.gadgets.iter().any(|g| {
+            g.hook
+                .as_ref()
+                .and_then(|l| l.ends(&self.world))
+                .is_some_and(|(pa, pb)| segments_cross(last, m, to_screen(pa.x, pa.y), to_screen(pb.x, pb.y)))
+        });
+        if cut.is_empty() && !cloth && !hooked {
             return;
         }
         if !self.knife.recorded {
@@ -81,6 +87,7 @@ impl App {
             self.knife.recorded = true;
         }
         self.knife_cloth(last, m);
+        self.knife_hooks(last, m);
         for &i in cut.iter().rev() {
             let l = self.links.remove(i);
             l.remove(&mut self.world);

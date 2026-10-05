@@ -68,6 +68,21 @@ impl Fire {
         h.temp = (h.temp + amount).min(1.5);
     }
 
+    /// How much `body` glows: 1 while burning, its heat while hot.
+    pub fn glow(&self, body: RigidBodyHandle) -> f32 {
+        self.heat
+            .get(&body)
+            .map_or(0.0, |h| if h.fuel.is_some() { 1.0 } else { ((h.temp - 0.3) / 0.7).clamp(0.0, 1.0) })
+    }
+
+    /// Put out `body` if it burns (rain on it). Returns whether it did.
+    pub fn douse(&mut self, body: RigidBodyHandle) -> bool {
+        let Some(h) = self.heat.get_mut(&body).filter(|h| h.fuel.is_some()) else { return false };
+        h.fuel = None;
+        h.temp = 0.2;
+        true
+    }
+
     /// Sprite tint: charred while burning, reddish while hot.
     pub fn tint(&self, body: RigidBodyHandle) -> Color {
         let Some(h) = self.heat.get(&body) else { return WHITE };

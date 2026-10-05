@@ -320,6 +320,16 @@ pub fn grain_kind(kind: crate::physics::grains::GrainKind, c: Vec2, size: f32, c
                 draw_circle(c.x + dx * s, c.y + dy * s - hop, 3.2 * s, color);
             }
         }
+        GrainKind::Snow => {
+            // A snowflake over a little drift.
+            let f = c + vec2(0.0, -3.0 * s + (t * 1.5).sin() * 1.0 * s);
+            for k in 0..3 {
+                let a = k as f32 * PI / 3.0 + t * 0.5;
+                let d = vec2(a.cos(), a.sin()) * 6.0 * s;
+                draw_line(f.x - d.x, f.y - d.y, f.x + d.x, f.y + d.y, 1.4 * s, color);
+            }
+            draw_rectangle(c.x - 9.0 * s, c.y + 7.0 * s, 18.0 * s, 3.0 * s, color);
+        }
     }
 }
 
@@ -627,6 +637,33 @@ pub fn gadget_kind(kind: crate::physics::gadgets::GadgetKind, c: Vec2, size: f32
             let ball = b + d * u * 8.0 * s;
             draw_circle(ball.x, ball.y, 2.0 * s, Color { a: color.a * (1.0 - u), ..color });
         }
+        GadgetKind::Lamp => {
+            // A bulb with rays that pulse.
+            draw_circle(c.x, c.y - 1.0 * s, 5.5 * s, color);
+            draw_rectangle(c.x - 2.5 * s, c.y + 4.0 * s, 5.0 * s, 4.0 * s, soft);
+            let k = 0.75 + 0.25 * (t * 3.0).sin();
+            for i in 0..6 {
+                let a = std::f32::consts::PI * (1.0 + i as f32) / 7.0;
+                let d = vec2(a.cos(), -a.sin());
+                let (p, q) = (c + d * 8.0 * s, c + d * (8.0 + 3.5 * k) * s);
+                draw_line(p.x, p.y - 1.0 * s, q.x, q.y - 1.0 * s, 1.4 * s, soft);
+            }
+        }
+        GadgetKind::Grapple => {
+            // A hook flying up on its rope.
+            let u = (t * 1.2) % 1.0;
+            let tip = vec2(c.x + 5.0 * s, c.y - (2.0 + 6.0 * u) * s);
+            let base = vec2(c.x - 7.0 * s, c.y + 8.0 * s);
+            draw_line(base.x, base.y, tip.x, tip.y, 1.2 * s, soft);
+            draw_circle(base.x, base.y, 2.5 * s, color);
+            let d = (tip - base).normalize();
+            let n = vec2(-d.y, d.x);
+            draw_line(tip.x - d.x * 5.0 * s, tip.y - d.y * 5.0 * s, tip.x, tip.y, 1.8 * s, color);
+            for side in [-1.0, 1.0] {
+                let p = tip - d * 2.5 * s + n * side * 4.0 * s;
+                draw_line(tip.x, tip.y, p.x, p.y, 1.6 * s, color);
+            }
+        }
     }
 }
 
@@ -657,4 +694,11 @@ pub fn trigger(trigger: crate::physics::gadgets::Trigger, c: Vec2, size: f32, co
             draw_circle(c.x, c.y, 2.2 * s, color);
         }
     }
+}
+
+/// A planet with a ring (badge of objects with their own gravity).
+pub fn planet(c: Vec2, size: f32, color: Color) {
+    let s = size / 14.0;
+    draw_circle(c.x, c.y, 4.5 * s, color);
+    draw_ellipse_lines(c.x, c.y, 8.0 * s, 2.6 * s, -18.0, 1.3 * s, color);
 }
