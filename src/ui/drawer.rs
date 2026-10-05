@@ -396,7 +396,7 @@ impl Drawer {
                             draw_stepper(sr, "Skin", &name, ACCENT_HI, mouse, f)
                         }
                         StepperId::WorldSize => {
-                            let v = format!("×{}", s.world_size);
+                            let v = if s.world_size >= 4 { "∞".to_string() } else { format!("×{}", s.world_size) };
                             draw_stepper(sr, "World size", &v, ACCENT_HI, mouse, f)
                         }
                         StepperId::Weather => {

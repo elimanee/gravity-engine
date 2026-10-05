@@ -19,6 +19,11 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Playable Sonic** (`Shift+O`, or *Sonic* in the settings) — Sonic joins the scene and is played with the keyboard: `←` `→` run, `↓` crouches or rolls, `Space` jumps (hold for higher), `↓` + `Space` charges a spin dash, `↑` looks up. He moves the way he does in the Mega Drive games, after the [Sonic Physics Guide](https://info.sonicretro.org/Sonic_Physics_Guide): acceleration, braking and friction, slopes that slow him down or speed him up, floor sensors that follow walls and ceilings (he runs round loops), slipping off when too slow, rolling, variable jump height, air drag, and slower physics underwater.
 - He pushes objects (curled up, he bowls them over), stands and rides on them, weighs down seesaws, bounces off bouncy surfaces like springs, slides on ice, is blown away by bombs and can be picked up and thrown with the Spring tool. The camera follows him in a big world. `Shift+Space` pauses while he is around.
 - **Rings** to collect, with a counter; example scene *Sonic loop* (a loop, a spring, a ramp and crates). Sonic and the rings are saved in scene files.
+- **Infinite world** (*World size* → `∞` in the settings) — a floor that goes on forever, no walls or ceiling: travel with the middle mouse button, or let the camera follow Sonic. Everything is quietly moved back towards the middle as you go, so it never loses precision.
+- **Endless run** (example scene) — Sonic in the infinite world, with terrain made ahead of him as he runs: hills, loops with dash panels, ramps, springs up to platforms, crates to smash curled up, and rings everywhere. The distance and your best run are shown under the ring counter.
+- Curled up, Sonic smashes breakable objects (rolling into them or landing on them), and conveyor surfaces launch him like dash panels.
+
+![Sonic on an endless run over hills, collecting rings](docs/screenshots/endless-run.png)
 - Sonic is drawn with shapes: no graphics or sounds from the games are included. You can give him **your own sprite sheet** (see below).
 
 ### Sonic sprite sheets
@@ -204,7 +209,7 @@ Each frame is the top-left corner of a `cell`-sized box whose centre is Sonic's 
 - **Object properties** — bounce, friction, mass, gravity, planet gravity, breakable, flammable, mirror, magnet and conveyor per object (right-click → *Properties…*, or `I`)
 - **Library** (`E`) — example scenes, eighteen challenges (three with a laser) with star ratings, and your own challenges
 - **Challenge editor** (`Shift+E`) — make levels and share them as `.gchallenge` files
-- **Camera** — zoom (`Ctrl`+wheel, `+` / `-`, `Home` to fit) and pan (middle mouse button); *World size* makes the arena up to 3× the window
+- **Camera** — zoom (`Ctrl`+wheel, `+` / `-`, `Home` to fit) and pan (middle mouse button); *World size* makes the arena up to 3× the window, or infinite
 - **Sound effects and slow motion** — procedural sounds for hits, glass, explosions and wins; a moment of slow motion on big impacts (both can be turned off)
 - **Undo / redo** — `Ctrl+Z` / `Ctrl+Y` for every edit
 - **Gravity** — presets ZERO / MOON / MARS / EARTH / JUPITER / HEAVY / REVERSE in the HUD, or any value with the slider

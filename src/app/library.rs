@@ -69,6 +69,10 @@ impl App {
             self.spawn_sonic(crate::physics::to_screen(x, y));
         }
         self.rings = sc.rings.iter().map(|&[x, y]| crate::physics::to_screen(x, y)).collect();
+        self.endless = None;
+        if sc.endless {
+            self.start_endless();
+        }
         if let Some(night) = sc.night {
             self.s.night = night;
         }

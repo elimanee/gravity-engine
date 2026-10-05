@@ -13,6 +13,10 @@ described on the [releases page](https://github.com/elimanee/gravity-engine/rele
 - Sounds for jumping, the spin dash, braking, springs and rings
 - **Your own Sonic sprite sheet** (*Sonic sprites…* in the settings, or a PNG in `~/.config/gravity_engine/sonic/`): Triangly's Sonic 1 sheet is recognised as it is, other sheets are cut up by a `sheet.json` (see the README). None ships with the program
 
+- **Infinite world** (*World size* → `∞` in the settings): a floor that goes on forever with no walls or ceiling; the world is moved back under the view as it travels so positions stay precise. Weather and water follow the view
+- **Endless run** (example scene): Sonic in the infinite world, with hills, loops with dash panels, ramps, springs, platforms, crates and rings made ahead of him and cleared behind him; distance run and best run (kept between sessions)
+- Curled up, Sonic smashes breakable objects; conveyor surfaces launch him like dash panels; too slow for a loop, he slips out of it instead of being trapped
+
 ### Changed
 - While Sonic is in the scene, `Space` is his jump button and `←` does not rewind (`Shift+←` still does)
 

@@ -24,6 +24,11 @@ pub const ALL: &[Example] = &[
         about: "← → run  ·  ↓ roll  ·  Space jump  ·  ↓ + Space spin dash",
         build: sonic_loop,
     },
+    Example {
+        name: "Endless run",
+        about: "Sonic in an infinite world made as he runs  ·  how far can you go?",
+        build: endless_run,
+    },
 ];
 
 const FLOOR: f32 = 690.0;
@@ -298,4 +303,9 @@ fn sonic_loop(b: &mut Builder) {
     for (x, row) in [(980.0, 0), (1030.0, 0), (1005.0, 1)] {
         b.shape(Shape::Box, WOOD, x, FLOOR - 24.0 - row as f32 * 48.0, 46.0);
     }
+}
+
+fn endless_run(b: &mut Builder) {
+    // The terrain is made while he runs (see `app::endless`).
+    b.scene.endless = true;
 }

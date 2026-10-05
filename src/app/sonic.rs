@@ -86,7 +86,16 @@ impl App {
         for o in &self.objects {
             let mass = self.world.bodies.get(o.body).filter(|b| b.is_dynamic()).map_or(0.0, |b| b.mass());
             let m = &o.material;
-            map.insert(o.collider, Ground { mass, bounce: m.bounce, friction: m.friction, layer: m.layer });
+            let conveyor = m.conveyor * PPM / (SCALE * FPS);
+            let g = Ground {
+                mass,
+                bounce: m.bounce,
+                friction: m.friction,
+                layer: m.layer,
+                breakable: m.breakable,
+                conveyor,
+            };
+            map.insert(o.collider, g);
         }
         map
     }
@@ -141,7 +150,12 @@ impl App {
         // Fell out of the world: back to the start.
         let (aw, ah) = self.arena();
         if s.pos.x < -300.0 || s.pos.x > aw + 300.0 || s.pos.y > ah + 300.0 || s.pos.y < -1500.0 {
+            let endless = self.endless.is_some();
             if let Some(run) = &mut self.sonic {
+                // In an endless run he comes back where he fell.
+                if endless {
+                    run.sonic.spawn = vec2(s.pos.x.clamp(0.0, aw), ah - WALL_T * PPM - 200.0);
+                }
                 run.sonic.respawn();
             }
         }
@@ -170,6 +184,13 @@ impl App {
                     let Some(b) = self.world.bodies.get_mut(h).filter(|b| b.is_dynamic()) else { continue };
                     let (x, y) = to_phys(at.x, at.y);
                     b.apply_impulse_at_point(vector![0.0, -MASS * g.max(0.0) / FPS], Point::new(x, y), true);
+                }
+                Event::Break { collider, at } => {
+                    let Some(h) = self.world.colliders.get(collider).and_then(|c| c.parent()) else { continue };
+                    let (x, y) = to_phys(at.x, at.y);
+                    if self.shatter(h, Point::new(x, y)) {
+                        self.sound(Sound::Shatter, at, 0.6);
+                    }
                 }
                 Event::Jump => self.sound(Sound::Jump, s.pos, 0.5),
                 Event::Roll => self.sound(Sound::Dash, s.pos, 0.25),
@@ -264,7 +285,7 @@ impl App {
         let line = format!("RINGS  {}", run.rings);
         theme::text_bold(&line, 18.0, top + 26.0, 20.0, shade);
         theme::text_bold(&line, 16.0, top + 24.0, 20.0, gold);
-        if !self.rings.is_empty() {
+        if !self.rings.is_empty() && self.endless.is_none() {
             let left = format!("{} left", self.rings.len());
             theme::text(&left, 16.0, top + 44.0, 13.0, Color::new(1.0, 1.0, 1.0, 0.7));
         }

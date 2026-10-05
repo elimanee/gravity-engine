@@ -67,8 +67,15 @@ impl Builder {
                 weather: None,
                 sonic: None,
                 rings: vec![],
+                endless: false,
             },
         }
+    }
+
+    /// A builder whose design x = 0 is at world x `x0` (px), with the
+    /// design floor on the world's floor (stretches of an endless run).
+    pub fn at(x0: f32, sh: f32) -> Self {
+        Builder { dx: x0, ..Builder::new(DESIGN_W, sh) }
     }
 
     /// Design pixels → physics metres.
@@ -284,7 +291,7 @@ mod tests {
     fn every_built_in_scene_builds_and_round_trips() {
         for e in examples::ALL {
             let sc = e.scene(1100.0, 720.0);
-            assert!(!sc.objects.is_empty(), "{} is empty", e.name);
+            assert!(!sc.objects.is_empty() || sc.endless, "{} is empty", e.name);
             let json = serde_json::to_string(&sc).unwrap();
             assert!(serde_json::from_str::<SceneFile>(&json).is_ok(), "{} round-trips", e.name);
         }

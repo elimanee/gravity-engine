@@ -54,6 +54,8 @@ pub fn current() -> View {
 }
 
 pub struct Camera {
+    /// The world goes on forever: zoom out only so far.
+    pub infinite: bool,
     pub zoom: f32,
     pub center: Vec2,
     /// World size in pixels.
@@ -62,19 +64,29 @@ pub struct Camera {
 
 impl Camera {
     pub fn new(arena: Vec2, screen: Vec2) -> Self {
-        let mut c = Camera { zoom: 1.0, center: arena / 2.0, arena };
+        let mut c = Camera { infinite: false, zoom: 1.0, center: arena / 2.0, arena };
         c.fit(arena, screen);
         c
     }
 
     /// Smallest zoom: the whole world fits with a margin.
     fn min_zoom(&self, screen: Vec2) -> f32 {
+        if self.infinite {
+            return (screen.y / self.arena.y).min(1.0) * 0.9;
+        }
         (screen.x / self.arena.x).min(screen.y / self.arena.y).min(1.0) * 0.9
     }
 
     /// Show the whole world (at most 100 %).
     pub fn fit(&mut self, arena: Vec2, screen: Vec2) {
         self.arena = arena;
+        if self.infinite {
+            // No whole to show: back to 100 %, down on the floor.
+            self.zoom = 1.0;
+            self.center = vec2(self.center.x, arena.y - screen.y / 2.0);
+            self.clamp(screen);
+            return;
+        }
         self.zoom = (screen.x / arena.x).min(screen.y / arena.y).min(1.0);
         self.center = arena / 2.0;
     }
@@ -102,6 +114,11 @@ impl Camera {
         let after = self.view(screen).to_world(anchor);
         self.center += before - after;
         self.clamp(screen);
+    }
+
+    /// Move the view `dx` world pixels to the left (the world shifted).
+    pub fn shift(&mut self, dx: f32) {
+        self.center.x -= dx;
     }
 
     /// Glide towards `target` (world px) by the fraction `k`.

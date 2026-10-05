@@ -51,10 +51,12 @@ use std::sync::Arc;
 
 mod build;
 mod editor;
+mod endless;
 mod fire;
 mod gadgets;
 mod grapple;
 mod impacts;
+mod infinite;
 mod juice;
 mod knife;
 mod library;
@@ -158,6 +160,8 @@ pub struct App {
     sonic_sheet: Option<crate::sonic::sheet::Sheet>,
     sonic_sheet_tried: bool,
     rings: Vec<Vec2>,
+    /// Sonic's endless run (terrain made as he goes).
+    endless: Option<endless::Endless>,
     /// The night's light map.
     lights: crate::lighting::Lights,
     climate: weather::Climate,
@@ -201,11 +205,24 @@ pub struct App {
 
 impl App {
     pub fn new(preload: Vec<String>, skip_title: bool) -> Self {
-        let s = Settings::load();
+        let mut s = Settings::load();
+        let infinite = s.world_size >= 4;
+        if infinite {
+            s.border = crate::physics::borders::BorderMode::Walls;
+        }
         let k = s.world_size as f32;
-        let size = (screen_width() * k, screen_height() * k);
-        let world = PhysWorld::new(s.gravity, s.border, size);
-        let camera = Camera::new(vec2(size.0, size.1), vec2(screen_width(), screen_height()));
+        let size = if infinite {
+            (infinite::INFINITE_W, screen_height() * 2.0)
+        } else {
+            (screen_width() * k, screen_height() * k)
+        };
+        let mut world = PhysWorld::new(s.gravity, s.border, size);
+        world.set_infinite(infinite);
+        let mut camera = Camera::new(vec2(size.0, size.1), vec2(screen_width(), screen_height()));
+        if infinite {
+            camera.infinite = true;
+            camera.fit(vec2(size.0, size.1), vec2(screen_width(), screen_height()));
+        }
         let mut bg = Background::new(s.background);
         let mut toasts = Toasts::default();
         if let Some(path) = s.custom_background.clone() {
@@ -253,6 +270,7 @@ impl App {
             sonic_sheet: None,
             sonic_sheet_tried: false,
             rings: Vec::new(),
+            endless: None,
             climate: Default::default(),
             pouring: false,
             pour_sound: 0.0,
@@ -349,6 +367,7 @@ impl App {
             self.last_size = arena;
         }
 
+        self.recentre();
         let mut input = Input::gather();
         input.world = self.view().to_world(input.mouse);
         let mut actions = Vec::new();
@@ -975,6 +994,9 @@ impl App {
                     self.spawner.fader.open = false;
                 }
             }
+            Action::CycleBorder(_) if self.infinite() => {
+                self.toasts.status("border", "An infinite world has a floor and no walls");
+            }
             Action::CycleBorder(d) => {
                 self.s.border = self.s.border.cycle(d);
                 self.world.set_border(self.s.border);
@@ -1177,13 +1199,14 @@ impl App {
                 self.toasts.status("grains", format!("Removed {n} grains"));
             }
             Action::CycleWorldSize(d) => {
-                self.s.world_size = (self.s.world_size as i32 - 1 + d).rem_euclid(3) as u8 + 1;
-                let (aw, ah) = self.arena();
-                self.world.resize((aw, ah));
-                self.last_size = (aw, ah);
-                let screen = vec2(screen_width(), screen_height());
-                self.camera.fit(vec2(aw, ah), screen);
-                self.toasts.status("world", format!("World size ×{}  ·  zoom with Ctrl+wheel", self.s.world_size));
+                let size = (self.s.world_size as i32 - 1 + d).rem_euclid(4) as u8 + 1;
+                self.set_world_size(size);
+                let msg = if self.infinite() {
+                    "Infinite world  ·  middle-drag to travel (Sonic is followed)  ·  Ctrl+wheel zooms".to_string()
+                } else {
+                    format!("World size ×{}  ·  zoom with Ctrl+wheel", self.s.world_size)
+                };
+                self.toasts.status("world", msg);
             }
             Action::ToggleEffects => {
                 self.s.effects = !self.s.effects;
@@ -1326,6 +1349,9 @@ impl App {
 
     /// World size in pixels.
     fn arena(&self) -> (f32, f32) {
+        if self.infinite() {
+            return (infinite::INFINITE_W, screen_height() * 2.0);
+        }
         let k = self.s.world_size as f32;
         (screen_width() * k, screen_height() * k)
     }
@@ -1779,6 +1805,7 @@ impl App {
             self.process_impacts();
             self.update_fire(step, mouse);
             self.update_sonic(step);
+            self.update_endless();
             self.soft_after_step(step, mouse);
             links::prune(&mut self.links, &self.world);
 
@@ -1800,7 +1827,7 @@ impl App {
         }
         self.update_weather(dt, running, step, mouse);
         self.blasts.retain(Blast::alive);
-        let floor = if self.world.border.walls().floor { self.arena().1 - WALL_T * PPM } else { f32::MAX };
+        let floor = if self.world.walls().floor { self.arena().1 - WALL_T * PPM } else { f32::MAX };
         let gravity = -self.world.gravity.y * PPM;
         self.effects.update(if running { step } else { 0.0 }, gravity, floor);
     }
@@ -1833,11 +1860,8 @@ impl App {
         let m = input.world;
         self.bg.draw(sw, sh);
         let view = self.view();
-        let floor = if self.world.border.walls().floor {
-            (sh - view.to_screen(vec2(0.0, ah - WALL_T * PPM)).y).max(0.0)
-        } else {
-            0.0
-        };
+        let floor =
+            if self.world.walls().floor { (sh - view.to_screen(vec2(0.0, ah - WALL_T * PPM)).y).max(0.0) } else { 0.0 };
         visualizer::draw_background(self.s.vis_background, &self.audio.analyzer, sw, sh, floor);
 
         // The scene, in world pixels.
@@ -2015,6 +2039,7 @@ impl App {
             self.challenge_bar.draw(&v, top, m);
         }
         self.draw_sonic_hud(top);
+        self.draw_endless_hud(top);
         if let (Some(v), Some(ed)) = (self.editor_view(), self.editor.as_ref()) {
             self.editor_bar.draw(&v, &ed.name, top, m);
         }

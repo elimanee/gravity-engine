@@ -59,6 +59,13 @@ impl Effects {
         }
     }
 
+    /// Move every particle `dx` px to the left (the world shifted).
+    pub fn shift(&mut self, dx: f32) {
+        for p in &mut self.items {
+            p.pos.x -= dx;
+        }
+    }
+
     pub fn clear(&mut self) {
         self.items.clear();
     }

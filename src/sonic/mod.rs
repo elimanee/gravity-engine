@@ -64,6 +64,8 @@ const STAND: (f32, f32) = (9.0, 19.0);
 const BALL: (f32, f32) = (7.0, 14.0);
 /// Launch speed of a spring (a surface with bounce 1).
 const SPRING: f32 = 10.0;
+/// Sensors start this far behind his centre (guide px).
+const LIFT: f32 = 8.0;
 /// Grounded frames on ordinary ground before loop layers reset.
 const LAYER_RESET: u32 = 40;
 
@@ -77,11 +79,16 @@ pub struct Ground {
     /// Loops: 0 always solid, 1 only on the way in, 2 only on the way out,
     /// 3 always solid and switches to the way out (the top of a loop).
     pub layer: u8,
+    /// Breaks when he hits it curled up.
+    pub breakable: bool,
+    /// Conveyor speed (guide px per frame, positive to the right): it
+    /// launches him like a dash panel.
+    pub conveyor: f32,
 }
 
 impl Default for Ground {
     fn default() -> Self {
-        Ground { mass: 0.0, bounce: 0.0, friction: 0.5, layer: 0 }
+        Ground { mass: 0.0, bounce: 0.0, friction: 0.5, layer: 0, breakable: false, conveyor: 0.0 }
     }
 }
 
@@ -118,6 +125,11 @@ pub enum Event {
     },
     /// Standing on a body at `at`.
     Stand {
+        collider: ColliderHandle,
+        at: Vec2,
+    },
+    /// Curled up, he smashed something breakable at `at`.
+    Break {
         collider: ColliderHandle,
         at: Vec2,
     },
@@ -306,14 +318,18 @@ impl Sonic {
 
     /// The nearer of the two floor sensors (A and B) along `down`, reaching
     /// `extra` guide px past his feet; its distance is measured from his feet.
-    fn floor(&self, world: &PhysWorld, env: Env, down: Vec2, extra: f32) -> Option<Hit> {
+    /// Sensors start this far behind his centre, so that sunk a little
+    /// into the ground he still finds it (and comes back out).
+    fn floor(&self, world: &PhysWorld, env: Env, down: Vec2, extra: f32, deepest: f32) -> Option<Hit> {
         let (wr, hr) = self.radii();
         let side = vec2(-down.y, down.x);
+        let back = self.pos - down * LIFT * SCALE;
         [-1.0, 1.0]
             .into_iter()
-            .filter_map(|k| self.cast(world, env, self.pos + side * k * wr * SCALE, down, hr + extra))
-            .map(|h| Hit { dist: h.dist - hr, ..h })
-            .filter(|h| h.dist >= -14.0)
+            .filter_map(|k| self.cast(world, env, back + side * k * wr * SCALE, down, hr + LIFT + extra))
+            .filter(|h| h.dist > 0.0)
+            .map(|h| Hit { dist: h.dist - hr - LIFT, ..h })
+            .filter(|h| h.dist >= -deepest)
             .min_by(|a, b| a.dist.total_cmp(&b.dist))
     }
 
@@ -466,6 +482,14 @@ impl Sonic {
         if self.skidding && !was_skidding {
             events.push(Event::Skid);
         }
+        // Dash panels (conveyors) send him off at their speed.
+        if ground.conveyor > 0.0 && self.gsp < ground.conveyor {
+            self.gsp = ground.conveyor;
+            self.facing = 1.0;
+        } else if ground.conveyor < 0.0 && self.gsp > ground.conveyor {
+            self.gsp = ground.conveyor;
+            self.facing = -1.0;
+        }
         self.gsp = self.gsp.clamp(-MAX_SPEED, MAX_SPEED);
         self.xsp = self.gsp * cos;
         self.ysp = -self.gsp * sin;
@@ -486,6 +510,12 @@ impl Sonic {
         let deg = degrees(self.angle);
         if self.control_lock == 0 && self.gsp.abs() < SLIP_SPEED && (46.0..=315.0).contains(&deg) {
             self.control_lock = SLIP_LOCK;
+            // Too slow for a loop: let him out the other side instead of
+            // trapping him in it.
+            if self.on.and_then(env).is_some_and(|g| g.layer == 1) {
+                self.layer_out = true;
+                self.layer_timer = 0;
+            }
             if (91.0..=269.0).contains(&deg) {
                 self.leave_ground();
             }
@@ -495,7 +525,7 @@ impl Sonic {
     /// Follow the floor; false (and airborne) when there is none.
     fn stick(&mut self, world: &PhysWorld, env: Env, events: &mut Vec<Event>) -> bool {
         let down = mode_down(self.angle);
-        let Some(hit) = self.floor(world, env, down, 16.0) else {
+        let Some(hit) = self.floor(world, env, down, 16.0, 14.0) else {
             self.leave_ground();
             return false;
         };
@@ -575,6 +605,11 @@ impl Sonic {
     /// Momentum shared with a body he runs into: returns his speed along
     /// `dir` afterwards.
     fn shove(&self, world: &PhysWorld, hit: &Hit, dir: Vec2, speed: f32, events: &mut Vec<Event>) -> f32 {
+        // Curled up, he goes straight through breakable things.
+        if hit.ground.breakable && self.is_ball() {
+            events.push(Event::Break { collider: hit.collider, at: hit.point });
+            return speed;
+        }
         let m = hit.ground.mass;
         if m <= 0.0 || speed <= 0.0 {
             return 0.0;
@@ -670,7 +705,9 @@ impl Sonic {
         }
         if self.ysp < 0.0 {
             let up = vec2(0.0, -1.0);
-            if let Some(hit) = self.floor(world, env, up, 0.0).filter(|h| h.dist < 0.0) {
+            // Only solid ground bumps his head (things that move do not).
+            let ceiling = self.floor(world, env, up, 0.0, 14.0).filter(|h| h.dist < 0.0 && h.ground.mass <= 0.0);
+            if let Some(hit) = ceiling {
                 self.pos.y -= hit.dist * SCALE;
                 let deg = degrees(angle_of(hit.normal));
                 // Steep ceilings catch him running.
@@ -687,12 +724,18 @@ impl Sonic {
             return false;
         }
         let down = vec2(0.0, 1.0);
-        let Some(hit) = self.floor(world, env, down, self.ysp + 2.0) else { return false };
+        let Some(hit) = self.floor(world, env, down, self.ysp + 2.0, self.ysp + 8.0 + LIFT) else { return false };
         if hit.dist > 0.0 || hit.dist < -(self.ysp + 8.0) {
             return false;
         }
         self.pos.y += hit.dist * SCALE;
         self.angle = angle_of(hit.normal);
+        // Landing curled up on something breakable smashes it and bounces him.
+        if hit.ground.breakable && self.is_ball() {
+            events.push(Event::Break { collider: hit.collider, at: hit.point });
+            self.ysp = -self.ysp.max(4.0);
+            return false;
+        }
         if hit.ground.bounce >= 0.6 {
             self.spring(hit, events);
             return true;
@@ -869,6 +912,45 @@ mod tests {
         assert!(top < centre.y - r * 0.5, "went over the top: {top}");
         assert!(s.pos.x > centre.x + r * 2.0 && s.gsp > 0.0, "came out the other side: {:?}", s.pos);
         assert!(s.grounded);
+    }
+
+    #[test]
+    fn rolling_smashes_breakable_things() {
+        let mut w = world();
+        let (x, y) = to_phys(500.0, floor_y() - 30.0);
+        let b = w.bodies.insert(RigidBodyBuilder::dynamic().translation(vector![x, y]));
+        let crate_ = w.colliders.insert_with_parent(ColliderBuilder::cuboid(0.5, 0.5), b, &mut w.bodies);
+        w.refresh_queries();
+        let env = |c: ColliderHandle| {
+            Some(if c == crate_ {
+                Ground { mass: 1.0, breakable: true, ..Ground::default() }
+            } else {
+                Ground::default()
+            })
+        };
+        let mut s = standing(300.0);
+        s.gsp = 8.0;
+        s.rolling = true;
+        s.curl(true);
+        let events = run(&mut s, &w, &env, Input::default(), 30);
+        assert!(events.iter().any(|e| matches!(e, Event::Break { collider, .. } if *collider == crate_)));
+        assert!(s.gsp > 6.0, "rolled straight through, still at {}", s.gsp);
+        // Walking, he only pushes it.
+        let mut s = standing(300.0);
+        let right = Input { right: true, ..Input::default() };
+        let events = run(&mut s, &w, &env, right, 120);
+        assert!(!events.iter().any(|e| matches!(e, Event::Break { .. })));
+        assert!(events.iter().any(|e| matches!(e, Event::Push { .. })));
+    }
+
+    #[test]
+    fn sunk_into_the_floor_he_climbs_back_out() {
+        let w = world();
+        let mut s = Sonic::new(vec2(300.0, floor_y() - 19.0 * SCALE + 8.0));
+        s.ysp = 2.0;
+        run(&mut s, &w, &walls, Input::default(), 10);
+        assert!(s.grounded, "landed");
+        assert!((s.pos.y - (floor_y() - 19.0 * SCALE)).abs() < 1.0, "back on top: {}", s.pos.y);
     }
 
     #[test]
