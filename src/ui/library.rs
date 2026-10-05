@@ -37,16 +37,28 @@ enum Tab {
 pub struct Library {
     pub fader: Fader,
     tab: Tab,
+    /// Rows scrolled past (mouse wheel).
+    scroll: usize,
 }
 
 impl Library {
-    fn count(&self, mine: usize) -> usize {
-        let n = match self.tab {
+    /// Cells in the current tab.
+    fn total(&self, mine: usize) -> usize {
+        match self.tab {
             Tab::Examples => examples::ALL.len(),
             Tab::Challenges => challenges::ALL.len(),
             Tab::Mine => mine + 1,
-        };
-        n.min(ROWS * COLS)
+        }
+    }
+
+    /// Cells shown (the rest is scrolled away).
+    fn count(&self, mine: usize) -> usize {
+        self.total(mine).saturating_sub(self.scroll * COLS).min(ROWS * COLS)
+    }
+
+    /// Rows that can be scrolled.
+    fn max_scroll(&self, mine: usize) -> usize {
+        self.total(mine).div_ceil(COLS).saturating_sub(ROWS)
     }
 
     fn panel(&self) -> Rect {
@@ -78,6 +90,7 @@ impl Library {
     pub fn open(&mut self, challenges: bool) {
         self.fader.open = true;
         self.tab = if challenges { Tab::Challenges } else { Tab::Examples };
+        self.scroll = 0;
     }
 
     pub fn update(&mut self, dt: f32, mine: usize, input: &mut Input, actions: &mut Vec<Action>) {
@@ -86,16 +99,22 @@ impl Library {
             return;
         }
         let p = self.panel();
+        if input.wheel != 0.0 {
+            let up = input.wheel > 0.0;
+            self.scroll = if up { self.scroll.saturating_sub(1) } else { (self.scroll + 1).min(self.max_scroll(mine)) };
+        }
         if input.left_pressed {
             let tabs = Self::tabs(p);
+            let before = self.tab;
             if tabs[0].contains(input.mouse) {
                 self.tab = Tab::Examples;
             } else if tabs[1].contains(input.mouse) {
                 self.tab = Tab::Challenges;
             } else if tabs[2].contains(input.mouse) {
                 self.tab = Tab::Mine;
-            } else if let Some(i) = (0..self.count(mine)).find(|&i| Self::cell(p, i).contains(input.mouse)) {
-                let edit = Self::edit_button(Self::cell(p, i)).contains(input.mouse);
+            } else if let Some(slot) = (0..self.count(mine)).find(|&i| Self::cell(p, i).contains(input.mouse)) {
+                let i = self.scroll * COLS + slot;
+                let edit = Self::edit_button(Self::cell(p, slot)).contains(input.mouse);
                 actions.push(match self.tab {
                     Tab::Examples => Action::LoadExample(i),
                     Tab::Challenges => Action::StartChallenge(i),
@@ -106,6 +125,9 @@ impl Library {
                 self.fader.open = false;
             } else if !p.contains(input.mouse) {
                 self.fader.open = false;
+            }
+            if self.tab != before {
+                self.scroll = 0;
             }
         }
         // Modal: swallow all pointer input.
@@ -139,8 +161,17 @@ impl Library {
         }
 
         let t = get_time() as f32;
-        for i in 0..self.count(data.mine.len()) {
-            let r = Self::cell(p, i);
+        let mine = data.mine.len();
+        let more = self.max_scroll(mine);
+        if more > 0 {
+            let above = if self.scroll > 0 { "↑ " } else { "" };
+            let below = if self.scroll < more { " ↓" } else { "" };
+            let label = format!("{above}Scroll for more{below}");
+            text_centered(&label, p.x + p.w / 2.0, p.y + p.h - 8.0, 11.0, fade(TEXT_MUTED, f));
+        }
+        for slot in 0..self.count(mine) {
+            let i = self.scroll * COLS + slot;
+            let r = Self::cell(p, slot);
             let hov = r.contains(mouse);
             rrect(r, 10.0, fade(if hov { SURFACE_HI } else { SURFACE_2 }, f));
             rrect_lines(r, 10.0, 1.0, fade(if hov { BORDER_HI } else { BORDER }, f));

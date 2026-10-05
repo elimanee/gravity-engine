@@ -12,10 +12,11 @@ pub mod examples;
 use crate::config::PPM;
 use crate::drawing;
 use crate::physics::borders::BorderMode;
+use crate::physics::gadgets::{GadgetKind, GadgetSpec, Trigger};
 use crate::physics::links::LinkKind;
 use crate::physics::object::Material;
 use crate::physics::zones::{self, Zone, ZoneKind};
-use crate::scene::{SceneFile, SceneLink, SceneObject, SceneSource, SceneWater};
+use crate::scene::{SceneFile, SceneGadget, SceneLink, SceneObject, SceneSource, SceneWater};
 use crate::shapes::Shape;
 
 const DESIGN_W: f32 = 1100.0;
@@ -61,6 +62,7 @@ impl Builder {
                 links: vec![],
                 water: None,
                 zones: vec![],
+                gadgets: vec![],
             },
         }
     }
@@ -133,7 +135,7 @@ impl Builder {
         let [ax, ay] = self.phys(pa.0, pa.1);
         let [bx, by] = self.phys(pb.0, pb.1);
         let length = ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt().max(0.05);
-        self.scene.links.push(SceneLink { kind, a, b, la, lb, length, speed });
+        self.scene.links.push(SceneLink { kind, a, b, la, lb, length, speed, drive: false });
     }
 
     /// A zone over the design rectangle `(x0, y0, x1, y1)`.
@@ -143,6 +145,29 @@ impl Builder {
         let zone = Zone { kind, min: a, max: b, angle: angle_deg.to_radians(), strength, pair: None };
         zones::add(&mut self.scene.zones, zone);
         self.scene.zones.len() - 1
+    }
+
+    /// A gadget at design point `at` on object `host` (or fixed in the
+    /// world), pointing `deg` degrees counter-clockwise from the right.
+    pub fn gadget(&mut self, host: Option<usize>, at: (f32, f32), deg: f32, spec: GadgetSpec) {
+        let [x, y] = self.phys(at.0, at.1);
+        let at = match host {
+            Some(i) => [x - self.scene.objects[i].x, y - self.scene.objects[i].y],
+            None => [x, y],
+        };
+        self.scene.gadgets.push(SceneGadget { spec: GadgetSpec { at, angle: deg.to_radians(), ..spec }, host });
+    }
+
+    /// A laser fixed in the world.
+    pub fn laser(&mut self, at: (f32, f32), deg: f32) {
+        self.gadget(None, at, deg, GadgetSpec::default());
+    }
+
+    /// The last link becomes a motor driven with ← / →.
+    pub fn drive_last(&mut self) {
+        if let Some(l) = self.scene.links.last_mut() {
+            l.drive = true;
+        }
     }
 
     pub fn water(&mut self, level: f32, density: f32) {
@@ -172,7 +197,8 @@ pub struct Example {
     pub build: fn(&mut Builder),
 }
 
-/// A challenge: bring the ball into the goal zone by drawing.
+/// A challenge: bring the ball into the goal zone by drawing (or, when
+/// the level has a laser, bend its beam into the goal with mirrors).
 pub struct Challenge {
     pub id: &'static str,
     pub name: &'static str,
@@ -186,7 +212,8 @@ pub struct Challenge {
 }
 
 impl Challenge {
-    /// Build the level; the ball must be a pinned circle of [`BALL_RGB`].
+    /// Build the level; the ball must be a pinned circle of [`BALL_RGB`]
+    /// (or, in a laser level, there is a laser and no ball).
     pub fn scene(&self, sw: f32, sh: f32) -> SceneFile {
         let mut b = Builder::new(sw, sh);
         (self.build)(&mut b);
@@ -234,7 +261,12 @@ mod tests {
                 .iter()
                 .filter(|o| matches!(o.source, SceneSource::Shape { rgb, .. } if rgb == BALL_RGB) && o.pinned)
                 .count();
-            assert_eq!(balls, 1, "{} has one pinned ball", c.name);
+            let lasers = sc.gadgets.iter().filter(|g| g.spec.kind == GadgetKind::Laser).count();
+            assert!(
+                (balls, lasers) == (1, 0) || (balls, lasers) == (0, 1),
+                "{} has one pinned ball or one laser",
+                c.name
+            );
             assert_eq!(sc.zones.iter().filter(|z| z.kind == ZoneKind::Goal).count(), 1, "{} has one goal", c.name);
         }
     }

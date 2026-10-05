@@ -35,6 +35,8 @@ pub struct Snapshot {
     zones: Vec<Zone>,
     /// Jellies and cloths (filled in by the app).
     pub softs: Vec<SoftState>,
+    /// Gadgets, their objects given by index (filled in by the app).
+    pub gadgets: Vec<crate::scene::SceneGadget>,
 }
 
 /// What a snapshot brings back.
@@ -79,6 +81,7 @@ impl Snapshot {
                 .collect(),
             zones: zones.to_vec(),
             softs: vec![],
+            gadgets: vec![],
         }
     }
 

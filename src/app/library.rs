@@ -65,11 +65,12 @@ impl App {
             self.s = self.s.clone().sanitized();
         }
         self.zones = sanitize_zones(sc.zones.clone());
-        let (objs, links, failed) = scene::instantiate(&sc, &mut self.world);
-        let n = objs.len();
-        self.objects = objs;
-        self.links = links;
-        (n, failed)
+        let made = scene::instantiate(&sc, &mut self.world);
+        let n = made.objects.len();
+        self.objects = made.objects;
+        self.links = made.links;
+        self.gadgets = made.gadgets;
+        (n, made.failed)
     }
 
     pub(super) fn open_example(&mut self, i: usize) {
@@ -159,7 +160,19 @@ impl App {
         self.objects.iter().position(|o| matches!(o.source, Source::Shape { shape: Shape::Circle, rgb } if rgb == gold))
     }
 
+    /// The challenge being played is a laser level: drawings are mirrors,
+    /// and the beam has to reach the goal.
+    pub(super) fn light_challenge(&self) -> bool {
+        self.challenge.as_ref().is_some_and(|r| {
+            r.def.scene.gadgets.iter().any(|g| g.spec.kind == crate::physics::gadgets::GadgetKind::Laser)
+        })
+    }
+
     pub(super) fn challenge_go(&mut self) {
+        if self.light_challenge() {
+            self.toasts.status("challenge", "The laser is always on  ·  draw mirrors to bend it into the target");
+            return;
+        }
         let Some(i) = self.ball() else { return };
         let Some(run) = self.challenge.as_mut().filter(|r| !r.started) else { return };
         run.started = true;
@@ -185,6 +198,23 @@ impl App {
     pub(super) fn update_challenge(&mut self, dt: f32) {
         let ball = self.ball();
         let goal = self.zones.iter().position(|z| z.kind == ZoneKind::Goal);
+        if self.light_challenge() {
+            // Laser level: the beam must stay on the target for a moment.
+            let lit = goal.is_some_and(|g| {
+                let z = &self.zones[g];
+                self.beams.iter().any(|b| b.crosses(z.min, z.max))
+            });
+            let Some(run) = self.challenge.as_mut().filter(|r| !r.won) else { return };
+            run.in_goal = if lit { run.in_goal + dt } else { 0.0 };
+            if run.in_goal >= WIN_HOLD {
+                let at = goal.map_or(Vec2::ZERO, |g| {
+                    let r = self.zones[g].rect();
+                    vec2(r.x + r.w / 2.0, r.y + r.h / 2.0)
+                });
+                self.challenge_won(at);
+            }
+            return;
+        }
         let Some(run) = self.challenge.as_mut() else { return };
         if !run.started || run.won || run.failed {
             return;
@@ -197,10 +227,19 @@ impl App {
         let inside = goal.is_some_and(|g| self.zones[g].contains(p));
         run.in_goal = if inside { run.in_goal + dt } else { 0.0 };
         if run.in_goal >= WIN_HOLD {
+            self.challenge_won(crate::physics::to_screen(p.x, p.y));
+        } else if get_time() - run.go_time > TIME_LIMIT && run.in_goal == 0.0 {
+            run.failed = true;
+        }
+    }
+
+    /// The challenge is solved (`at`: where to celebrate).
+    fn challenge_won(&mut self, at: Vec2) {
+        let Some(run) = self.challenge.as_mut() else { return };
+        {
             run.won = true;
             run.stars = custom::stars(1.0 - run.ink_left / run.def.ink.max(1.0));
             let (stars, def) = (run.stars, run.def.clone());
-            let at = crate::physics::to_screen(p.x, p.y);
             self.effects.confetti(at);
             self.effects.confetti(at + vec2(-120.0, 0.0));
             self.effects.confetti(at + vec2(120.0, 0.0));
@@ -223,8 +262,6 @@ impl App {
                 self.toasts.success(format!("Solved “{}”  ·  {shown}{new}{more}", def.name));
             }
             self.sound(crate::audio::sfx::Sound::Win, at, 0.8);
-        } else if get_time() - run.go_time > TIME_LIMIT && run.in_goal == 0.0 {
-            run.failed = true;
         }
     }
 
@@ -250,6 +287,7 @@ impl App {
             has_next,
             stars: run.stars,
             testing: def.origin == Origin::Test,
+            light: self.light_challenge(),
         })
     }
 

@@ -2,6 +2,7 @@
 
 use crate::background::BgMode;
 use crate::physics::borders::BorderMode;
+use crate::physics::gadgets::{Ammo, GadgetKind, Trigger};
 use crate::physics::links::LinkKind;
 use crate::physics::tools::Tool;
 use crate::physics::zones::ZoneKind;
@@ -52,6 +53,18 @@ pub struct Settings {
     pub link_kind: LinkKind,
     /// Motor speed (rad/s, positive = clockwise).
     pub motor_speed: f32,
+    /// New motors are driven with ← / → instead of turning by themselves.
+    pub motor_drive: bool,
+
+    /// What the Gadget tool places, and when it works.
+    pub gadget_kind: GadgetKind,
+    pub gadget_trigger: Trigger,
+    /// Thrust as a multiple of the object's weight.
+    pub thrust: f32,
+    /// Cannon muzzle speed (m/s), shots per second and ammunition.
+    pub cannon_speed: f32,
+    pub cannon_rate: f32,
+    pub cannon_ammo: Ammo,
 
     pub zone_kind: ZoneKind,
     /// Wind direction in degrees (0 = right, 90 = up).
@@ -137,6 +150,13 @@ impl Default for Settings {
             draw_pinned: false,
             link_kind: LinkKind::Rope,
             motor_speed: 4.0,
+            motor_drive: false,
+            gadget_kind: GadgetKind::Laser,
+            gadget_trigger: Trigger::Always,
+            thrust: 2.0,
+            cannon_speed: 14.0,
+            cannon_rate: 2.0,
+            cannon_ammo: Ammo::Ball,
             zone_kind: ZoneKind::Wind,
             zone_angle: 0.0,
             zone_strength: 14.0,
@@ -183,6 +203,9 @@ pub const WATER_LEVEL_RANGE: (f32, f32) = (0.05, 0.9);
 pub const WATER_DENSITY_RANGE: (f32, f32) = (0.3, 4.0);
 pub const MOTOR_SPEED_RANGE: (f32, f32) = (-12.0, 12.0);
 pub const ZONE_STRENGTH_RANGE: (f32, f32) = (2.0, 40.0);
+pub const THRUST_RANGE: (f32, f32) = (0.2, 8.0);
+pub const CANNON_SPEED_RANGE: (f32, f32) = (2.0, 40.0);
+pub const CANNON_RATE_RANGE: (f32, f32) = (0.3, 10.0);
 
 impl Settings {
     fn path() -> Option<std::path::PathBuf> {
@@ -234,6 +257,9 @@ impl Settings {
         self.water_level = clamp(self.water_level, WATER_LEVEL_RANGE, d.water_level);
         self.water_density = clamp(self.water_density, WATER_DENSITY_RANGE, d.water_density);
         self.motor_speed = clamp(self.motor_speed, MOTOR_SPEED_RANGE, d.motor_speed);
+        self.thrust = clamp(self.thrust, THRUST_RANGE, d.thrust);
+        self.cannon_speed = clamp(self.cannon_speed, CANNON_SPEED_RANGE, d.cannon_speed);
+        self.cannon_rate = clamp(self.cannon_rate, CANNON_RATE_RANGE, d.cannon_rate);
         self.world_size = self.world_size.clamp(1, 3);
         self.zone_strength = clamp(self.zone_strength, ZONE_STRENGTH_RANGE, d.zone_strength);
         self.zone_angle =

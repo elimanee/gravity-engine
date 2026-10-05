@@ -27,6 +27,8 @@ enum Kind {
     Smoke,
     /// Glowing speck that drifts up.
     Ember,
+    /// Exhaust of a thruster: a fast flame along its velocity.
+    Jet,
 }
 
 struct Particle {
@@ -215,6 +217,22 @@ impl Effects {
         }
     }
 
+    /// Thruster exhaust leaving `at` along `dir` (unit, screen space).
+    pub fn jet(&mut self, at: Vec2, dir: Vec2, size: f32) {
+        let n = vec2(-dir.y, dir.x);
+        self.push(Particle {
+            kind: Kind::Jet,
+            pos: at + n * gen_range(-2.0, 2.0),
+            vel: dir * gen_range(260.0, 460.0) + n * gen_range(-40.0, 40.0),
+            age: 0.0,
+            life: gen_range(0.12, 0.26),
+            size: size * gen_range(0.7, 1.1),
+            color: WHITE,
+            angle: 0.0,
+            spin: 0.0,
+        });
+    }
+
     /// A puff of smoke (grey `shade` 0 dark ‥ 1 light, e.g. steam).
     pub fn smoke(&mut self, at: Vec2, size: f32, shade: f32) {
         let g = 0.18 + shade * 0.7;
@@ -244,6 +262,7 @@ impl Effects {
                 Kind::Flame => (-260.0, 2.5),
                 Kind::Smoke => (-18.0, 1.2),
                 Kind::Ember => (-40.0, 1.0),
+                Kind::Jet => (-60.0, 3.0),
             };
             p.vel.y += g * dt;
             p.vel *= (-drag * dt).exp();
@@ -257,6 +276,7 @@ impl Effects {
                 Kind::Dust => p.size += dt * 9.0,
                 Kind::Smoke => p.size += dt * 14.0,
                 Kind::Flame => p.size = (p.size - dt * p.size * 1.2).max(0.5),
+                Kind::Jet => p.size = (p.size - dt * p.size * 2.5).max(0.5),
                 // Embers wander as they rise.
                 Kind::Ember => p.vel.x += (p.age * p.spin + p.angle).sin() * 90.0 * dt,
                 _ => {}
@@ -310,6 +330,12 @@ impl Effects {
                     draw_circle(p.pos.x, p.pos.y, p.size * 1.7, Color::new(1.0, 0.5, 0.1, 0.06 * fade));
                     draw_ellipse(p.pos.x, p.pos.y, p.size * 0.8, p.size * 1.35, lean, outer);
                     draw_ellipse(p.pos.x, p.pos.y + p.size * 0.25, p.size * 0.45, p.size * 0.75, lean, inner);
+                }
+                Kind::Jet => {
+                    let outer = Color::new(1.0, 0.5 - 0.3 * t, 0.12, 0.5 * fade);
+                    let inner = Color::new(1.0, 0.95 - 0.4 * t, 0.7 - 0.6 * t, 0.85 * fade);
+                    draw_circle(p.pos.x, p.pos.y, p.size, outer);
+                    draw_circle(p.pos.x, p.pos.y, p.size * 0.5, inner);
                 }
                 Kind::Ember => {
                     let flicker = 0.6 + 0.4 * (p.age * 30.0 + p.angle).sin().abs();

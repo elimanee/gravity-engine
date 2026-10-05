@@ -3,6 +3,7 @@
 pub mod borders;
 pub mod events;
 pub mod fracture;
+pub mod gadgets;
 pub mod grains;
 pub mod links;
 pub mod magnets;
@@ -178,6 +179,26 @@ impl PhysWorld {
         );
     }
 
+    /// The first collider along a ray from `from` in direction `dir` (unit),
+    /// within `max` m: its handle, the distance and the surface normal.
+    pub fn cast_ray(
+        &self,
+        from: Point<f32>,
+        dir: Vector<f32>,
+        max: f32,
+        filter: QueryFilter,
+    ) -> Option<(ColliderHandle, f32, Vector<f32>)> {
+        let ray = Ray::new(from, dir);
+        self.query
+            .cast_ray_and_get_normal(&self.bodies, &self.colliders, &ray, max, true, filter)
+            .map(|(c, hit)| (c, hit.time_of_impact, hit.normal))
+    }
+
+    /// Bring ray casts up to date without stepping (while paused).
+    pub fn refresh_queries(&mut self) {
+        self.query.update(&self.colliders);
+    }
+
     /// Impacts reported since the last call.
     pub fn take_impacts(&self) -> Vec<events::Impact> {
         self.events.drain()
@@ -198,12 +219,31 @@ impl PhysWorld {
         self.colliders.remove(h, &mut self.islands, &mut self.bodies, true);
     }
 
-    /// Clear user forces on every body (called once per frame before tools add theirs).
+    /// Clear user forces and torques on every body (called once per frame
+    /// before tools add theirs). Rapier keeps both until they are reset, and
+    /// forces applied off-centre add a torque.
     pub fn reset_forces(&mut self) {
         for (_, b) in self.bodies.iter_mut() {
-            if b.user_force() != vector![0.0, 0.0] {
+            if b.user_force() != vector![0.0, 0.0] || b.user_torque() != 0.0 {
                 b.reset_forces(false);
+                b.reset_torques(false);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn off_centre_forces_do_not_keep_turning_things() {
+        let mut w = PhysWorld::new(0.0, BorderMode::Portal, (1200.0, 1200.0));
+        let h = w.bodies.insert(RigidBodyBuilder::dynamic().translation(vector![10.0, 10.0]));
+        w.colliders.insert_with_parent(ColliderBuilder::cuboid(0.5, 0.5), h, &mut w.bodies);
+        w.bodies[h].add_force_at_point(vector![1.0, 0.0], point![10.0, 10.4], true);
+        w.reset_forces();
+        assert_eq!(w.bodies[h].user_force(), vector![0.0, 0.0]);
+        assert_eq!(w.bodies[h].user_torque(), 0.0, "the torque goes too");
     }
 }

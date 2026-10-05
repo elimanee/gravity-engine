@@ -124,6 +124,30 @@ pub const ALL: &[Challenge] = &[
         build: stop_sign,
         solution: &[&[(648.0, 400.0), (648.0, 478.0)]],
     },
+    Challenge {
+        id: "bankshot",
+        name: "Bank shot",
+        goal: "Your lines are mirrors: bounce the laser into the target",
+        ink: 200.0,
+        build: bank_shot,
+        solution: &[&[(362.0, 613.0), (438.0, 587.0)]],
+    },
+    Challenge {
+        id: "periscope",
+        name: "Periscope",
+        goal: "Around the shelf: up, then back to the left",
+        ink: 300.0,
+        build: periscope,
+        solution: &[&[(820.0, 670.0), (880.0, 610.0)], &[(820.0, 220.0), (880.0, 280.0)]],
+    },
+    Challenge {
+        id: "stainedglass",
+        name: "Stained glass",
+        goal: "Light passes through glass — get it under the roof",
+        ink: 320.0,
+        build: stained_glass,
+        solution: &[&[(570.0, 120.0), (630.0, 180.0)], &[(570.0, 600.0), (630.0, 660.0)]],
+    },
 ];
 
 const FLOOR: f32 = 690.0;
@@ -255,4 +279,25 @@ fn stop_sign(b: &mut Builder) {
     b.wall(&[(300.0, 360.0), (590.0, 470.0)], STONE);
     b.wall(&[(646.0, 484.0), (950.0, 560.0)], STONE);
     goal_cup(b, 540.0, 690.0, FLOOR, 110.0);
+}
+
+fn bank_shot(b: &mut Builder) {
+    b.laser((90.0, 600.0), 0.0);
+    b.wall(&[(560.0, 500.0), (560.0, FLOOR)], STONE);
+    b.zone(ZoneKind::Goal, (860.0, 90.0, 1040.0, 250.0), 0.0, 0.0);
+}
+
+fn periscope(b: &mut Builder) {
+    b.laser((90.0, 640.0), 0.0);
+    b.wall(&[(40.0, 400.0), (700.0, 400.0)], STONE);
+    b.zone(ZoneKind::Goal, (60.0, 180.0, 240.0, 330.0), 0.0, 0.0);
+}
+
+fn stained_glass(b: &mut Builder) {
+    b.laser((90.0, 150.0), 0.0);
+    b.stroke(&dense(&[(480.0, 70.0), (480.0, 290.0)]), 18.0, GLASS, true, Material::GLASS);
+    // A box over the goal, open only low on its left side.
+    b.wall(&[(700.0, 330.0), (700.0, 560.0)], STONE);
+    b.wall(&[(700.0, 330.0), (1060.0, 330.0)], STONE);
+    b.zone(ZoneKind::Goal, (720.0, 580.0, 1050.0, 680.0), 0.0, 0.0);
 }

@@ -24,6 +24,7 @@ pub enum Tool {
     Pour,
     Knife,
     Fire,
+    Gadget,
 }
 
 /// What the bottom-left tool card shows for a tool.
@@ -42,6 +43,8 @@ pub enum Card {
     Select,
     /// Sand / liquid / beads.
     Pour,
+    /// Laser / thruster / cannon, trigger and settings.
+    Gadget,
 }
 
 /// Field forces are expressed as accelerations for an object of this mass, so
@@ -66,6 +69,7 @@ impl Tool {
         Tool::Pour,
         Tool::Knife,
         Tool::Fire,
+        Tool::Gadget,
     ];
 
     /// Keyboard shortcut.
@@ -87,6 +91,7 @@ impl Tool {
             Tool::Pour => "K",
             Tool::Knife => "C",
             Tool::Fire => "Y",
+            Tool::Gadget => "L",
         }
     }
 
@@ -108,6 +113,7 @@ impl Tool {
             Tool::Pour => "Pour",
             Tool::Knife => "Knife",
             Tool::Fire => "Fire",
+            Tool::Gadget => "Gadgets",
         }
     }
 
@@ -129,6 +135,7 @@ impl Tool {
             Tool::Pour => "Pour sand, liquid and beads",
             Tool::Knife => "Cut ropes, joints and objects",
             Tool::Fire => "Set things on fire, melt ice",
+            Tool::Gadget => "Lasers, thrusters and cannons",
         }
     }
 
@@ -150,6 +157,7 @@ impl Tool {
             Tool::Pour => (232, 196, 120),
             Tool::Knife => (220, 235, 255),
             Tool::Fire => (255, 128, 40),
+            Tool::Gadget => (255, 96, 120),
         };
         Color::from_rgba(r, g, b, 255)
     }
@@ -172,6 +180,7 @@ impl Tool {
             Tool::Zone => Card::Zone,
             Tool::Select => Card::Select,
             Tool::Pour => Card::Pour,
+            Tool::Gadget => Card::Gadget,
             _ => Card::None,
         }
     }

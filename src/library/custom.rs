@@ -141,6 +141,7 @@ mod tests {
             objects: vec![],
             links: vec![],
             water: None,
+            gadgets: vec![],
             zones: vec![Zone {
                 kind: ZoneKind::Goal,
                 min: [1.0, 0.0],
