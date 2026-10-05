@@ -154,6 +154,9 @@ pub struct App {
     sky: Sky,
     /// Sonic (Shift+O) and the rings left to collect (world px).
     sonic: Option<sonic::SonicRun>,
+    /// The user's Sonic sprite sheet (loaded when he first appears).
+    sonic_sheet: Option<crate::sonic::sheet::Sheet>,
+    sonic_sheet_tried: bool,
     rings: Vec<Vec2>,
     /// The night's light map.
     lights: crate::lighting::Lights,
@@ -247,6 +250,8 @@ impl App {
             sky: Sky::default(),
             lights: Default::default(),
             sonic: None,
+            sonic_sheet: None,
+            sonic_sheet_tried: false,
             rings: Vec::new(),
             climate: Default::default(),
             pouring: false,
@@ -1110,6 +1115,7 @@ impl App {
                 let at = if self.paused { self.spawn_point(screen_width() / 2.0) } else { mouse };
                 self.toggle_sonic(at);
             }
+            Action::LoadSonicSheet => self.pick_sonic_sheet(),
             Action::ToggleNight => {
                 self.s.night = !self.s.night;
                 self.toasts.status(

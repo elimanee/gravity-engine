@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::audio::sfx::Sound;
+use crate::sonic::sheet::Sheet;
 use crate::sonic::{art, Event, Ground, Input as Pad, Sonic, FPS, MASS, SCALE};
 use rapier2d::prelude::{nalgebra, vector, ColliderHandle};
 
@@ -41,8 +42,42 @@ impl App {
     }
 
     pub(super) fn spawn_sonic(&mut self, at: Vec2) {
+        if !self.sonic_sheet_tried {
+            self.sonic_sheet_tried = true;
+            self.load_sonic_sheet();
+        }
         let sonic = Sonic::new(at);
         self.sonic = Some(SonicRun { sonic, acc: 0.0, jump: false, rings: 0, held: None });
+    }
+
+    /// (Re)load the sprite sheet from the Sonic folder.
+    fn load_sonic_sheet(&mut self) {
+        match Sheet::load() {
+            Ok(sheet) => self.sonic_sheet = sheet,
+            Err(e) => {
+                self.sonic_sheet = None;
+                self.toasts.warn(format!("Sonic sprite sheet not used: {e}"));
+            }
+        }
+    }
+
+    /// Pick a sprite sheet (PNG, with its sheet.json if it has one).
+    pub(super) fn pick_sonic_sheet(&mut self) {
+        let Some(png) = FileDialog::new().add_filter("Sprite sheet", &["png", "PNG"]).pick_file() else { return };
+        if let Err(e) = Sheet::install(&png) {
+            self.toasts.error(format!("Could not copy the sheet: {e}"));
+            return;
+        }
+        self.sonic_sheet_tried = true;
+        self.load_sonic_sheet();
+        if let Some(sheet) = &self.sonic_sheet {
+            let msg = format!("Sonic now uses {}", sheet.name);
+            self.toasts.success(msg);
+            if self.sonic.is_none() && self.challenge.is_none() {
+                let at = self.spawn_point(screen_width() / 2.0);
+                self.spawn_sonic(at);
+            }
+        }
     }
 
     /// What every collider is to Sonic.
@@ -214,7 +249,10 @@ impl App {
             art::ring(*r, t + k as f32 * 0.07, SCALE);
         }
         if let Some(run) = &self.sonic {
-            art::draw(&run.sonic);
+            match &self.sonic_sheet {
+                Some(sheet) => sheet.draw(&run.sonic),
+                None => art::draw(&run.sonic),
+            }
         }
     }
 

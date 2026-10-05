@@ -11,6 +11,7 @@ described on the [releases page](https://github.com/elimanee/gravity-engine/rele
 - Sonic pushes objects (curled up he bowls them over), stands and rides on them, bounces off springs (any bouncy surface), slides on ice, is blown away by bombs and can be thrown with the Spring tool. The camera follows him
 - Rings to collect, with a counter, and the example scene *Sonic loop*. Sonic and the rings are saved in scenes
 - Sounds for jumping, the spin dash, braking, springs and rings
+- **Your own Sonic sprite sheet** (*Sonic sprites…* in the settings, or a PNG in `~/.config/gravity_engine/sonic/`): Triangly's Sonic 1 sheet is recognised as it is, other sheets are cut up by a `sheet.json` (see the README). None ships with the program
 
 ### Changed
 - While Sonic is in the scene, `Space` is his jump button and `←` does not rewind (`Shift+←` still does)

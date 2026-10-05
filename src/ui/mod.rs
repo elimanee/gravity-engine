@@ -125,6 +125,8 @@ pub enum Action {
     ToggleNight,
     /// Sonic joins the scene (or leaves it).
     ToggleSonic,
+    /// Pick a sprite sheet for Sonic.
+    LoadSonicSheet,
     Undo,
     Redo,
     ToggleRecording,

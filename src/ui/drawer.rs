@@ -75,7 +75,8 @@ const AUDIO_BUTTONS: &[(&str, Action)] = &[("Load…", Action::LoadAudio), ("Pla
 const ADD_BUTTONS: &[(&str, Action)] = &[("Images…", Action::AddImages), ("Shapes", Action::ToggleSpawner)];
 const RAGDOLL_BUTTONS: &[(&str, Action)] =
     &[("Ragdoll (O)", Action::SpawnRagdoll), ("Jelly (U)", Action::SpawnJelly), ("Cloth", Action::SpawnCloth)];
-const SONIC_BUTTONS: &[(&str, Action)] = &[("Sonic  (Shift+O)", Action::ToggleSonic)];
+const SONIC_BUTTONS: &[(&str, Action)] =
+    &[("Sonic  (Shift+O)", Action::ToggleSonic), ("Sonic sprites…", Action::LoadSonicSheet)];
 const WEB_BUTTONS: &[(&str, Action)] = &[("88×31 buttons", Action::FetchButtons), ("Game logos", Action::FetchLogos)];
 const SCENE_BUTTONS: &[(&str, Action)] = &[("Save…", Action::SaveScene), ("Open…", Action::LoadScene)];
 const VIS_BUTTONS: &[(&str, Action)] = &[("Spawn visualizer  (Shift+V)", Action::SpawnVisualizer)];

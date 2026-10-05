@@ -19,7 +19,27 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Playable Sonic** (`Shift+O`, or *Sonic* in the settings) — Sonic joins the scene and is played with the keyboard: `←` `→` run, `↓` crouches or rolls, `Space` jumps (hold for higher), `↓` + `Space` charges a spin dash, `↑` looks up. He moves the way he does in the Mega Drive games, after the [Sonic Physics Guide](https://info.sonicretro.org/Sonic_Physics_Guide): acceleration, braking and friction, slopes that slow him down or speed him up, floor sensors that follow walls and ceilings (he runs round loops), slipping off when too slow, rolling, variable jump height, air drag, and slower physics underwater.
 - He pushes objects (curled up, he bowls them over), stands and rides on them, weighs down seesaws, bounces off bouncy surfaces like springs, slides on ice, is blown away by bombs and can be picked up and thrown with the Spring tool. The camera follows him in a big world. `Shift+Space` pauses while he is around.
 - **Rings** to collect, with a counter; example scene *Sonic loop* (a loop, a spring, a ramp and crates). Sonic and the rings are saved in scene files.
-- Sonic is drawn with shapes: no graphics or sounds from the games are included.
+- Sonic is drawn with shapes: no graphics or sounds from the games are included. You can give him **your own sprite sheet** (see below).
+
+### Sonic sprite sheets
+
+*Sonic sprites…* in the settings (or putting a PNG in `~/.config/gravity_engine/sonic/`) makes Sonic use a sprite sheet you provide. Nothing is copied into the program: the sheet stays on your computer. Triangly's Sonic 1 sheet from The Spriters Resource (690 × 1558) is recognised as it is. For any other sheet, put a `sheet.json` next to it:
+
+```json
+{
+  "cell": [66, 66],
+  "transparent": [[13, 72, 7], [67, 153, 49]],
+  "scale": 1.0,
+  "animations": {
+    "idle": [[24, 243]],
+    "walk": [[24, 334], [94, 334], [164, 334]],
+    "run": [[24, 516], [94, 516]],
+    "roll": [[24, 607], [94, 607]]
+  }
+}
+```
+
+Each frame is the top-left corner of a `cell`-sized box whose centre is Sonic's centre, facing right; `transparent` lists background colours to cut out and `scale` is sheet pixels per original game pixel. Animations: `idle` (required), `bored`, `walk`, `run`, `roll` (also the spin dash), `skid`, `push`, `crouch`, `look_up`, `spring`; missing ones fall back to `walk` or `idle`. Frames play at the games' speed (held for 8 − speed frames, 4 − speed curled up) and turn with the ground.
 
 ## What's new in 2.9
 

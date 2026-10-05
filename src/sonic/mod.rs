@@ -11,6 +11,7 @@
 //! larger in the world.
 
 pub mod art;
+pub mod sheet;
 
 use crate::config::PPM;
 use crate::physics::{to_phys, to_screen, PhysWorld};
@@ -169,6 +170,10 @@ pub struct Sonic {
     /// Animation clocks: running legs, and the ball's spin.
     pub stride: f32,
     pub spin: f32,
+    /// Sprite animation clock (frames of the current animation) and
+    /// frames spent standing idle.
+    pub anim: f32,
+    pub idle: u32,
 }
 
 /// Unit vector "down" for his feet in each ground mode.
@@ -223,6 +228,8 @@ impl Sonic {
             spawn: at,
             stride: 0.0,
             spin: 0.0,
+            anim: 0.0,
+            idle: 0,
         }
     }
 
@@ -334,6 +341,18 @@ impl Sonic {
             self.air_frame(world, env, input, c, grv, &mut events);
         }
         self.stride += self.gsp.abs().max(0.6) * 0.07;
+        // The games hold each frame for (8 − speed) frames, (4 − speed) curled up.
+        let speed = if self.grounded { self.gsp.abs() } else { self.xsp.abs() };
+        let hold = if self.spindash.is_some() {
+            0.0
+        } else if self.is_ball() {
+            (4.0 - speed).max(0.0)
+        } else {
+            (8.0 - speed).max(0.0)
+        };
+        self.anim += 1.0 / (hold + 1.0);
+        let still = self.grounded && self.gsp == 0.0 && !self.crouching && !self.looking_up && !self.is_ball();
+        self.idle = if still { self.idle + 1 } else { 0 };
         self.spin += if self.grounded { self.gsp } else { self.xsp.abs().max(4.0) * self.facing } * 0.12;
         events
     }
