@@ -1,4 +1,4 @@
-//! The Gadget tool (lasers, thrusters, cannons) and what gadgets do each
+//! The Gadget tool (lasers, thrusters, cannons, lamps, hooks) and what gadgets do each
 //! frame, plus motors driven with the arrow keys.
 
 use super::fire::point_gap_px;
@@ -53,6 +53,8 @@ impl App {
             GadgetKind::Laser => vec2(1.0, 0.0),
             GadgetKind::Thruster => vec2(0.0, -1.0),
             GadgetKind::Cannon => vec2(0.7, -0.7).normalize(),
+            GadgetKind::Lamp => vec2(0.0, 1.0),
+            GadgetKind::Grapple => vec2(0.0, -1.0),
         }
     }
 
@@ -70,24 +72,40 @@ impl App {
                 ([x, y], world_angle)
             }
         };
+        let power = match kind {
+            GadgetKind::Thruster => self.s.thrust,
+            GadgetKind::Lamp => self.s.lamp_reach / PPM,
+            _ => self.s.cannon_speed,
+        };
+        let spread =
+            if kind == GadgetKind::Lamp && self.s.lamp_spot { gadgets::SPOT_SPREAD } else { std::f32::consts::PI };
+        let colour = gadgets::LAMP_COLOURS[self.s.lamp_colour.min(gadgets::LAMP_COLOURS.len() - 1)];
         let spec = GadgetSpec {
             kind,
             trigger: self.s.gadget_trigger,
             ammo: self.s.cannon_ammo,
-            power: if kind == GadgetKind::Thruster { self.s.thrust } else { self.s.cannon_speed },
+            power,
             rate: self.s.cannon_rate,
             at,
             angle,
+            spread,
+            colour,
         };
         self.record(kind.label());
         self.gadgets.push(Gadget::new(spec, host.map(|(b, _)| b)));
         self.sound(Sound::Snap, drag.start, 0.5);
         let what = match (kind, host.is_some()) {
             (GadgetKind::Thruster, false) => "Fan".to_string(),
+            (GadgetKind::Grapple, false) => "Winch".to_string(),
+            (GadgetKind::Grapple, true) => "Grappling hook".to_string(),
             _ => kind.label().to_string(),
         };
-        self.toasts
-            .status("gadget", format!("{what} added  ·  works {}  ·  right-click it to remove", spec.trigger.label()));
+        let msg = if kind == GadgetKind::Lamp && !self.s.night {
+            format!("{what} added  ·  its light shows at night (Shift+T)")
+        } else {
+            format!("{what} added  ·  works {}  ·  right-click it to remove", spec.trigger.label())
+        };
+        self.toasts.status("gadget", msg);
     }
 
     /// Index of the gadget under the pointer.
@@ -105,6 +123,9 @@ impl App {
     pub(super) fn remove_gadget(&mut self, i: usize) {
         self.record("Remove gadget");
         let g = self.gadgets.remove(i);
+        if let Some(l) = &g.hook {
+            l.remove(&mut self.world);
+        }
         self.toasts.status("gadget", format!("{} removed", g.spec.kind.label()));
     }
 
@@ -130,7 +151,7 @@ impl App {
     /// Once per frame before the physics step: which gadgets work, thrust,
     /// cannon shots, laser beams and driven motors. `dt` is the simulated
     /// time (0 when paused).
-    pub(super) fn update_gadgets(&mut self, dt: f32, running: bool) {
+    pub(super) fn update_gadgets(&mut self, dt: f32, running: bool, mouse: Vec2) {
         let world = &self.world;
         self.gadgets.retain(|g| g.host.is_none_or(|h| world.bodies.contains(h)));
         let beat = running && self.audio.analyzer.beat_now;
@@ -161,6 +182,7 @@ impl App {
             }
             self.run_thrusters(dt);
             self.run_cannons(dt);
+            self.run_grapples(dt, mouse);
         }
         self.trace_beams(dt, running);
     }
@@ -393,10 +415,13 @@ impl App {
         for beam in &self.beams {
             gadgets::draw_beam(beam, t);
         }
-        for g in &self.gadgets {
+        self.draw_hooks();
+        for g in self.gadgets.iter().filter(|g| g.spec.kind != GadgetKind::Lamp) {
             let Some((p, d)) = g.pose(&self.world) else { continue };
-            gadgets::draw_gadget(g.spec.kind, to_screen(p.x, p.y), screen_dir(d), g.on, t);
+            let on = if g.spec.kind == GadgetKind::Grapple { g.hook.is_some() } else { g.on };
+            gadgets::draw_gadget(g.spec.kind, to_screen(p.x, p.y), screen_dir(d), on, t);
         }
+        self.draw_lamps();
     }
 
     /// The Gadget tool: its aim while dragging, or what it would place.
@@ -407,14 +432,22 @@ impl App {
             Some(drag) => {
                 let aim = m - drag.start;
                 let dir = if aim.length() > 12.0 { aim.normalize() } else { Self::default_aim(kind) };
-                gadgets::draw_gadget(kind, drag.start, dir, false, get_time() as f32);
+                if kind == GadgetKind::Lamp {
+                    super::night::cursor_lamp(&self.s, drag.start, dir);
+                } else {
+                    gadgets::draw_gadget(kind, drag.start, dir, false, get_time() as f32);
+                }
                 let end = drag.start + dir * 70.0;
                 draw_line(drag.start.x, drag.start.y, end.x, end.y, 1.5, theme::alpha(c, 0.8));
                 let n = vec2(-dir.y, dir.x);
                 draw_triangle(end + dir * 8.0, end + n * 5.0, end - n * 5.0, theme::alpha(c, 0.8));
             }
             None => {
-                gadgets::draw_gadget(kind, m, Self::default_aim(kind), false, get_time() as f32);
+                if kind == GadgetKind::Lamp {
+                    super::night::cursor_lamp(&self.s, m, Self::default_aim(kind));
+                } else {
+                    gadgets::draw_gadget(kind, m, Self::default_aim(kind), false, get_time() as f32);
+                }
                 icons::trigger(self.s.gadget_trigger, m + vec2(20.0, -18.0), 14.0, theme::alpha(c, 0.9));
             }
         }

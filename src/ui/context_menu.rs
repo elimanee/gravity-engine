@@ -23,12 +23,13 @@ enum Item {
     Pin,
     Jelly,
     Flag,
+    Planet,
     Unlink,
     Delete,
 }
 
 impl Item {
-    fn label(self, pinned: bool) -> &'static str {
+    fn label(self, pinned: bool, planet: bool) -> &'static str {
         match self {
             Item::Resize => "Resize",
             Item::Duplicate => "Duplicate",
@@ -39,6 +40,8 @@ impl Item {
             Item::Pin => "Pin in place",
             Item::Jelly => "Make it jelly   (U)",
             Item::Flag => "Hang it as a flag",
+            Item::Planet if planet => "No longer a planet",
+            Item::Planet => "Make it a planet",
             Item::Delete => "Delete",
         }
     }
@@ -53,6 +56,7 @@ pub struct ContextMenu {
     pub target: Option<RigidBodyHandle>,
     title: String,
     pinned: bool,
+    planet: bool,
     items: Vec<Item>,
     sub: Option<usize>,
 }
@@ -65,6 +69,7 @@ impl Default for ContextMenu {
             target: None,
             title: String::new(),
             pinned: false,
+            planet: false,
             items: vec![],
             sub: None,
         }
@@ -72,9 +77,18 @@ impl Default for ContextMenu {
 }
 
 impl ContextMenu {
-    pub fn open(&mut self, at: Vec2, target: RigidBodyHandle, title: String, pinned: bool, linked: bool) {
-        self.items =
-            vec![Item::Resize, Item::Duplicate, Item::SizeAll, Item::Properties, Item::Pin, Item::Jelly, Item::Flag];
+    pub fn open(&mut self, at: Vec2, target: RigidBodyHandle, title: String, flags: (bool, bool, bool)) {
+        let (pinned, linked, planet) = flags;
+        self.items = vec![
+            Item::Resize,
+            Item::Duplicate,
+            Item::SizeAll,
+            Item::Properties,
+            Item::Pin,
+            Item::Jelly,
+            Item::Flag,
+            Item::Planet,
+        ];
         if linked {
             self.items.push(Item::Unlink);
         }
@@ -85,6 +99,7 @@ impl ContextMenu {
         self.target = Some(target);
         self.title = ellipsize(&title, 24);
         self.pinned = pinned;
+        self.planet = planet;
         self.sub = None;
         self.fader.open = true;
     }
@@ -168,6 +183,7 @@ impl ContextMenu {
                         Item::Unlink => Some(ObjectCmd::Unlink),
                         Item::Jelly => Some(ObjectCmd::Jelly),
                         Item::Flag => Some(ObjectCmd::Flag),
+                        Item::Planet => Some(ObjectCmd::Planet),
                         Item::Delete => Some(ObjectCmd::Delete),
                         _ => None,
                     };
@@ -214,7 +230,7 @@ impl ContextMenu {
             } else {
                 TEXT_DIM
             };
-            text_left(r, 10.0, item.label(self.pinned), FONT, fade(c, f));
+            text_left(r, 10.0, item.label(self.pinned, self.planet), FONT, fade(c, f));
             if item.has_sub() {
                 let (ax, ay) = (r.x + r.w - 14.0, r.y + r.h / 2.0);
                 draw_triangle(vec2(ax, ay - 4.0), vec2(ax, ay + 4.0), vec2(ax + 5.0, ay), fade(c, f));

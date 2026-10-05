@@ -8,6 +8,7 @@ pub mod grains;
 pub mod links;
 pub mod magnets;
 pub mod object;
+pub mod planets;
 pub mod soft;
 pub mod tools;
 pub mod water;
@@ -17,13 +18,17 @@ use crate::config::{BOUNCE, FRICTION, PHYSICS_DT, PPM, WALL_T};
 use borders::BorderMode;
 use macroquad::prelude::{vec2, Vec2};
 use rapier2d::prelude::*;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::cell::Cell;
 
-/// Height of the world in pixels (720 until a world is created).
-static WORLD_H: AtomicU32 = AtomicU32::new(0x4434_0000);
+thread_local! {
+    /// Height of the world in pixels (720 until a world is created). Per
+    /// thread: the world lives on the main thread, and tests running side
+    /// by side each have their own.
+    static WORLD_H: Cell<f32> = const { Cell::new(720.0) };
+}
 
 fn world_height() -> f32 {
-    f32::from_bits(WORLD_H.load(Ordering::Relaxed))
+    WORLD_H.with(Cell::get)
 }
 
 /// World pixels (y down, see `camera`) → physics metres (y up).
@@ -82,14 +87,14 @@ impl PhysWorld {
             border,
             arena: (arena_px.0 / PPM, arena_px.1 / PPM),
         };
-        WORLD_H.store(arena_px.1.to_bits(), Ordering::Relaxed);
+        WORLD_H.with(|h| h.set(arena_px.1));
         w.rebuild_walls();
         w
     }
 
     pub fn resize(&mut self, arena_px: (f32, f32)) {
         self.arena = (arena_px.0 / PPM, arena_px.1 / PPM);
-        WORLD_H.store(arena_px.1.to_bits(), Ordering::Relaxed);
+        WORLD_H.with(|h| h.set(arena_px.1));
         self.rebuild_walls();
     }
 

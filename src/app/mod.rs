@@ -14,6 +14,7 @@ use crate::physics::grains::Grains;
 use crate::physics::links::{self, Link, LinkKind};
 use crate::physics::magnets;
 use crate::physics::object::{object_at, objects_at, Material, Object, Placement, Source, Visual};
+use crate::physics::planets;
 use crate::physics::tools::{self, Grab, Tool};
 use crate::physics::water::{self, Water};
 use crate::physics::zones::{self, PortalState, Zone};
@@ -40,6 +41,7 @@ use crate::ui::tool_card::ToolCard;
 use crate::ui::tool_picker::ToolPicker;
 use crate::ui::visualizer::{self, VisStyle};
 use crate::ui::{debug, icons, theme, Action, Input, ObjectCmd, SelectionCmd};
+use crate::weather::{Sky, Weather};
 use crate::window_tracker::WindowTracker;
 use macroquad::prelude::*;
 use rapier2d::prelude::{Point, RigidBodyHandle};
@@ -51,10 +53,12 @@ mod build;
 mod editor;
 mod fire;
 mod gadgets;
+mod grapple;
 mod impacts;
 mod juice;
 mod knife;
 mod library;
+mod night;
 mod player;
 mod player_body;
 mod ragdoll;
@@ -62,6 +66,7 @@ mod rewind;
 mod select;
 mod soft;
 mod verify;
+mod weather;
 
 const TIME_STEPS: &[f32] = &[0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
 const SPAWN_REPEAT: f32 = 0.11;
@@ -135,7 +140,7 @@ pub struct App {
     fire: fire::Fire,
     /// Jellies and cloths.
     softs: Vec<crate::physics::soft::Soft>,
-    /// Lasers, thrusters and cannons, a Gadget-tool drag, this frame's
+    /// Gadgets (lasers, thrusters, cannons, lamps, hooks), a Gadget-tool drag, this frame's
     /// laser beams, and the colour of glass the beams cross.
     gadgets: Vec<crate::physics::gadgets::Gadget>,
     gadget_drag: Option<gadgets::GadgetDrag>,
@@ -144,6 +149,11 @@ pub struct App {
     /// Seconds until the thrusters' roar is played again.
     thrust_sound: f32,
     grains: Grains,
+    /// Rain, snow and lightning: their look, and what they do.
+    sky: Sky,
+    /// The night's light map.
+    lights: crate::lighting::Lights,
+    climate: weather::Climate,
     /// The Pour tool is pouring.
     pouring: bool,
     /// Seconds until the next pouring sound.
@@ -230,6 +240,9 @@ impl App {
             glass_tints: HashMap::new(),
             thrust_sound: 0.0,
             grains: Grains::default(),
+            sky: Sky::default(),
+            lights: Default::default(),
+            climate: Default::default(),
             pouring: false,
             pour_sound: 0.0,
             select_drag: None,
@@ -517,7 +530,7 @@ impl App {
             }
         }
         if pressed(KeyCode::H) {
-            actions.push(Action::ToggleWater);
+            actions.push(if shift { Action::CycleWeather(1) } else { Action::ToggleWater });
         }
         if pressed(KeyCode::X) {
             actions.push(if shift { Action::TogglePlayerPhysics } else { Action::TogglePlayer });
@@ -551,7 +564,9 @@ impl App {
             self.s.window_shake = !self.s.window_shake;
             self.toasts.status("shake", format!("Window shake {}", if self.s.window_shake { "on" } else { "off" }));
         }
-        if pressed(KeyCode::T) {
+        if pressed(KeyCode::T) && shift {
+            actions.push(Action::ToggleNight);
+        } else if pressed(KeyCode::T) {
             self.s.trails = !self.s.trails;
             self.toasts.status("trails", format!("Trails {}", if self.s.trails { "on" } else { "off" }));
         }
@@ -880,7 +895,8 @@ impl App {
             } else if let Some(i) = object_at(&self.objects, &self.world, m.x, m.y) {
                 let o = &self.objects[i];
                 let linked = self.links.iter().any(|l| l.involves(o.body));
-                self.menu.open(input.mouse, o.body, o.name(), o.pinned, linked);
+                let flags = (o.pinned, linked, o.material.planet > 0.0);
+                self.menu.open(input.mouse, o.body, o.name(), flags);
             }
         }
     }
@@ -1065,6 +1081,23 @@ impl App {
                     if self.s.water { "Water on  ·  level and density in settings" } else { "Water off" },
                 );
             }
+            Action::CycleWeather(d) => {
+                self.s.weather = self.s.weather.cycle(d);
+                let hint = match self.s.weather {
+                    Weather::Clear => "Clear sky",
+                    Weather::Rain => "Rain  ·  it puts out fires and fills containers",
+                    Weather::Snow => "Snow  ·  it settles, and fire melts it",
+                    Weather::Storm => "Storm  ·  gusts of wind and lightning that starts fires",
+                };
+                self.toasts.status("weather", hint);
+            }
+            Action::ToggleNight => {
+                self.s.night = !self.s.night;
+                self.toasts.status(
+                    "night",
+                    if self.s.night { "Night  ·  lamps, fire and lasers light the scene" } else { "Day" },
+                );
+            }
             Action::Undo | Action::Redo if self.challenge.is_some() => {
                 self.toasts.status("undo", "No undo in challenges  ·  press R to start over");
             }
@@ -1156,6 +1189,21 @@ impl App {
         }
     }
 
+    /// A soft glow around planets, and a slow ripple of their pull.
+    fn draw_planet_halos(&self) {
+        let t = get_time() as f32;
+        for o in self.objects.iter().filter(|o| o.material.planet > 0.0) {
+            let (p, _) = o.screen_pos(&self.world);
+            let r = o.size.x.min(o.size.y) / 2.0;
+            let k = (o.material.planet / 30.0).clamp(0.25, 1.0);
+            for i in 1..=4 {
+                draw_circle(p.x, p.y, r * (1.0 + i as f32 * 0.3), Color::new(0.45, 0.6, 1.0, 0.035 * k));
+            }
+            let u = (t * 0.4 + o.size.x * 0.01) % 1.0;
+            draw_circle_lines(p.x, p.y, r * (1.2 + u * 1.8), 1.0, Color::new(0.6, 0.75, 1.0, 0.3 * (1.0 - u) * k));
+        }
+    }
+
     fn spawn_visualizer(&mut self, at: Vec2) {
         let placement = Placement { pos_px: (at.x, at.y), size_px: Some((240.0, 130.0)), ..Default::default() };
         if let Some(o) = Object::load(&mut self.world, Source::Visualizer, placement) {
@@ -1177,6 +1225,7 @@ impl App {
             ObjectCmd::Unlink => Some("Detach links"),
             ObjectCmd::Jelly => Some("Make jelly"),
             ObjectCmd::Flag => Some("Make flag"),
+            ObjectCmd::Planet => Some("Planet"),
             ObjectCmd::Properties => None,
         };
         if let Some(label) = label {
@@ -1186,6 +1235,22 @@ impl App {
             ObjectCmd::Delete => self.remove_object(i),
             ObjectCmd::Jelly => self.make_jelly(i),
             ObjectCmd::Flag => self.make_flag(i),
+            ObjectCmd::Planet => {
+                let o = &mut self.objects[i];
+                if o.material.planet > 0.0 {
+                    let m = Material { planet: 0.0, gravity: 1.0, ..o.material };
+                    o.set_material(&mut self.world, m);
+                    self.toasts.info("No longer a planet");
+                } else {
+                    // Pinned, it stays put for things to orbit (unpin it to let it move).
+                    let m = Material { planet: Material::PLANET.planet, gravity: 0.0, ..o.material };
+                    o.set_material(&mut self.world, m);
+                    if !o.pinned {
+                        o.set_pinned(&mut self.world, true);
+                    }
+                    self.toasts.info("Planet  ·  things fall toward it  ·  its pull is in Properties (I)");
+                }
+            }
             ObjectCmd::Properties => {
                 let o = &self.objects[i];
                 let (p, _) = o.screen_pos(&self.world);
@@ -1543,6 +1608,8 @@ impl App {
             self.s.water.then_some(scene::SceneWater { level: self.s.water_level, density: self.s.water_density });
         let mut scene = scene::capture(&self.world, &self.objects, &self.links, &self.zones, water);
         scene.gadgets = scene::capture_gadgets(&self.objects, &self.gadgets);
+        scene.night = Some(self.s.night);
+        scene.weather = Some(self.s.weather);
         match scene::write(&path, &scene) {
             Ok(()) => self.toasts.success(format!(
                 "Saved {} objects to {}",
@@ -1618,8 +1685,13 @@ impl App {
             self.world.border.apply_forces(&mut self.world, &handles);
             links::apply_springs(&self.links, &mut self.world);
             self.soft_forces();
-            self.update_gadgets(step, true);
+            self.update_gadgets(step, true, mouse);
             magnets::apply(&mut self.world, &self.objects);
+            let wells = planets::wells(&self.world, &self.objects);
+            if !wells.is_empty() {
+                let bodies = self.dynamic_bodies();
+                planets::apply(&mut self.world, &wells, &bodies);
+            }
             let rigid = self.rigid_bodies();
             let mut zoned = rigid.clone();
             zoned.extend(self.player_body.as_ref().map(|p| p.body));
@@ -1681,12 +1753,13 @@ impl App {
             }
         } else {
             // Paused: beams still follow what is moved around.
-            self.update_gadgets(0.0, false);
+            self.update_gadgets(0.0, false, mouse);
         }
         let dt_ms = dt * 1000.0 * if self.paused { 0.0 } else { 1.0 };
         for o in &mut self.objects {
             o.update_anim(dt_ms);
         }
+        self.update_weather(dt, running, step, mouse);
         self.blasts.retain(Blast::alive);
         let floor = if self.world.border.walls().floor { self.arena().1 - WALL_T * PPM } else { f32::MAX };
         let gravity = -self.world.gravity.y * PPM;
@@ -1741,6 +1814,7 @@ impl App {
         for s in &self.softs {
             s.draw(&self.world);
         }
+        self.draw_planet_halos();
         for o in &self.objects {
             if o.is_visualizer() {
                 let (p, angle) = o.screen_pos(&self.world);
@@ -1771,6 +1845,9 @@ impl App {
             if o.material.conveyor != 0.0 {
                 badges.push(2);
             }
+            if o.material.planet > 0.0 {
+                badges.push(3);
+            }
             let n = badges.len() as f32;
             for (k, badge) in badges.into_iter().enumerate() {
                 let c = p + vec2((k as f32 - (n - 1.0) / 2.0) * 20.0, 0.0);
@@ -1778,6 +1855,7 @@ impl App {
                 match badge {
                     0 => icons::pin(c, 14.0, theme::WARNING),
                     1 => icons::magnet(c + vec2(0.0, 2.0), 14.0, 1.0, o.material.magnet < 0.0),
+                    3 => icons::planet(c, 14.0, theme::alpha(Color::new(0.55, 0.7, 1.0, 1.0), 0.9)),
                     _ => icons::conveyor(c, 14.0, o.material.conveyor, t, 1.0),
                 }
             }
@@ -1787,6 +1865,7 @@ impl App {
             self.water.draw(&self.world, rest, aw, ah);
         }
         self.effects.draw();
+        self.sky.draw();
         for target in [self.menu.target, self.inspector.target].into_iter().flatten() {
             if let Some(o) = self.objects.iter().find(|o| o.body == target) {
                 let c = o.corners(&self.world);
@@ -1798,6 +1877,7 @@ impl App {
         }
 
         camera::end_world();
+        self.draw_night(m);
 
         if self.screenshot {
             self.screenshot = false;
@@ -1864,6 +1944,7 @@ impl App {
         self.draw_knife();
         camera::end_world();
         self.draw_slow_vignette();
+        self.sky.draw_flash();
 
         // Interface, in screen pixels.
         let (m, world_mouse) = (input.mouse, m);

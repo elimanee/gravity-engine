@@ -63,6 +63,8 @@ impl Builder {
                 water: None,
                 zones: vec![],
                 gadgets: vec![],
+                night: None,
+                weather: None,
             },
         }
     }

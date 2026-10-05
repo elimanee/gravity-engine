@@ -4,6 +4,26 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [2.9.0]
+
+### Added
+- **Planets**: any object can have its own gravity. Right-click → *Make it a planet*, or the *Planet gravity* slider and *Planet* preset in the properties panel; everything nearby falls towards it and can orbit it. Example scene *Solar system*
+- **Weather** (`Shift+H`, or *Weather* in the settings): **rain** falls as real drops that fill containers and put out fires under the open sky; **snow** settles in drifts and melts near fire (also a new grain for the Pour tool); a **storm** brings gusts of wind, heavy rain and **lightning** that strikes the highest thing around and sets it on fire, with thunder. No weather in challenges
+- **Night** (`Shift+T`, or *Night* and *Darkness* in the settings): the scene goes dark and only light shows it. Fire, embers, sparks, laser beams, thrusters, hot objects and lightning glow
+- **Lamps** (Gadget tool): a bulb that lights all round or a spotlight you aim, in six colours and with an adjustable reach. Objects cast real shadows. Like the other gadgets, a lamp can be on all the time, on an arrow key or on the beat
+- **Grappling hook** (Gadget tool): put it on an object and hold its arrow key — the hook shoots at the pointer, catches what it hits and reels in; let go of the key to let go. Set to *always*, it hangs on where it catches; fixed in the world, it is a winch that pulls things in. The knife cuts its rope
+- Example scenes *Night lights* and *Grapple swing*; night and weather are saved in scene files
+
+### Changed
+- The Gadget tool has five gadgets: laser, thruster, cannon, lamp and hook
+
+### Fixed
+- Unit tests could fail now and then when run side by side
+
+### Downloads
+- `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
+- `gravity_engine-windows-x86_64.zip` — Windows build: unzip and run `gravity_engine.exe` (keep the DLLs next to it)
+
 ## [2.8.0]
 
 ### Added

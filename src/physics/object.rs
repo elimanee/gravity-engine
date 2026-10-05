@@ -165,6 +165,8 @@ pub struct Material {
     pub flammable: bool,
     /// Reflects laser beams.
     pub mirror: bool,
+    /// Planet: gravity at its surface (m/s²) pulling everything else in; 0: none.
+    pub planet: f32,
 }
 
 impl Default for Material {
@@ -184,6 +186,7 @@ impl Material {
         conveyor: 0.0,
         flammable: true,
         mirror: false,
+        planet: 0.0,
     };
     pub const RUBBER: Material = Material { bounce: 0.92, friction: 0.9, ..Material::DEFAULT };
     pub const ICE: Material = Material { bounce: 0.05, friction: 0.0, flammable: false, ..Material::DEFAULT };
@@ -192,6 +195,9 @@ impl Material {
         Material { bounce: 0.2, friction: 0.4, breakable: true, strength: 6.0, flammable: false, ..Material::DEFAULT };
     pub const MAGNET: Material = Material { magnet: 1.0, friction: 0.8, flammable: false, ..Material::DEFAULT };
 
+    /// A planet: its own gravity, unaffected by the world's.
+    pub const PLANET: Material =
+        Material { planet: 12.0, gravity: 0.0, bounce: 0.2, friction: 0.9, flammable: false, ..Material::DEFAULT };
     pub const MIRROR: Material =
         Material { bounce: 0.3, friction: 0.3, flammable: false, mirror: true, ..Material::DEFAULT };
 

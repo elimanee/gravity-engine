@@ -18,16 +18,19 @@ pub enum GrainKind {
     Sand,
     Liquid,
     Beads,
+    /// Light flakes that settle in drifts (and melt near fire).
+    Snow,
 }
 
 impl GrainKind {
-    pub const ALL: &'static [GrainKind] = &[GrainKind::Sand, GrainKind::Liquid, GrainKind::Beads];
+    pub const ALL: &'static [GrainKind] = &[GrainKind::Sand, GrainKind::Liquid, GrainKind::Beads, GrainKind::Snow];
 
     pub fn label(self) -> &'static str {
         match self {
             GrainKind::Sand => "Sand",
             GrainKind::Liquid => "Liquid",
             GrainKind::Beads => "Beads",
+            GrainKind::Snow => "Snow",
         }
     }
 
@@ -36,6 +39,7 @@ impl GrainKind {
             GrainKind::Sand => ["Piles up and slides in heaps", "Hold to pour  ·  right-drag erases"],
             GrainKind::Liquid => ["Flows and finds its level", "Hold to pour  ·  right-drag erases"],
             GrainKind::Beads => ["Light and bouncy", "Hold to pour  ·  right-drag erases"],
+            GrainKind::Snow => ["Settles in drifts, melts near fire", "Hold to pour  ·  right-drag erases"],
         }
     }
 
@@ -44,6 +48,7 @@ impl GrainKind {
             GrainKind::Sand => Color::from_rgba(232, 196, 120, 255),
             GrainKind::Liquid => Color::from_rgba(70, 150, 245, 255),
             GrainKind::Beads => Color::from_rgba(250, 120, 190, 255),
+            GrainKind::Snow => Color::from_rgba(236, 244, 255, 255),
         }
     }
 
@@ -53,6 +58,7 @@ impl GrainKind {
             GrainKind::Sand => 4.5,
             GrainKind::Liquid => 4.0,
             GrainKind::Beads => 5.5,
+            GrainKind::Snow => 3.8,
         }
     }
 
@@ -63,6 +69,8 @@ impl GrainKind {
             GrainKind::Sand => (1.8, 0.95, 0.02, 0.1, 12.0),
             GrainKind::Liquid => (1.0, 0.0, 0.0, 0.25, 0.0),
             GrainKind::Beads => (0.7, 0.3, 0.75, 0.0, 0.5),
+            // Light and sticky, drifting down slowly.
+            GrainKind::Snow => (0.35, 1.0, 0.0, 1.2, 14.0),
         }
     }
 }
@@ -101,6 +109,33 @@ impl Grains {
             .filter(|g| g.kind == GrainKind::Liquid)
             .filter_map(|g| world.bodies.get(g.body).map(|b| to_screen(b.translation().x, b.translation().y)))
             .collect()
+    }
+
+    /// Snow closer to a `heat` point than its reach (px) melts into liquid.
+    /// Returns how many flakes melted.
+    pub fn melt_snow(&mut self, world: &mut PhysWorld, heat: &[(Vec2, f32)]) -> usize {
+        if heat.is_empty() {
+            return 0;
+        }
+        let mut melted = vec![];
+        self.list.retain(|g| {
+            if g.kind != GrainKind::Snow {
+                return true;
+            }
+            let Some(b) = world.bodies.get(g.body) else { return true };
+            let p = to_screen(b.translation().x, b.translation().y);
+            if heat.iter().any(|&(h, reach)| h.distance(p) < reach) {
+                melted.push((p, *b.linvel()));
+                world.remove_body(g.body);
+                false
+            } else {
+                true
+            }
+        });
+        for &(p, v) in &melted {
+            self.add(world, GrainKind::Liquid, p, v);
+        }
+        melted.len()
     }
 
     /// Add one grain at `at` (world px), moving at `vel` (m/s).
@@ -202,6 +237,10 @@ impl Grains {
             let Some(p) = pos(g) else { continue };
             let r = g.kind.radius_px();
             match g.kind {
+                GrainKind::Snow => {
+                    let k = 0.94 + g.tint * 0.06;
+                    draw_circle(p.x, p.y, r + 1.2, Color::new(0.86 * k, 0.9 * k, 1.0, 1.0));
+                }
                 GrainKind::Sand => {
                     let k = 0.85 + g.tint * 0.25;
                     let c = g.kind.accent();
@@ -235,6 +274,18 @@ mod tests {
         assert_eq!(w.bodies.len(), walls + MAX_GRAINS, "the oldest bodies are removed too");
         let erased = g.erase(&mut w, vec2(600.0, 600.0), 5000.0);
         assert_eq!((erased, g.len()), (MAX_GRAINS, 0));
+    }
+
+    #[test]
+    fn snow_melts_near_heat() {
+        let mut w = PhysWorld::new(-9.8, BorderMode::Walls, (1200.0, 800.0));
+        let mut g = Grains::default();
+        g.add(&mut w, GrainKind::Snow, vec2(100.0, 100.0), vector![0.0, 0.0]);
+        g.add(&mut w, GrainKind::Snow, vec2(600.0, 100.0), vector![0.0, 0.0]);
+        assert_eq!(g.melt_snow(&mut w, &[(vec2(110.0, 100.0), 30.0)]), 1);
+        assert_eq!(g.len(), 2, "the flake became a drop");
+        assert_eq!(g.liquid_px(&w).len(), 1);
+        assert_eq!(g.melt_snow(&mut w, &[]), 0);
     }
 
     #[test]

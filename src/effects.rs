@@ -291,6 +291,21 @@ impl Effects {
         self.items.retain(|p| p.age < p.life);
     }
 
+    /// Glowing particles as lights at night: `f(centre, radius, colour)`,
+    /// the colour's alpha being the strength.
+    pub fn lights(&self, mut f: impl FnMut(Vec2, f32, Color)) {
+        for p in &self.items {
+            let fade = 1.0 - p.age / p.life;
+            match p.kind {
+                Kind::Flame => f(p.pos, p.size * 5.0, Color::new(1.0, 0.55, 0.2, 0.2 * fade)),
+                Kind::Ember => f(p.pos, 16.0, Color::new(1.0, 0.5, 0.15, 0.3 * fade)),
+                Kind::Spark => f(p.pos, 24.0, Color::new(1.0, 0.8, 0.5, 0.35 * fade)),
+                Kind::Jet => f(p.pos, p.size * 4.0, Color::new(1.0, 0.6, 0.25, 0.18 * fade)),
+                _ => {}
+            }
+        }
+    }
+
     pub fn draw(&self) {
         // Smoke goes behind the flames.
         for p in self.items.iter().filter(|p| p.kind == Kind::Smoke) {

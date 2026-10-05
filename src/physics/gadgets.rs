@@ -1,8 +1,10 @@
 //! Gadgets attached to objects (or fixed in the world): **lasers** whose
 //! beams bounce off mirrors and pass through glass, **thrusters** that push
 //! what they are attached to (or blow like a fan when fixed in the world),
-//! and **cannons** that fire balls, shapes, grains or images. Each one
-//! works all the time, while an arrow key is held, or on the music's beats.
+//! **cannons** that fire balls, shapes, grains or images, **lamps** that
+//! light the night (and cast shadows), and **grappling hooks** that hook
+//! onto what they hit and reel in. Each one works all the time, while an
+//! arrow key is held, or on the music's beats.
 
 use super::{to_screen, PhysWorld};
 use macroquad::prelude::*;
@@ -21,16 +23,21 @@ pub enum GadgetKind {
     Laser,
     Thruster,
     Cannon,
+    Lamp,
+    Grapple,
 }
 
 impl GadgetKind {
-    pub const ALL: &'static [GadgetKind] = &[GadgetKind::Laser, GadgetKind::Thruster, GadgetKind::Cannon];
+    pub const ALL: &'static [GadgetKind] =
+        &[GadgetKind::Laser, GadgetKind::Thruster, GadgetKind::Cannon, GadgetKind::Lamp, GadgetKind::Grapple];
 
     pub fn label(self) -> &'static str {
         match self {
             GadgetKind::Laser => "Laser",
             GadgetKind::Thruster => "Thruster",
             GadgetKind::Cannon => "Cannon",
+            GadgetKind::Lamp => "Lamp",
+            GadgetKind::Grapple => "Hook",
         }
     }
 
@@ -39,6 +46,8 @@ impl GadgetKind {
             GadgetKind::Laser => ["Drag to aim  ·  mirrors reflect it,", "glass lets it through, it burns the rest"],
             GadgetKind::Thruster => ["Drag on an object the way to push it", "(on empty space: a fan)"],
             GadgetKind::Cannon => ["Drag to aim  ·  on an object it", "recoils; right-click a gadget removes it"],
+            GadgetKind::Lamp => ["Lights the night (Shift+T) and casts", "shadows  ·  drag to aim a spotlight"],
+            GadgetKind::Grapple => ["Put it on an object: an arrow key shoots", "the hook at the pointer and reels in"],
         }
     }
 
@@ -47,6 +56,8 @@ impl GadgetKind {
             GadgetKind::Laser => Color::from_rgba(255, 80, 90, 255),
             GadgetKind::Thruster => Color::from_rgba(255, 160, 60, 255),
             GadgetKind::Cannon => Color::from_rgba(170, 180, 200, 255),
+            GadgetKind::Lamp => Color::from_rgba(255, 220, 130, 255),
+            GadgetKind::Grapple => Color::from_rgba(120, 220, 170, 255),
         }
     }
 }
@@ -134,7 +145,17 @@ pub struct GadgetSpec {
     /// Which way it fires or pushes (rad, counter-clockwise from +x), on
     /// its object or in the world.
     pub angle: f32,
+    /// Lamp: half-angle of its light (rad), π all round.
+    pub spread: f32,
+    /// Lamp: light colour.
+    pub colour: [u8; 3],
 }
+
+/// Lamp colours offered by the Gadget tool.
+pub const LAMP_COLOURS: [[u8; 3]; 6] =
+    [[255, 214, 150], [235, 242, 255], [255, 96, 80], [110, 255, 150], [100, 160, 255], [214, 120, 255]];
+/// Half-angle of a spotlight (rad).
+pub const SPOT_SPREAD: f32 = 0.5;
 
 impl Default for GadgetSpec {
     fn default() -> Self {
@@ -146,6 +167,8 @@ impl Default for GadgetSpec {
             rate: 2.0,
             at: [0.0, 0.0],
             angle: 0.0,
+            spread: std::f32::consts::PI,
+            colour: LAMP_COLOURS[0],
         }
     }
 }
@@ -158,6 +181,7 @@ impl GadgetSpec {
         self.rate = ok(self.rate, 0.1, 20.0, 2.0);
         self.at = [ok(self.at[0], -1e4, 1e4, 0.0), ok(self.at[1], -1e4, 1e4, 0.0)];
         self.angle = ok(self.angle, -100.0, 100.0, 0.0);
+        self.spread = ok(self.spread, 0.1, std::f32::consts::PI, std::f32::consts::PI);
         self
     }
 }
@@ -174,11 +198,15 @@ pub struct Gadget {
     pub fired: VecDeque<RigidBodyHandle>,
     /// Beat trigger: seconds left of the current pulse.
     pub pulse: f32,
+    /// Grapple: the rope to what it hooked, or where a shot that missed
+    /// got to (world px) and how long ago (s).
+    pub hook: Option<super::links::Link>,
+    pub miss: Option<(Vec2, f32)>,
 }
 
 impl Gadget {
     pub fn new(spec: GadgetSpec, host: Option<RigidBodyHandle>) -> Self {
-        Gadget { spec, host, on: false, cooldown: 0.0, fired: VecDeque::new(), pulse: 0.0 }
+        Gadget { spec, host, on: false, cooldown: 0.0, fired: VecDeque::new(), pulse: 0.0, hook: None, miss: None }
     }
 
     /// World position (m) and unit direction, or `None` when its object is gone.
@@ -368,6 +396,50 @@ pub fn draw_gadget(kind: GadgetKind, at: Vec2, dir: Vec2, on: bool, t: f32) {
             draw_circle(at.x, at.y, 8.5, rim);
             draw_circle(at.x, at.y, 6.5, dark);
         }
+        GadgetKind::Lamp => {}
+        GadgetKind::Grapple => {
+            // A launcher with a three-pronged hook at its mouth.
+            quad(at + dir * 4.0, 16.0, 5.0, rim);
+            quad(at + dir * 4.0, 13.0, 3.5, dark);
+            draw_circle(at.x, at.y, 6.0, rim);
+            draw_circle(at.x, at.y, 4.0, dark);
+            if !on {
+                draw_hook(at + dir * 14.0, dir, Color::from_rgba(200, 210, 220, 255));
+            }
+        }
+    }
+}
+
+/// The hook itself, its point at `at`, facing `dir`.
+pub fn draw_hook(at: Vec2, dir: Vec2, colour: Color) {
+    let n = vec2(-dir.y, dir.x);
+    let back = at - dir * 6.0;
+    draw_line(back.x, back.y, at.x, at.y, 2.0, colour);
+    for side in [-1.0, 1.0] {
+        let tip = at - dir * 3.0 + n * side * 5.0;
+        draw_line(at.x, at.y, tip.x, tip.y, 1.8, colour);
+    }
+}
+
+/// Draw a lamp at `at` (world px): a bulb, with a hood when it is a
+/// spotlight facing `dir`.
+pub fn draw_lamp(at: Vec2, dir: Vec2, spot: bool, colour: Color, on: bool) {
+    let n = vec2(-dir.y, dir.x);
+    let rim = Color::from_rgba(150, 156, 180, 255);
+    let dark = Color::from_rgba(44, 46, 60, 255);
+    if spot {
+        let (back, front) = (at - dir * 6.0, at + dir * 6.0);
+        draw_triangle(back + n * 4.0, back - n * 4.0, front + n * 8.0, rim);
+        draw_triangle(back - n * 4.0, front - n * 8.0, front + n * 8.0, rim);
+        draw_line(front.x + n.x * 7.0, front.y + n.y * 7.0, front.x - n.x * 7.0, front.y - n.y * 7.0, 3.0, dark);
+    } else {
+        draw_circle(at.x, at.y, 7.5, rim);
+    }
+    let glass = if on { colour } else { Color::new(colour.r * 0.35, colour.g * 0.35, colour.b * 0.35, 1.0) };
+    let bulb = if spot { at + dir * 5.0 } else { at };
+    draw_circle(bulb.x, bulb.y, if spot { 4.0 } else { 5.5 }, glass);
+    if on {
+        draw_circle(bulb.x, bulb.y, 2.0, Color::new(1.0, 1.0, 1.0, 0.9));
     }
 }
 

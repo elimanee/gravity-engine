@@ -150,6 +150,8 @@ mod tests {
                 strength: 0.0,
                 pair: None,
             }],
+            night: None,
+            weather: None,
         };
         ChallengeFile::new("  My level! ", 500.0, (1100.0, 720.0), scene)
     }

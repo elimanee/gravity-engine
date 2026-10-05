@@ -65,6 +65,11 @@ pub struct Settings {
     pub cannon_speed: f32,
     pub cannon_rate: f32,
     pub cannon_ammo: Ammo,
+    /// Lamp reach (px), spotlight or bulb, and colour (index into
+    /// `gadgets::LAMP_COLOURS`).
+    pub lamp_reach: f32,
+    pub lamp_spot: bool,
+    pub lamp_colour: usize,
 
     pub zone_kind: ZoneKind,
     /// Wind direction in degrees (0 = right, 90 = up).
@@ -120,6 +125,13 @@ pub struct Settings {
     pub slow_motion: bool,
 
     pub show_title: bool,
+
+    /// Rain, snow or storm over the world.
+    pub weather: crate::weather::Weather,
+    /// Night: the scene goes dark and only lights (lamps, fire, lasers) show it.
+    pub night: bool,
+    /// How dark the night is, 0.5‥0.95.
+    pub darkness: f32,
 }
 
 impl Default for Settings {
@@ -157,6 +169,9 @@ impl Default for Settings {
             cannon_speed: 14.0,
             cannon_rate: 2.0,
             cannon_ammo: Ammo::Ball,
+            lamp_reach: 380.0,
+            lamp_spot: false,
+            lamp_colour: 0,
             zone_kind: ZoneKind::Wind,
             zone_angle: 0.0,
             zone_strength: 14.0,
@@ -185,6 +200,9 @@ impl Default for Settings {
             sfx_volume: 0.6,
             slow_motion: true,
             show_title: true,
+            weather: Default::default(),
+            night: false,
+            darkness: 0.8,
         }
     }
 }
@@ -206,6 +224,8 @@ pub const ZONE_STRENGTH_RANGE: (f32, f32) = (2.0, 40.0);
 pub const THRUST_RANGE: (f32, f32) = (0.2, 8.0);
 pub const CANNON_SPEED_RANGE: (f32, f32) = (2.0, 40.0);
 pub const CANNON_RATE_RANGE: (f32, f32) = (0.3, 10.0);
+pub const DARKNESS_RANGE: (f32, f32) = (0.5, 0.95);
+pub const LAMP_REACH_RANGE: (f32, f32) = (120.0, 800.0);
 
 impl Settings {
     fn path() -> Option<std::path::PathBuf> {
@@ -260,6 +280,9 @@ impl Settings {
         self.thrust = clamp(self.thrust, THRUST_RANGE, d.thrust);
         self.cannon_speed = clamp(self.cannon_speed, CANNON_SPEED_RANGE, d.cannon_speed);
         self.cannon_rate = clamp(self.cannon_rate, CANNON_RATE_RANGE, d.cannon_rate);
+        self.darkness = clamp(self.darkness, DARKNESS_RANGE, d.darkness);
+        self.lamp_reach = clamp(self.lamp_reach, LAMP_REACH_RANGE, d.lamp_reach);
+        self.lamp_colour = self.lamp_colour.min(crate::physics::gadgets::LAMP_COLOURS.len() - 1);
         self.world_size = self.world_size.clamp(1, 3);
         self.zone_strength = clamp(self.zone_strength, ZONE_STRENGTH_RANGE, d.zone_strength);
         self.zone_angle =

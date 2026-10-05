@@ -22,6 +22,7 @@ enum SliderId {
     WaterLevel,
     WaterDensity,
     SfxVolume,
+    Darkness,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -35,6 +36,7 @@ enum ToggleId {
     SlowMo,
     Player,
     PlayerPhysics,
+    Night,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -45,6 +47,7 @@ enum StepperId {
     VisObject,
     WorldSize,
     Skin,
+    Weather,
 }
 
 enum Row {
@@ -88,7 +91,7 @@ pub struct Drawer {
     /// Name of the classic player's skin (set by the app).
     pub skin_name: String,
     scroll: f32,
-    sliders: [SliderState; 10],
+    sliders: [SliderState; 11],
 }
 
 fn slider_index(id: SliderId) -> usize {
@@ -118,6 +121,10 @@ fn slider_spec(id: SliderId, s: &Settings) -> (SliderSpec<'static>, f32) {
             let text = format!("×{:.1}", s.water_density);
             ("Density", WATER_DENSITY_RANGE, s.water_density, text, Color::new(0.35, 0.65, 1.0, 1.0))
         }
+        SliderId::Darkness => {
+            let text = format!("{:.0}%", s.darkness * 100.0);
+            ("Darkness", DARKNESS_RANGE, s.darkness, text, Color::new(0.55, 0.5, 1.0, 1.0))
+        }
         SliderId::SfxVolume => {
             let text = format!("{:.0}%", s.sfx_volume * 100.0);
             ("Effects volume", (0.0, 1.0), s.sfx_volume, text, Color::new(0.4, 0.8, 1.0, 1.0))
@@ -138,6 +145,7 @@ fn slider_value(id: SliderId, s: &mut Settings) -> &mut f32 {
         SliderId::WaterLevel => &mut s.water_level,
         SliderId::WaterDensity => &mut s.water_density,
         SliderId::SfxVolume => &mut s.sfx_volume,
+        SliderId::Darkness => &mut s.darkness,
     }
 }
 
@@ -168,6 +176,12 @@ impl Drawer {
         if s.water {
             rows.push(Row::Slider(SliderId::WaterLevel));
             rows.push(Row::Slider(SliderId::WaterDensity));
+        }
+        rows.push(Row::Header("WEATHER & LIGHT"));
+        rows.push(Row::Stepper(StepperId::Weather));
+        rows.push(Row::Toggle(ToggleId::Night));
+        if s.night {
+            rows.push(Row::Slider(SliderId::Darkness));
         }
         rows.extend([
             Row::Header("AUDIO"),
@@ -282,6 +296,7 @@ impl Drawer {
                             ToggleId::Player => actions.push(Action::TogglePlayer),
                             ToggleId::PlayerPhysics => actions.push(Action::TogglePlayerPhysics),
                             ToggleId::SlowMo => s.slow_motion = !s.slow_motion,
+                            ToggleId::Night => actions.push(Action::ToggleNight),
                         }
                     }
                 }
@@ -296,6 +311,7 @@ impl Drawer {
                             StepperId::VisObject => Action::CycleVisualizerObject(d),
                             StepperId::WorldSize => Action::CycleWorldSize(d),
                             StepperId::Skin => Action::CycleSkin(d),
+                            StepperId::Weather => Action::CycleWeather(d),
                         });
                     }
                 }
@@ -358,6 +374,7 @@ impl Drawer {
                         ToggleId::Player => ("Classic player  (X)", s.player),
                         ToggleId::PlayerPhysics => ("Physical player  (Shift+X)", s.player_physics),
                         ToggleId::SlowMo => ("Slow motion on big hits", s.slow_motion),
+                        ToggleId::Night => ("Night  (Shift+T)", s.night),
                     };
                     draw_toggle_row(r, label, on, hov, f);
                 }
@@ -378,6 +395,9 @@ impl Drawer {
                         StepperId::WorldSize => {
                             let v = format!("×{}", s.world_size);
                             draw_stepper(sr, "World size", &v, ACCENT_HI, mouse, f)
+                        }
+                        StepperId::Weather => {
+                            draw_stepper(sr, "Weather  (Shift+H)", s.weather.label(), s.weather.accent(), mouse, f)
                         }
                         StepperId::VisObject => {
                             draw_stepper(sr, "Object style", s.vis_object.label(), ACCENT_HI, mouse, f)
