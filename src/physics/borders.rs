@@ -166,8 +166,9 @@ impl BorderMode {
                 b.set_translation(vector![nx, ny], true);
             }
             let out_x = pos.x < -1.0 || pos.x > sw + 1.0;
-            let lost =
-                pos.x < -CULL_MARGIN || pos.x > sw + CULL_MARGIN || pos.y < -CULL_MARGIN || pos.y > sh + CULL_MARGIN;
+            // An infinite world goes on sideways.
+            let lost_x = !world.infinite && (pos.x < -CULL_MARGIN || pos.x > sw + CULL_MARGIN);
+            let lost = lost_x || pos.y < -CULL_MARGIN || pos.y > sh + CULL_MARGIN;
             if (self == BorderMode::Kill && out_x) || lost {
                 dead.push(body);
             }

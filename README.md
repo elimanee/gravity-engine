@@ -4,13 +4,47 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
-![Version](https://img.shields.io/badge/version-2.9-8b78ff)
+![Version](https://img.shields.io/badge/version-2.10-8b78ff)
 
 ![Title screen](docs/screenshots/title.png)
 
 | Sandbox | Settings drawer (Space) | Tool picker (Tab) |
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
+
+## What's new in 2.10
+
+![Sonic running upside down round a loop, collecting rings](docs/screenshots/sonic-loop.png)
+
+- **Playable Sonic** (`Shift+O`, or *Sonic* in the settings) — Sonic joins the scene and is played with the keyboard: `←` `→` run, `↓` crouches or rolls, `Space` jumps (hold for higher), `↓` + `Space` charges a spin dash, `↑` looks up. He moves the way he does in the Mega Drive games, after the [Sonic Physics Guide](https://info.sonicretro.org/Sonic_Physics_Guide): acceleration, braking and friction, slopes that slow him down or speed him up, floor sensors that follow walls and ceilings (he runs round loops), slipping off when too slow, rolling, variable jump height, air drag, and slower physics underwater.
+- He pushes objects (curled up, he bowls them over), stands and rides on them, weighs down seesaws, bounces off bouncy surfaces like springs, slides on ice, is blown away by bombs and can be picked up and thrown with the Spring tool. The camera follows him in a big world. `Shift+Space` pauses while he is around.
+- **Rings** to collect, with a counter; example scene *Sonic loop* (a loop, a spring, a ramp and crates). Sonic and the rings are saved in scene files.
+- **Infinite world** (*World size* → `∞` in the settings) — a floor that goes on forever, no walls or ceiling: travel with the middle mouse button, or let the camera follow Sonic. Everything is quietly moved back towards the middle as you go, so it never loses precision.
+- **Endless run** (example scene) — Sonic in the infinite world, with terrain made ahead of him as he runs: hills, loops with dash panels, ramps, springs up to platforms, crates to smash curled up, and rings everywhere. The distance and your best run are shown under the ring counter.
+- Curled up, Sonic smashes breakable objects (rolling into them or landing on them), and conveyor surfaces launch him like dash panels.
+
+![Sonic on an endless run over hills, collecting rings](docs/screenshots/endless-run.png)
+- Sonic is drawn with shapes: no graphics or sounds from the games are included. You can give him **your own sprite sheet** (see below).
+
+### Sonic sprite sheets
+
+*Sonic sprites…* in the settings (or putting a PNG in `~/.config/gravity_engine/sonic/`) makes Sonic use a sprite sheet you provide. Nothing is copied into the program: the sheet stays on your computer. Triangly's Sonic 1 sheet from The Spriters Resource (690 × 1558) is recognised as it is. For any other sheet, put a `sheet.json` next to it:
+
+```json
+{
+  "cell": [66, 66],
+  "transparent": [[13, 72, 7], [67, 153, 49]],
+  "scale": 1.0,
+  "animations": {
+    "idle": [[24, 243]],
+    "walk": [[24, 334], [94, 334], [164, 334]],
+    "run": [[24, 516], [94, 516]],
+    "roll": [[24, 607], [94, 607]]
+  }
+}
+```
+
+Each frame is the top-left corner of a `cell`-sized box whose centre is Sonic's centre, facing right; `transparent` lists background colours to cut out and `scale` is sheet pixels per original game pixel. Animations: `idle` (required), `bored`, `walk`, `run`, `roll` (also the spin dash), `skid`, `push`, `crouch`, `look_up`, `spring`; missing ones fall back to `walk` or `idle`. Frames play at the games' speed (held for 8 − speed frames, 4 − speed curled up) and turn with the ground.
 
 ## What's new in 2.9
 
@@ -175,7 +209,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Object properties** — bounce, friction, mass, gravity, planet gravity, breakable, flammable, mirror, magnet and conveyor per object (right-click → *Properties…*, or `I`)
 - **Library** (`E`) — example scenes, eighteen challenges (three with a laser) with star ratings, and your own challenges
 - **Challenge editor** (`Shift+E`) — make levels and share them as `.gchallenge` files
-- **Camera** — zoom (`Ctrl`+wheel, `+` / `-`, `Home` to fit) and pan (middle mouse button); *World size* makes the arena up to 3× the window
+- **Camera** — zoom (`Ctrl`+wheel, `+` / `-`, `Home` to fit) and pan (middle mouse button); *World size* makes the arena up to 3× the window, or infinite
 - **Sound effects and slow motion** — procedural sounds for hits, glass, explosions and wins; a moment of slow motion on big impacts (both can be turned off)
 - **Undo / redo** — `Ctrl+Z` / `Ctrl+Y` for every edit
 - **Gravity** — presets ZERO / MOON / MARS / EARTH / JUPITER / HEAVY / REVERSE in the HUD, or any value with the slider
@@ -190,6 +224,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **Jelly and cloth** (`U` / `Shift+U`) — soft bodies from any image or shape, and fabric that drapes, flaps in the wind and tears
 - **Gadgets** (`L`) — lasers that reflect off mirrors and cross glass, thrusters, fans, cannons, lamps and grappling hooks; motors driven with the arrow keys
 - **Planets** — objects with their own gravity that others orbit
+- **Playable Sonic** (`Shift+O`) — arrows and `Space`, with the physics of the Mega Drive games: loops, rolling, spin dash, rings
 - **Weather and night** (`Shift+H` / `Shift+T`) — rain, snow and storms with lightning; a night lit by lamps with shadows, fire and lasers
 - **Screenshots** (`F12`) and **GIF recording** (`F11`, up to 30 s) of the scene, without the interface
 - **Debug overlay** (`D`) — FPS, collider outlines, velocities and details of the object under the cursor
@@ -206,6 +241,7 @@ Press **F1** in the app for the full list.
 | `←` (hold) | Rewind time (`Shift+←` when `←` drives something) |
 | `←` `↑` `→` `↓` | Drive motors, work the gadgets set to an arrow (a grappling hook shoots at the pointer) |
 | `O` | Drop a ragdoll (over an image: it becomes the head) |
+| `Shift+O` | Sonic joins (or leaves): `←` `→` run, `↓` roll, `Space` jump, `↓` + `Space` spin dash, `Shift+Space` pause |
 | `U` / `Shift+U` | Jelly / cloth (over an object: it turns to jelly / is hung as a flag) |
 | `E` / `Shift+E` | Examples & challenges / challenge editor |
 | `Ctrl`+Wheel, `+` / `-`, `Home` | Zoom at the pointer, zoom in / out, fit the world |
@@ -295,6 +331,7 @@ src/
 ├── recorder.rs        GIF recording                net.rs        web fetchers
 ├── effects.rs         particles                    library/      example scenes and challenges
 ├── weather.rs         rain, snow and lightning     lighting.rs   the night's light map and shadows
+├── sonic/             playable Sonic: movement after the Sonic Physics Guide, and his drawing
 ├── window_tracker.rs  window shake
 ├── audio/             tracker modules, streams, playlists, the visualizer's analyzer, sound effects
 ├── physics/           world, objects, tools, links, zones, water, grains, soft bodies, gadgets, magnets,
@@ -302,7 +339,7 @@ src/
 └── ui/                theme, widgets, HUD, drawer, tool card, menus, properties panel, overlays, title screen
 ```
 
-`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, snow, jelly, cloth, laser beams, gadgets, planets, rope reeling, weather, night light, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
+`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, snow, jelly, cloth, laser beams, gadgets, planets, rope reeling, weather, night light, Sonic's running, jumping, spin dash, underwater speed and loops, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
 
 `gravity_engine --verify-challenges` (needs a display) checks that every built-in challenge can be solved.
 

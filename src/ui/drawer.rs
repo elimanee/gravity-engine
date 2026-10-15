@@ -75,6 +75,8 @@ const AUDIO_BUTTONS: &[(&str, Action)] = &[("Load…", Action::LoadAudio), ("Pla
 const ADD_BUTTONS: &[(&str, Action)] = &[("Images…", Action::AddImages), ("Shapes", Action::ToggleSpawner)];
 const RAGDOLL_BUTTONS: &[(&str, Action)] =
     &[("Ragdoll (O)", Action::SpawnRagdoll), ("Jelly (U)", Action::SpawnJelly), ("Cloth", Action::SpawnCloth)];
+const SONIC_BUTTONS: &[(&str, Action)] =
+    &[("Sonic  (Shift+O)", Action::ToggleSonic), ("Sonic sprites…", Action::LoadSonicSheet)];
 const WEB_BUTTONS: &[(&str, Action)] = &[("88×31 buttons", Action::FetchButtons), ("Game logos", Action::FetchLogos)];
 const SCENE_BUTTONS: &[(&str, Action)] = &[("Save…", Action::SaveScene), ("Open…", Action::LoadScene)];
 const VIS_BUTTONS: &[(&str, Action)] = &[("Spawn visualizer  (Shift+V)", Action::SpawnVisualizer)];
@@ -212,6 +214,7 @@ impl Drawer {
             Row::Buttons(LIBRARY_BUTTONS),
             Row::Buttons(ADD_BUTTONS),
             Row::Buttons(RAGDOLL_BUTTONS),
+            Row::Buttons(SONIC_BUTTONS),
             Row::Buttons(WEB_BUTTONS),
             Row::Header("SCENE"),
             Row::Buttons(SCENE_BUTTONS),
@@ -393,7 +396,7 @@ impl Drawer {
                             draw_stepper(sr, "Skin", &name, ACCENT_HI, mouse, f)
                         }
                         StepperId::WorldSize => {
-                            let v = format!("×{}", s.world_size);
+                            let v = if s.world_size >= 4 { "∞".to_string() } else { format!("×{}", s.world_size) };
                             draw_stepper(sr, "World size", &v, ACCENT_HI, mouse, f)
                         }
                         StepperId::Weather => {

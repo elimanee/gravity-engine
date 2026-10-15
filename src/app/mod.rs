@@ -51,10 +51,12 @@ use std::sync::Arc;
 
 mod build;
 mod editor;
+mod endless;
 mod fire;
 mod gadgets;
 mod grapple;
 mod impacts;
+mod infinite;
 mod juice;
 mod knife;
 mod library;
@@ -65,6 +67,7 @@ mod ragdoll;
 mod rewind;
 mod select;
 mod soft;
+mod sonic;
 mod verify;
 mod weather;
 
@@ -151,6 +154,14 @@ pub struct App {
     grains: Grains,
     /// Rain, snow and lightning: their look, and what they do.
     sky: Sky,
+    /// Sonic (Shift+O) and the rings left to collect (world px).
+    sonic: Option<sonic::SonicRun>,
+    /// The user's Sonic sprite sheet (loaded when he first appears).
+    sonic_sheet: Option<crate::sonic::sheet::Sheet>,
+    sonic_sheet_tried: bool,
+    rings: Vec<Vec2>,
+    /// Sonic's endless run (terrain made as he goes).
+    endless: Option<endless::Endless>,
     /// The night's light map.
     lights: crate::lighting::Lights,
     climate: weather::Climate,
@@ -194,11 +205,24 @@ pub struct App {
 
 impl App {
     pub fn new(preload: Vec<String>, skip_title: bool) -> Self {
-        let s = Settings::load();
+        let mut s = Settings::load();
+        let infinite = s.world_size >= 4;
+        if infinite {
+            s.border = crate::physics::borders::BorderMode::Walls;
+        }
         let k = s.world_size as f32;
-        let size = (screen_width() * k, screen_height() * k);
-        let world = PhysWorld::new(s.gravity, s.border, size);
-        let camera = Camera::new(vec2(size.0, size.1), vec2(screen_width(), screen_height()));
+        let size = if infinite {
+            (infinite::INFINITE_W, screen_height() * 2.0)
+        } else {
+            (screen_width() * k, screen_height() * k)
+        };
+        let mut world = PhysWorld::new(s.gravity, s.border, size);
+        world.set_infinite(infinite);
+        let mut camera = Camera::new(vec2(size.0, size.1), vec2(screen_width(), screen_height()));
+        if infinite {
+            camera.infinite = true;
+            camera.fit(vec2(size.0, size.1), vec2(screen_width(), screen_height()));
+        }
         let mut bg = Background::new(s.background);
         let mut toasts = Toasts::default();
         if let Some(path) = s.custom_background.clone() {
@@ -242,6 +266,11 @@ impl App {
             grains: Grains::default(),
             sky: Sky::default(),
             lights: Default::default(),
+            sonic: None,
+            sonic_sheet: None,
+            sonic_sheet_tried: false,
+            rings: Vec::new(),
+            endless: None,
             climate: Default::default(),
             pouring: false,
             pour_sound: 0.0,
@@ -338,6 +367,7 @@ impl App {
             self.last_size = arena;
         }
 
+        self.recentre();
         let mut input = Input::gather();
         input.world = self.view().to_world(input.mouse);
         let mut actions = Vec::new();
@@ -472,7 +502,12 @@ impl App {
             self.quit = true;
         }
         let challenge = self.challenge.as_ref().map(|r| (r.started, r.won));
-        if pressed(KeyCode::Space) {
+        if pressed(KeyCode::Space) && self.sonic.is_some() && !shift {
+            // Sonic's jump button (Shift+Space pauses).
+            if let Some(run) = &mut self.sonic {
+                run.jump = true;
+            }
+        } else if pressed(KeyCode::Space) {
             actions.push(match challenge {
                 Some((false, _)) => Action::ChallengeGo,
                 _ => Action::TogglePause,
@@ -536,7 +571,7 @@ impl App {
             actions.push(if shift { Action::TogglePlayerPhysics } else { Action::TogglePlayer });
         }
         if pressed(KeyCode::O) {
-            actions.push(Action::SpawnRagdoll);
+            actions.push(if shift { Action::ToggleSonic } else { Action::SpawnRagdoll });
         }
         if pressed(KeyCode::U) {
             actions.push(if shift { Action::SpawnCloth } else { Action::SpawnJelly });
@@ -808,7 +843,10 @@ impl App {
                         self.s.tool_strength,
                     );
                     self.bomb_hits(m, hits);
+                    self.blast_sonic(m, self.s.tool_radius, self.s.tool_strength);
                     self.blasts.push(Blast::new(m, self.s.tool_radius));
+                } else if tool.grabs() && self.grab_sonic(m) {
+                    // Picked Sonic up.
                 } else if tool.grabs() {
                     if let Some(i) = object_at(&self.objects, &self.world, m.x, m.y) {
                         self.grab = Some(Grab::new(&self.world.bodies, self.objects[i].body, to_phys(m.x, m.y), tool));
@@ -840,6 +878,7 @@ impl App {
             }
         }
 
+        self.drag_sonic(m, input.left_down, dt);
         if input.left_down && self.select_drag.is_some() {
             self.select_drag_to(m);
         }
@@ -954,6 +993,9 @@ impl App {
                     self.gadget_drag = None;
                     self.spawner.fader.open = false;
                 }
+            }
+            Action::CycleBorder(_) if self.infinite() => {
+                self.toasts.status("border", "An infinite world has a floor and no walls");
             }
             Action::CycleBorder(d) => {
                 self.s.border = self.s.border.cycle(d);
@@ -1091,6 +1133,11 @@ impl App {
                 };
                 self.toasts.status("weather", hint);
             }
+            Action::ToggleSonic => {
+                let at = if self.paused { self.spawn_point(screen_width() / 2.0) } else { mouse };
+                self.toggle_sonic(at);
+            }
+            Action::LoadSonicSheet => self.pick_sonic_sheet(),
             Action::ToggleNight => {
                 self.s.night = !self.s.night;
                 self.toasts.status(
@@ -1152,13 +1199,14 @@ impl App {
                 self.toasts.status("grains", format!("Removed {n} grains"));
             }
             Action::CycleWorldSize(d) => {
-                self.s.world_size = (self.s.world_size as i32 - 1 + d).rem_euclid(3) as u8 + 1;
-                let (aw, ah) = self.arena();
-                self.world.resize((aw, ah));
-                self.last_size = (aw, ah);
-                let screen = vec2(screen_width(), screen_height());
-                self.camera.fit(vec2(aw, ah), screen);
-                self.toasts.status("world", format!("World size ×{}  ·  zoom with Ctrl+wheel", self.s.world_size));
+                let size = (self.s.world_size as i32 - 1 + d).rem_euclid(4) as u8 + 1;
+                self.set_world_size(size);
+                let msg = if self.infinite() {
+                    "Infinite world  ·  middle-drag to travel (Sonic is followed)  ·  Ctrl+wheel zooms".to_string()
+                } else {
+                    format!("World size ×{}  ·  zoom with Ctrl+wheel", self.s.world_size)
+                };
+                self.toasts.status("world", msg);
             }
             Action::ToggleEffects => {
                 self.s.effects = !self.s.effects;
@@ -1301,6 +1349,9 @@ impl App {
 
     /// World size in pixels.
     fn arena(&self) -> (f32, f32) {
+        if self.infinite() {
+            return (infinite::INFINITE_W, screen_height() * 2.0);
+        }
         let k = self.s.world_size as f32;
         (screen_width() * k, screen_height() * k)
     }
@@ -1403,6 +1454,7 @@ impl App {
         self.zone_drag = None;
         self.rewind.clear();
         self.fire.clear();
+        self.rings.clear();
         self.selection.clear();
         self.select_drag = None;
         self.zones.clear();
@@ -1609,6 +1661,18 @@ impl App {
         let mut scene = scene::capture(&self.world, &self.objects, &self.links, &self.zones, water);
         scene.gadgets = scene::capture_gadgets(&self.objects, &self.gadgets);
         scene.night = Some(self.s.night);
+        scene.sonic = self.sonic.as_ref().map(|r| {
+            let (x, y) = to_phys(r.sonic.pos.x, r.sonic.pos.y);
+            [x, y]
+        });
+        scene.rings = self
+            .rings
+            .iter()
+            .map(|r| {
+                let (x, y) = to_phys(r.x, r.y);
+                [x, y]
+            })
+            .collect();
         scene.weather = Some(self.s.weather);
         match scene::write(&path, &scene) {
             Ok(()) => self.toasts.success(format!(
@@ -1740,6 +1804,8 @@ impl App {
             }
             self.process_impacts();
             self.update_fire(step, mouse);
+            self.update_sonic(step);
+            self.update_endless();
             self.soft_after_step(step, mouse);
             links::prune(&mut self.links, &self.world);
 
@@ -1761,7 +1827,7 @@ impl App {
         }
         self.update_weather(dt, running, step, mouse);
         self.blasts.retain(Blast::alive);
-        let floor = if self.world.border.walls().floor { self.arena().1 - WALL_T * PPM } else { f32::MAX };
+        let floor = if self.world.walls().floor { self.arena().1 - WALL_T * PPM } else { f32::MAX };
         let gravity = -self.world.gravity.y * PPM;
         self.effects.update(if running { step } else { 0.0 }, gravity, floor);
     }
@@ -1794,11 +1860,8 @@ impl App {
         let m = input.world;
         self.bg.draw(sw, sh);
         let view = self.view();
-        let floor = if self.world.border.walls().floor {
-            (sh - view.to_screen(vec2(0.0, ah - WALL_T * PPM)).y).max(0.0)
-        } else {
-            0.0
-        };
+        let floor =
+            if self.world.walls().floor { (sh - view.to_screen(vec2(0.0, ah - WALL_T * PPM)).y).max(0.0) } else { 0.0 };
         visualizer::draw_background(self.s.vis_background, &self.audio.analyzer, sw, sh, floor);
 
         // The scene, in world pixels.
@@ -1827,6 +1890,7 @@ impl App {
             }
         }
         self.draw_player_body();
+        self.draw_sonic();
         self.draw_gadgets();
         self.grains.draw(&self.world);
         for l in &self.links {
@@ -1836,7 +1900,7 @@ impl App {
         for o in &self.objects {
             let (p, _) = o.screen_pos(&self.world);
             let mut badges = vec![];
-            if o.pinned {
+            if o.pinned && o.material.layer == 0 {
                 badges.push(0);
             }
             if o.material.magnet != 0.0 {
@@ -1974,6 +2038,8 @@ impl App {
         if let Some(v) = self.challenge_view() {
             self.challenge_bar.draw(&v, top, m);
         }
+        self.draw_sonic_hud(top);
+        self.draw_endless_hud(top);
         if let (Some(v), Some(ed)) = (self.editor_view(), self.editor.as_ref()) {
             self.editor_bar.draw(&v, &ed.name, top, m);
         }

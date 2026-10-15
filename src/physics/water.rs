@@ -37,7 +37,7 @@ impl Default for Water {
 
 /// Height of the still water surface (m) for a level in 0‥1.
 pub fn rest_level(world: &PhysWorld, level: f32) -> f32 {
-    let floor = if world.border.walls().floor { WALL_T } else { 0.0 };
+    let floor = if world.walls().floor { WALL_T } else { 0.0 };
     floor + level * (world.arena.1 - floor)
 }
 
@@ -144,10 +144,16 @@ impl Water {
     pub fn draw(&self, world: &PhysWorld, rest: f32, sw: f32, sh: f32) {
         let width = world.arena.0;
         // Stay inside the walls and above the floor.
-        let walls = world.border.walls();
+        let walls = world.walls();
         let side = if walls.sides { WALL_T * PPM } else { 0.0 };
         let bottom = if walls.floor { sh - WALL_T * PPM } else { sh };
-        let (x0, x1) = (side, sw - side);
+        let (x0, x1) = if world.infinite {
+            // Only around the view: the world goes on and on.
+            let v = crate::camera::current().visible();
+            ((v.x - 50.0).max(0.0), (v.x + v.w + 50.0).min(sw))
+        } else {
+            (side, sw - side)
+        };
         let top_c = Color::new(0.24, 0.55, 1.0, 0.30);
         let deep_c = Color::new(0.06, 0.16, 0.45, 0.62);
         let deepest = to_screen(0.0, rest - 4.0).y.min(bottom);

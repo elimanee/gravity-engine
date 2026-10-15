@@ -68,9 +68,21 @@ impl App {
         }
     }
 
+    /// Where weather falls (world px): the whole arena, or around the view
+    /// in an infinite world.
+    fn sky_span(&self) -> (f32, f32) {
+        let (aw, _) = self.arena();
+        if self.infinite() {
+            let v = self.view().visible();
+            ((v.x - 200.0).max(0.0), (v.x + v.w + 200.0).min(aw))
+        } else {
+            (0.0, aw)
+        }
+    }
+
     /// Height (world px) just under the ceiling, where drops appear.
     fn sky_top(&self) -> f32 {
-        if self.world.border.walls().ceiling {
+        if self.world.walls().ceiling {
             WALL_T * PPM + 6.0
         } else {
             4.0
@@ -89,12 +101,12 @@ impl App {
         if self.s.gravity > -0.5 {
             return;
         }
-        let (aw, _) = self.arena();
-        self.climate.owed += rate * step * (aw / screen_width().max(1.0));
+        let (x0, x1) = self.sky_span();
+        self.climate.owed += rate * step * ((x1 - x0) / screen_width().max(1.0));
         let top = self.sky_top();
         while self.climate.owed >= 1.0 {
             self.climate.owed -= 1.0;
-            let x = rand::gen_range(10.0, aw - 10.0);
+            let x = rand::gen_range(x0 + 10.0, x1 - 10.0);
             let wind = self.sky.gust * 0.3;
             self.grains.add(&mut self.world, kind, vec2(x, top), vector![wind, -speed]);
         }
@@ -175,12 +187,13 @@ impl App {
     /// A lightning bolt strikes the highest of a few random spots: what it
     /// hits gets hot enough to burn (or crack, or melt).
     fn lightning(&mut self) {
-        let (aw, ah) = self.arena();
+        let (_, ah) = self.arena();
+        let (x0, x1) = self.sky_span();
         let top = self.sky_top();
         let grains: HashSet<RigidBodyHandle> = self.grains.bodies().collect();
         let mut best: Option<(Vec2, Option<RigidBodyHandle>)> = None;
         for _ in 0..4 {
-            let x = rand::gen_range(aw * 0.05, aw * 0.95);
+            let x = x0 + rand::gen_range(0.05, 0.95) * (x1 - x0);
             let (px, py) = to_phys(x, top);
             let not_grain = |_, c: &rapier2d::prelude::Collider| c.parent().is_none_or(|b| !grains.contains(&b));
             let filter = QueryFilter::default().exclude_sensors().predicate(&not_grain);

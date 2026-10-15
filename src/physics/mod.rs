@@ -62,6 +62,9 @@ pub struct PhysWorld {
     pub border: BorderMode,
     /// Arena size in metres.
     pub arena: (f32, f32),
+    /// No side walls or ceiling, and a floor that goes on forever (the
+    /// arena is only the stretch around the view; see [`PhysWorld::shift`]).
+    pub infinite: bool,
 }
 
 impl PhysWorld {
@@ -86,6 +89,7 @@ impl PhysWorld {
             ground,
             border,
             arena: (arena_px.0 / PPM, arena_px.1 / PPM),
+            infinite: false,
         };
         WORLD_H.with(|h| h.set(arena_px.1));
         w.rebuild_walls();
@@ -96,6 +100,50 @@ impl PhysWorld {
         self.arena = (arena_px.0 / PPM, arena_px.1 / PPM);
         WORLD_H.with(|h| h.set(arena_px.1));
         self.rebuild_walls();
+    }
+
+    pub fn set_infinite(&mut self, infinite: bool) {
+        self.infinite = infinite;
+        self.rebuild_walls();
+        self.wake_all();
+    }
+
+    /// Move everything (but the walls) `dx` metres to the left, so the
+    /// numbers stay small in an infinite world. Joints to the background
+    /// move with it.
+    pub fn shift(&mut self, dx: f32) {
+        let walls: std::collections::HashSet<RigidBodyHandle> = self.walls.iter().copied().collect();
+        for (h, b) in self.bodies.iter_mut() {
+            if h == self.ground || walls.contains(&h) {
+                continue;
+            }
+            let mut p = *b.position();
+            p.translation.x -= dx;
+            b.set_position(p, false);
+            if b.is_kinematic() {
+                let mut n = *b.next_position();
+                n.translation.x -= dx;
+                b.set_next_kinematic_position(n);
+            }
+        }
+        for (_, j) in self.impulse_joints.iter_mut() {
+            if j.body1 == self.ground {
+                j.data.local_frame1.translation.x -= dx;
+            }
+            if j.body2 == self.ground {
+                j.data.local_frame2.translation.x -= dx;
+            }
+        }
+        self.query.update(&self.colliders);
+    }
+
+    /// The walls actually there (an infinite world only has a floor).
+    pub fn walls(&self) -> borders::WallSpec {
+        if self.infinite {
+            borders::WallSpec { floor: true, ceiling: false, sides: false }
+        } else {
+            self.border.walls()
+        }
     }
 
     pub fn set_border(&mut self, mode: BorderMode) {
@@ -110,11 +158,14 @@ impl PhysWorld {
         }
         let (sw, sh) = self.arena;
         let (hw, hh) = (sw / 2.0, sh / 2.0);
-        let spec = self.border.walls();
+        let spec = self.walls();
         let t = WALL_T / 2.0;
 
         let mut walls = vec![];
-        if spec.floor {
+        if self.infinite {
+            // Far wider than anything will ever travel between two shifts.
+            walls.push((vector![hw, t], vector![1.0e5, t]));
+        } else if spec.floor {
             walls.push((vector![hw, t], vector![hw + WALL_T, t]));
         }
         if spec.ceiling {
@@ -250,5 +301,31 @@ mod tests {
         w.reset_forces();
         assert_eq!(w.bodies[h].user_force(), vector![0.0, 0.0]);
         assert_eq!(w.bodies[h].user_torque(), 0.0, "the torque goes too");
+    }
+
+    #[test]
+    fn an_infinite_world_shifts_with_its_ropes() {
+        let mut w = PhysWorld::new(-9.8, BorderMode::Walls, (60_000.0, 1400.0));
+        w.set_infinite(true);
+        let h = w.bodies.insert(RigidBodyBuilder::dynamic().translation(vector![500.0, 15.0]));
+        w.colliders.insert_with_parent(ColliderBuilder::ball(0.3), h, &mut w.bodies);
+        let rope = RopeJointBuilder::new(2.0).local_anchor2(point![500.0, 17.0]).build();
+        w.impulse_joints.insert(h, w.ground, rope, true);
+        // A box far out on the floor, beyond the arena.
+        let far = w.bodies.insert(RigidBodyBuilder::dynamic().translation(vector![1_200.0, 2.0]));
+        w.colliders.insert_with_parent(ColliderBuilder::cuboid(0.5, 0.5), far, &mut w.bodies);
+        for _ in 0..120 {
+            w.step_fixed();
+        }
+        let before = *w.bodies[h].translation();
+        w.shift(200.0);
+        for _ in 0..120 {
+            w.step_fixed();
+        }
+        let after = *w.bodies[h].translation();
+        assert!((after.x - (before.x - 200.0)).abs() < 0.05, "moved with its rope: {before:?} → {after:?}");
+        assert!((after.y - before.y).abs() < 0.05);
+        assert!(w.bodies[far].translation().y > 0.4, "the floor goes on forever");
+        assert!(!w.walls().sides && !w.walls().ceiling);
     }
 }

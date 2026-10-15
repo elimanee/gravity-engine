@@ -150,6 +150,18 @@ impl Sky {
         Particle { pos, vel, size, phase: gen_range(0.0, std::f32::consts::TAU) }
     }
 
+    /// Move everything `dx` px to the left (the world shifted).
+    pub fn shift(&mut self, dx: f32) {
+        for p in &mut self.particles {
+            p.pos.x -= dx;
+        }
+        if let Some(b) = &mut self.bolt {
+            for p in &mut b.points {
+                p.x -= dx;
+            }
+        }
+    }
+
     /// Start a lightning bolt from the top of the view down to `to`.
     pub fn strike(&mut self, top: f32, to: Vec2) {
         let mut points = vec![vec2(to.x + gen_range(-80.0, 80.0), top)];

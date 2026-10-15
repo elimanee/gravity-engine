@@ -15,7 +15,10 @@ const MAX_VOICES: usize = 6;
 pub enum Sound {
     /// Two objects hitting. `size` is the larger one's size (px), `hard`
     /// 0 (soft, dull) ‥ 1 (bouncy, ringing).
-    Hit { size: f32, hard: f32 },
+    Hit {
+        size: f32,
+        hard: f32,
+    },
     /// Something breaking.
     Shatter,
     /// Bomb tool.
@@ -40,6 +43,13 @@ pub enum Sound {
     Shot,
     /// Thunder after a lightning strike.
     Thunder,
+    /// Sonic: jump, spin-dash rev, dash, skid, spring and ring.
+    Jump,
+    Rev,
+    Dash,
+    Skid,
+    Spring,
+    Ring,
     /// Challenge solved.
     Win,
 }
@@ -281,6 +291,84 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
             );
             out
         }
+        Sound::Jump => {
+            // A quick upward chirp.
+            let mut out = secs(0.2);
+            let dt = 1.0 / RATE as f32;
+            let mut phase = 0.0;
+            for (k, s) in out.iter_mut().enumerate() {
+                let t = k as f32 * dt;
+                phase += std::f32::consts::TAU * (420.0 + 2600.0 * t) * p * dt;
+                let sq = if phase.sin() > 0.0 { 1.0 } else { -1.0 };
+                *s = (sq * 0.12 + phase.sin() * 0.15) * (t / 0.005).min(1.0) * ((0.2 - t) / 0.08).clamp(0.0, 1.0);
+            }
+            out
+        }
+        Sound::Rev => {
+            // A revving whirr rising in pitch.
+            let mut out = secs(0.3);
+            add_noise(
+                &mut out,
+                &mut n,
+                |t| (900.0 + 5000.0 * t) * p,
+                |t| 0.5 * (t / 0.02).min(1.0) * ((0.3 - t) / 0.1).clamp(0.0, 1.0),
+            );
+            let dt = 1.0 / RATE as f32;
+            let mut phase = 0.0;
+            for (k, s) in out.iter_mut().enumerate() {
+                let t = k as f32 * dt;
+                phase += std::f32::consts::TAU * (300.0 + 900.0 * t / 0.3) * p * dt;
+                *s += phase.sin() * 0.12 * ((0.3 - t) / 0.1).clamp(0.0, 1.0);
+            }
+            out
+        }
+        Sound::Dash => {
+            let mut out = secs(0.45);
+            add_noise(
+                &mut out,
+                &mut n,
+                |t| (7000.0 * (-t / 0.12).exp() + 500.0) * p,
+                |t| 0.9 * (t / 0.01).min(1.0) * (-t / 0.15).exp(),
+            );
+            out
+        }
+        Sound::Skid => {
+            let mut out = secs(0.35);
+            add_noise(
+                &mut out,
+                &mut n,
+                |_| 2400.0 * p,
+                |t| 0.35 * (t / 0.02).min(1.0) * ((0.35 - t) / 0.12).clamp(0.0, 1.0),
+            );
+            out
+        }
+        Sound::Spring => {
+            // A boing: a tone sliding up with a wobble.
+            let mut out = secs(0.4);
+            let dt = 1.0 / RATE as f32;
+            let mut phase = 0.0;
+            for (k, s) in out.iter_mut().enumerate() {
+                let t = k as f32 * dt;
+                let f = (180.0 + 700.0 * (t / 0.15).min(1.0)) * (1.0 + 0.06 * (t * 60.0).sin()) * p;
+                phase += std::f32::consts::TAU * f * dt;
+                *s = phase.sin() * 0.4 * (t / 0.004).min(1.0) * (-t / 0.14).exp();
+            }
+            out
+        }
+        Sound::Ring => {
+            // Two bright bell notes.
+            let mut out = secs(0.6);
+            add_partials(
+                &mut out,
+                &[
+                    Partial(1568.0 * p, 0.22, 0.12, 0.0),
+                    Partial(3136.0 * p, 0.06, 0.08, 0.0),
+                    Partial(2093.0 * p, 0.24, 0.22, 0.07),
+                    Partial(4186.0 * p, 0.06, 0.12, 0.07),
+                ],
+            );
+            out
+        }
         Sound::Win => {
             let mut out = secs(1.6);
             // C major arpeggio of soft bells.
@@ -301,7 +389,7 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
 mod tests {
     use super::*;
 
-    const ALL: [Sound; 15] = [
+    const ALL: [Sound; 21] = [
         Sound::Hit { size: 80.0, hard: 0.2 },
         Sound::Hit { size: 20.0, hard: 1.0 },
         Sound::Shatter,
@@ -316,6 +404,12 @@ mod tests {
         Sound::Thrust,
         Sound::Shot,
         Sound::Thunder,
+        Sound::Jump,
+        Sound::Rev,
+        Sound::Dash,
+        Sound::Skid,
+        Sound::Spring,
+        Sound::Ring,
         Sound::Win,
     ];
 

@@ -90,7 +90,7 @@ pub struct Settings {
     /// Water density relative to the default object density.
     pub water_density: f32,
 
-    /// World size as a multiple of the window (1‥3).
+    /// World size as a multiple of the window (1‥3), 4: infinite.
     pub world_size: u8,
 
     /// What the Pour tool pours.
@@ -125,6 +125,8 @@ pub struct Settings {
     pub slow_motion: bool,
 
     pub show_title: bool,
+    /// Longest endless run (m).
+    pub sonic_best: f32,
 
     /// Rain, snow or storm over the world.
     pub weather: crate::weather::Weather,
@@ -200,6 +202,7 @@ impl Default for Settings {
             sfx_volume: 0.6,
             slow_motion: true,
             show_title: true,
+            sonic_best: 0.0,
             weather: Default::default(),
             night: false,
             darkness: 0.8,
@@ -283,7 +286,7 @@ impl Settings {
         self.darkness = clamp(self.darkness, DARKNESS_RANGE, d.darkness);
         self.lamp_reach = clamp(self.lamp_reach, LAMP_REACH_RANGE, d.lamp_reach);
         self.lamp_colour = self.lamp_colour.min(crate::physics::gadgets::LAMP_COLOURS.len() - 1);
-        self.world_size = self.world_size.clamp(1, 3);
+        self.world_size = self.world_size.clamp(1, 4);
         self.zone_strength = clamp(self.zone_strength, ZONE_STRENGTH_RANGE, d.zone_strength);
         self.zone_angle =
             if self.zone_angle.is_finite() { (self.zone_angle / 90.0).round().rem_euclid(4.0) * 90.0 } else { 0.0 };

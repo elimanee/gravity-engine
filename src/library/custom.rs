@@ -152,6 +152,9 @@ mod tests {
             }],
             night: None,
             weather: None,
+            sonic: None,
+            rings: vec![],
+            endless: false,
         };
         ChallengeFile::new("  My level! ", 500.0, (1100.0, 720.0), scene)
     }

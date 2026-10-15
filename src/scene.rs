@@ -42,6 +42,14 @@ pub struct SceneFile {
     pub night: Option<bool>,
     #[serde(default)]
     pub weather: Option<crate::weather::Weather>,
+    /// Sonic's starting point and the rings to collect (m).
+    #[serde(default)]
+    pub sonic: Option<[f32; 2]>,
+    #[serde(default)]
+    pub rings: Vec<[f32; 2]>,
+    /// Sonic's endless run in the infinite world.
+    #[serde(default)]
+    pub endless: bool,
 }
 
 /// A gadget (laser, thruster, cannon, lamp or grappling hook).
@@ -206,6 +214,9 @@ pub fn capture(
         gadgets: vec![],
         night: None,
         weather: None,
+        sonic: None,
+        rings: vec![],
+        endless: false,
     }
 }
 
@@ -356,6 +367,9 @@ mod tests {
             gadgets: vec![SceneGadget { spec: GadgetSpec { power: 7.0, ..GadgetSpec::default() }, host: Some(0) }],
             night: None,
             weather: None,
+            sonic: None,
+            rings: vec![],
+            endless: false,
         };
         let json = serde_json::to_string(&scene).unwrap();
         assert!(json.contains("\"type\":\"embedded\""));

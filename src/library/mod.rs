@@ -65,8 +65,17 @@ impl Builder {
                 gadgets: vec![],
                 night: None,
                 weather: None,
+                sonic: None,
+                rings: vec![],
+                endless: false,
             },
         }
+    }
+
+    /// A builder whose design x = 0 is at world x `x0` (px), with the
+    /// design floor on the world's floor (stretches of an endless run).
+    pub fn at(x0: f32, sh: f32) -> Self {
+        Builder { dx: x0, ..Builder::new(DESIGN_W, sh) }
     }
 
     /// Design pixels → physics metres.
@@ -172,6 +181,36 @@ impl Builder {
         }
     }
 
+    /// Sonic starts at design point (x, y).
+    pub fn sonic(&mut self, x: f32, y: f32) {
+        self.scene.sonic = Some(self.phys(x, y));
+    }
+
+    /// A ring to collect at design point (x, y).
+    pub fn ring(&mut self, x: f32, y: f32) {
+        let p = self.phys(x, y);
+        self.scene.rings.push(p);
+    }
+
+    /// A loop Sonic can run round: centre (x, y), inner radius `r`, on
+    /// three pinned planks (the way in, the top, the way out).
+    pub fn sonic_loop(&mut self, x: f32, y: f32, r: f32, rgb: [u8; 3]) {
+        let t = 16.0;
+        let rc = r + t / 2.0;
+        // Screen angles: 90° is the bottom, 0° the right, -90° the top.
+        for (from, to, layer) in [(90.0f32, -60.0f32, 1u8), (-60.0, -120.0, 3), (-120.0, -270.0, 2)] {
+            let n = 36;
+            let pts: Vec<(f32, f32)> = (0..=n)
+                .map(|k| {
+                    let a = (from + (to - from) * k as f32 / n as f32).to_radians();
+                    (x + a.cos() * rc, y + a.sin() * rc)
+                })
+                .collect();
+            let m = Material { layer, flammable: false, bounce: 0.1, ..Material::DEFAULT };
+            self.stroke(&pts, t, rgb, true, m);
+        }
+    }
+
     pub fn water(&mut self, level: f32, density: f32) {
         self.scene.water = Some(SceneWater { level, density });
     }
@@ -252,7 +291,7 @@ mod tests {
     fn every_built_in_scene_builds_and_round_trips() {
         for e in examples::ALL {
             let sc = e.scene(1100.0, 720.0);
-            assert!(!sc.objects.is_empty(), "{} is empty", e.name);
+            assert!(!sc.objects.is_empty() || sc.endless, "{} is empty", e.name);
             let json = serde_json::to_string(&sc).unwrap();
             assert!(serde_json::from_str::<SceneFile>(&json).is_ok(), "{} round-trips", e.name);
         }
