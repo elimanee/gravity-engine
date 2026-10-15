@@ -4,8 +4,9 @@
 //! buttons; every one of them becomes a rigid body. Press F1 in the app for
 //! the full list of controls.
 //!
-//! Usage: `gravity_engine [--no-title] [FILES…]` — files may be images,
-//! audio (tracker modules, mp3/flac/ogg/…, .pls playlists) or `.gscene` scenes.
+//! Usage: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files may
+//! be images, audio (tracker modules, mp3/flac/ogg/…, .pls playlists) or
+//! `.gscene` scenes.
 
 // No console window behind the game on Windows release builds.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
@@ -25,6 +26,7 @@ mod library;
 mod lighting;
 mod net;
 mod physics;
+mod profile;
 mod recorder;
 mod scene;
 mod settings;
@@ -54,15 +56,21 @@ fn window_conf() -> Conf {
 async fn main() {
     let mut skip_title = false;
     let mut verify = None;
+    let mut benchmark = false;
     let mut files = vec![];
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
             "--no-title" => skip_title = true,
+            "--benchmark" => benchmark = true,
             // Development: play every challenge's reference solution.
             "--verify-challenges" => verify = Some(None),
             a if a.starts_with("--verify-challenge=") => verify = Some(a[19..].parse::<usize>().ok().map(|n| n - 1)),
             "-h" | "--help" => {
-                println!("usage: gravity_engine [--no-title] [FILES…]\n\nPress F1 in the app for controls.");
+                println!(
+                    "usage: gravity_engine [--no-title] [--benchmark] [FILES…]\n\n  \
+                     --benchmark  run stress scenes, print frame times and quit\n\n\
+                     Press F1 in the app for controls."
+                );
                 return;
             }
             "-V" | "--version" => {
@@ -75,14 +83,21 @@ async fn main() {
 
     ui::theme::load_fonts();
     prevent_quit();
-    let mut app = app::App::new(files, skip_title);
+    let mut app = app::App::new(files, skip_title || benchmark);
     if let Some(only) = verify {
         let ok = app.verify_challenges(only);
         // Exit without saving the settings the check changed.
         std::process::exit(if ok { 0 } else { 1 });
     }
+    if benchmark {
+        app.start_benchmark();
+    }
     loop {
         app.frame();
+        if app.benchmark_done() {
+            // Exit without saving the settings the benchmark changed.
+            std::process::exit(0);
+        }
         if app.quit || is_quit_requested() {
             break;
         }

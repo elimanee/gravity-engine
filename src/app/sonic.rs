@@ -174,6 +174,7 @@ impl App {
         let gp_jump = self.pad.jump_pressed();
         let gp_action = self.pad.pressed(crate::gamepad::Button::West);
         let locked = self.game.as_ref().is_some_and(|g| g.locks_input());
+        let bench = self.bench_frame();
         let (aw, ah) = self.arena();
         let floor = world.walls().floor.then_some(ah - WALL_T * PPM);
         let Some(run) = &mut self.sonic else { return };
@@ -189,6 +190,12 @@ impl App {
         if locked {
             pad = Pad::default();
             run.jump = false;
+        }
+        // The benchmark runs him to the right, hopping now and then.
+        if let Some(frame) = bench {
+            pad.right = true;
+            pad.jump = frame % 50 < 20;
+            pad.jump_pressed = frame % 50 == 0;
         }
         let mut events = vec![];
         if run.held.is_none() {

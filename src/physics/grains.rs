@@ -216,8 +216,13 @@ impl Grains {
 
     /// Draw in world space. The liquid is drawn as overlapping discs, dark
     /// and wide first, so neighbouring drops merge into one body of liquid.
-    pub fn draw(&self, world: &PhysWorld) {
-        let pos = |g: &Grain| world.bodies.get(g.body).map(|b| to_screen(b.translation().x, b.translation().y));
+    /// Draw the grains within `visible` (world px).
+    pub fn draw(&self, world: &PhysWorld, visible: Rect) {
+        let near = Rect::new(visible.x - 12.0, visible.y - 12.0, visible.w + 24.0, visible.h + 24.0);
+        let pos = |g: &Grain| {
+            let b = world.bodies.get(g.body)?;
+            Some(to_screen(b.translation().x, b.translation().y)).filter(|p| near.contains(*p))
+        };
         let liquid = |g: &&Grain| g.kind == GrainKind::Liquid;
         for g in self.list.iter().filter(liquid) {
             if let Some(p) = pos(g) {

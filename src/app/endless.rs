@@ -272,7 +272,10 @@ impl App {
     pub(super) fn end_endless(&mut self) {
         if let Some(mut e) = self.endless.take() {
             (self.s.weather, self.s.night, self.s.water, self.s.water_level) = e.before;
-            self.ghost_toast(e.keep_if_best());
+            // The benchmark leaves the player's ghost alone.
+            if self.bench.is_none() {
+                self.ghost_toast(e.keep_if_best());
+            }
         }
     }
 
@@ -325,7 +328,7 @@ impl App {
         if over {
             let t = e.over.map_or(0.0, |t| t + step);
             e.over = Some(t);
-            let kept = e.keep_if_best();
+            let kept = if self.bench.is_none() { e.keep_if_best() } else { None };
             self.ghost_toast(kept);
             if t > RESTART {
                 self.clear_objects();
