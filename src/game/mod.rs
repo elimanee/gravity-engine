@@ -51,6 +51,8 @@ pub enum EnemyKind {
     Crab,
 }
 
+// Used by the level editor (next).
+#[allow(dead_code)]
 impl EnemyKind {
     pub const ALL: &'static [EnemyKind] = &[EnemyKind::Crawler, EnemyKind::Flyer, EnemyKind::Crab];
 
@@ -82,6 +84,7 @@ pub enum MonitorKind {
     Life,
 }
 
+#[allow(dead_code)]
 impl MonitorKind {
     pub const ALL: &'static [MonitorKind] =
         &[MonitorKind::Rings, MonitorKind::Shield, MonitorKind::Invincible, MonitorKind::Shoes, MonitorKind::Life];
@@ -118,6 +121,7 @@ pub struct LevelSpec {
 }
 
 impl LevelSpec {
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.enemies.is_empty()
             && self.monitors.is_empty()
@@ -406,6 +410,7 @@ impl Game {
     }
 
     /// Forget what lies far behind `x` (endless runs).
+    #[allow(dead_code)]
     pub fn forget_before(&mut self, world: &mut PhysWorld, x: f32) {
         self.enemies.retain(|e| e.pos.x > x);
         self.shots.retain(|s| s.pos.x > x);
