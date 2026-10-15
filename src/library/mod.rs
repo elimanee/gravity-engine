@@ -5,12 +5,14 @@
 //! and turned into a regular [`SceneFile`] for the current window size: the
 //! layout is centred horizontally and anchored to the floor.
 
+pub mod acts;
 pub mod challenges;
 pub mod custom;
 pub mod examples;
 
 use crate::config::PPM;
 use crate::drawing;
+use crate::game::{self, EnemyKind, LevelSpec, MonitorKind, Placed};
 use crate::physics::borders::BorderMode;
 use crate::physics::gadgets::{GadgetKind, GadgetSpec, Trigger};
 use crate::physics::links::LinkKind;
@@ -68,6 +70,7 @@ impl Builder {
                 sonic: None,
                 rings: vec![],
                 endless: false,
+                game: None,
             },
         }
     }
@@ -209,6 +212,105 @@ impl Builder {
             let m = Material { layer, flammable: false, bounce: 0.1, ..Material::DEFAULT };
             self.stroke(&pts, t, rgb, true, m);
         }
+    }
+
+    /// The level being built (made on first use).
+    fn level(&mut self) -> &mut LevelSpec {
+        self.scene.game.get_or_insert_with(LevelSpec::default)
+    }
+
+    /// A badnik at design point (x, y) (its centre).
+    pub fn enemy(&mut self, kind: EnemyKind, x: f32, y: f32) {
+        let at = self.phys(x, y);
+        self.level().enemies.push(Placed { kind, at });
+    }
+
+    /// A badnik walking on the ground at `ground` (design y).
+    pub fn walker(&mut self, kind: EnemyKind, x: f32, ground: f32) {
+        self.enemy(kind, x, ground - 17.0);
+    }
+
+    /// An item monitor standing on the ground at `ground`.
+    pub fn monitor(&mut self, kind: MonitorKind, x: f32, ground: f32) {
+        let at = self.phys(x, ground - game::MONITOR.y / 2.0);
+        self.level().monitors.push(Placed { kind, at });
+    }
+
+    /// `n` spike blocks side by side from `x`, on the ground at `ground`.
+    pub fn spikes(&mut self, x: f32, ground: f32, n: usize) {
+        for k in 0..n {
+            let at = self.phys(x + k as f32 * game::SPIKES.x, ground - game::SPIKES.y / 2.0);
+            self.level().spikes.push(at);
+        }
+    }
+
+    /// A star post (checkpoint) on the ground at `ground`.
+    pub fn post(&mut self, x: f32, ground: f32) {
+        let at = self.phys(x, ground - 40.0);
+        self.level().posts.push(at);
+    }
+
+    /// The goal signpost on the ground at `ground`.
+    pub fn goal(&mut self, x: f32, ground: f32) {
+        let at = self.phys(x, ground - 40.0);
+        self.level().goal = Some(at);
+    }
+
+    /// The boss, flying to and fro around (x, y).
+    pub fn boss(&mut self, x: f32, y: f32) {
+        let at = self.phys(x, y);
+        self.level().boss = Some(at);
+    }
+
+    /// Solid ground from x0 to x1, its top at `top`, down to the bottom of
+    /// the world, with a strip of grass (or `edge`) along the top.
+    pub fn ground(&mut self, x0: f32, x1: f32, top: f32, rgb: [u8; 3], edge: [u8; 3]) {
+        self.hill(x0, x1, top, 0.0, rgb, edge);
+    }
+
+    /// Ground from x0 to x1 whose top rises `h` px in a smooth hump (made
+    /// of pieces at most 600 px wide, so their sprites stay small).
+    pub fn hill(&mut self, x0: f32, x1: f32, top: f32, h: f32, rgb: [u8; 3], edge: [u8; 3]) {
+        let n = ((x1 - x0) / 40.0).ceil().max(1.0) as usize;
+        let surface: Vec<(f32, f32)> = (0..=n)
+            .map(|i| {
+                let t = i as f32 / n as f32;
+                (x0 + (x1 - x0) * t, top - h * (std::f32::consts::PI * t).sin().powi(2))
+            })
+            .collect();
+        let m = Material { flammable: false, friction: 0.6, bounce: 0.05, ..Material::DEFAULT };
+        for piece in
+            surface.chunks(15).enumerate().map(|(k, c)| &surface[k * 15..(k * 15 + c.len() + 1).min(surface.len())])
+        {
+            if piece.len() < 2 {
+                continue;
+            }
+            let (a, b) = (piece[0], piece[piece.len() - 1]);
+            let mut outline = piece.to_vec();
+            outline.push((b.0, DESIGN_H));
+            outline.push((a.0, DESIGN_H));
+            outline.push(a);
+            self.stroke(&outline, 4.0, rgb, true, m);
+            self.stroke(&dense(piece), 10.0, edge, true, m);
+        }
+    }
+
+    /// A floating platform plank from x0 to x1 at height y.
+    pub fn platform(&mut self, x0: f32, x1: f32, y: f32, rgb: [u8; 3]) {
+        let m = Material { flammable: false, friction: 0.6, bounce: 0.05, ..Material::DEFAULT };
+        self.stroke(&dense(&[(x0, y), (x1, y)]), 16.0, rgb, true, m);
+    }
+
+    /// A spring pad (straight up) centred on x, on the ground at `ground`.
+    pub fn spring(&mut self, x: f32, ground: f32) {
+        let m = Material { bounce: 1.0, flammable: false, ..Material::DEFAULT };
+        self.stroke(&[(x - 26.0, ground - 4.0), (x + 26.0, ground - 4.0)], 10.0, CORAL, true, m);
+    }
+
+    /// A dash panel from x0 to x1 on the ground at `ground`.
+    pub fn dash_panel(&mut self, x0: f32, x1: f32, ground: f32) {
+        let m = Material { conveyor: 20.0, flammable: false, ..Material::DEFAULT };
+        self.stroke(&[(x0, ground - 3.0), (x1, ground - 3.0)], 8.0, CORAL, true, m);
     }
 
     pub fn water(&mut self, level: f32, density: f32) {

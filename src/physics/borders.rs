@@ -18,6 +18,8 @@ pub enum BorderMode {
     Bounce,
     Repulse,
     Portal,
+    /// No walls and no floor: what falls off is gone (pits in levels).
+    Open,
 }
 
 pub struct WallSpec {
@@ -35,6 +37,7 @@ impl BorderMode {
         BorderMode::Bounce,
         BorderMode::Repulse,
         BorderMode::Portal,
+        BorderMode::Open,
     ];
 
     pub fn label(self) -> &'static str {
@@ -46,6 +49,7 @@ impl BorderMode {
             BorderMode::Bounce => "Bounce",
             BorderMode::Repulse => "Repulse",
             BorderMode::Portal => "Portal",
+            BorderMode::Open => "Open",
         }
     }
 
@@ -58,6 +62,7 @@ impl BorderMode {
             BorderMode::Bounce => "Springy trampolines on the sides",
             BorderMode::Repulse => "Soft force field on every edge",
             BorderMode::Portal => "No floor — every edge is a portal",
+            BorderMode::Open => "No walls, no floor — what falls off is gone",
         }
     }
 
@@ -73,6 +78,7 @@ impl BorderMode {
                 let (r, g, b) = hsv_to_rgb(get_time() as f32 * 0.4, 0.7, 1.0);
                 Color::from_rgba(r, g, b, 255)
             }
+            BorderMode::Open => Color::from_rgba(150, 150, 165, 255),
         }
     }
 
@@ -84,8 +90,8 @@ impl BorderMode {
 
     pub fn walls(self) -> WallSpec {
         WallSpec {
-            floor: self != BorderMode::Portal,
-            ceiling: !matches!(self, BorderMode::Warp | BorderMode::Portal),
+            floor: !matches!(self, BorderMode::Portal | BorderMode::Open),
+            ceiling: !matches!(self, BorderMode::Warp | BorderMode::Portal | BorderMode::Open),
             sides: matches!(self, BorderMode::Walls | BorderMode::Bounce | BorderMode::Repulse),
         }
     }
@@ -288,6 +294,10 @@ impl BorderMode {
                     x += spacing;
                 }
             }
+            BorderMode::Open => {
+                // A dark fade at the bottom: the drop.
+                crate::ui::theme::gradient_v(0.0, sh - ft * 3.0, sw, ft * 3.0, with_a(BLACK, 0.0), with_a(BLACK, 0.45));
+            }
         }
     }
 }
@@ -298,8 +308,10 @@ mod tests {
 
     #[test]
     fn cycle_wraps_both_ways() {
-        assert_eq!(BorderMode::Walls.cycle(-1), BorderMode::Portal);
-        assert_eq!(BorderMode::Portal.cycle(1), BorderMode::Walls);
+        assert_eq!(BorderMode::Walls.cycle(-1), BorderMode::Open);
+        assert_eq!(BorderMode::Open.cycle(1), BorderMode::Walls);
+        let w = BorderMode::Open.walls();
+        assert!(!w.floor && !w.ceiling && !w.sides, "nothing to stand on");
     }
 
     #[test]

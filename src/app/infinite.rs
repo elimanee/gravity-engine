@@ -26,8 +26,9 @@ impl App {
             self.shift_world((cx - aw / 2.0).round());
             self.world.set_infinite(now);
             self.camera.infinite = now;
-            if now && self.s.border != crate::physics::borders::BorderMode::Walls {
-                self.s.border = crate::physics::borders::BorderMode::Walls;
+            use crate::physics::borders::BorderMode;
+            if now && !matches!(self.s.border, BorderMode::Walls | BorderMode::Open) {
+                self.s.border = BorderMode::Walls;
                 self.world.set_border(self.s.border);
             }
         }
@@ -91,6 +92,12 @@ impl App {
         }
         if let Some(e) = &mut self.endless {
             e.shift(dx);
+        }
+        if let Some(g) = &mut self.game {
+            g.shift(dx);
+        }
+        for p in &mut self.popups {
+            p.at.x -= dx;
         }
         for o in &mut self.objects {
             o.clear_trail();

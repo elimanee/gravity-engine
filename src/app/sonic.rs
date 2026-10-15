@@ -97,6 +97,9 @@ impl App {
             };
             map.insert(o.collider, g);
         }
+        if let Some(game) = &self.game {
+            map.extend(game.grounds());
+        }
         map
     }
 
@@ -129,6 +132,7 @@ impl App {
         let gravity = -self.s.gravity / 9.8;
         let gp = self.pad.state();
         let gp_jump = self.pad.jump_pressed();
+        let locked = self.game.as_ref().is_some_and(|g| g.locks_input());
         let Some(run) = &mut self.sonic else { return };
         let mut pad = Pad {
             left: key(KeyCode::Left) || gp.left(),
@@ -138,6 +142,10 @@ impl App {
             jump: (key(KeyCode::Space) && !shift) || gp.jump(),
             jump_pressed: run.jump || gp_jump,
         };
+        if locked {
+            pad = Pad::default();
+            run.jump = false;
+        }
         let mut events = vec![];
         if run.held.is_none() {
             run.acc = (run.acc + step).min(MAX_FRAMES / FPS);
@@ -149,9 +157,11 @@ impl App {
             }
         }
         let s = run.sonic.clone();
-        // Fell out of the world: back to the start.
+        // Fell out of the world: back to the start (a level takes a life instead).
         let (aw, ah) = self.arena();
-        if s.pos.x < -300.0 || s.pos.x > aw + 300.0 || s.pos.y > ah + 300.0 || s.pos.y < -1500.0 {
+        if self.game.is_none()
+            && (s.pos.x < -300.0 || s.pos.x > aw + 300.0 || s.pos.y > ah + 300.0 || s.pos.y < -1500.0)
+        {
             let endless = self.endless.is_some();
             if let Some(run) = &mut self.sonic {
                 // In an endless run he comes back where he fell.
@@ -163,7 +173,7 @@ impl App {
         }
         self.sonic_events(&s, &events, step);
         self.collect_rings(&s);
-        if self.pan_last.is_none() {
+        if self.pan_last.is_none() && !s.dead {
             let screen = vec2(screen_width(), screen_height());
             self.camera.follow(s.pos, screen, FOLLOW);
         }
@@ -188,6 +198,9 @@ impl App {
                     b.apply_impulse_at_point(vector![0.0, -MASS * g.max(0.0) / FPS], Point::new(x, y), true);
                 }
                 Event::Break { collider, at } => {
+                    if self.break_game_monitor(collider) {
+                        continue;
+                    }
                     let Some(h) = self.world.colliders.get(collider).and_then(|c| c.parent()) else { continue };
                     let (x, y) = to_phys(at.x, at.y);
                     if self.shatter(h, Point::new(x, y)) {
@@ -245,7 +258,10 @@ impl App {
             if let Some(run) = &mut self.sonic {
                 run.rings += got.len() as u32;
             }
-            if self.rings.is_empty() {
+            if let Some(game) = &mut self.game {
+                let fx = game.add_rings(got.len() as u32);
+                self.game_effects(fx);
+            } else if self.rings.is_empty() {
                 self.toasts.success("Every ring collected!");
             }
         }
@@ -278,7 +294,7 @@ impl App {
         for (k, r) in self.rings.iter().enumerate() {
             art::ring(*r, t + k as f32 * 0.07, SCALE);
         }
-        if let Some(run) = &self.sonic {
+        if let Some(run) = self.sonic.as_ref().filter(|_| !self.sonic_blinks()) {
             match &self.sonic_sheet {
                 Some(sheet) => sheet.draw(&run.sonic),
                 None => art::draw(&run.sonic),

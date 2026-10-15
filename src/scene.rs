@@ -50,6 +50,9 @@ pub struct SceneFile {
     /// Sonic's endless run in the infinite world.
     #[serde(default)]
     pub endless: bool,
+    /// A Sonic level: badniks, hazards, items and the goal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game: Option<crate::game::LevelSpec>,
 }
 
 /// A gadget (laser, thruster, cannon, lamp or grappling hook).
@@ -217,6 +220,7 @@ pub fn capture(
         sonic: None,
         rings: vec![],
         endless: false,
+        game: None,
     }
 }
 
@@ -370,6 +374,7 @@ mod tests {
             sonic: None,
             rings: vec![],
             endless: false,
+            game: None,
         };
         let json = serde_json::to_string(&scene).unwrap();
         assert!(json.contains("\"type\":\"embedded\""));

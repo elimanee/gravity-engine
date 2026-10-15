@@ -2,7 +2,8 @@
 
 use super::*;
 use crate::library::custom::{self, ChallengeFile};
-use crate::library::{challenges, examples, BALL_RGB};
+use crate::library::{acts, challenges, examples, BALL_RGB};
+use crate::physics::borders::BorderMode;
 use crate::physics::zones::ZoneKind;
 use crate::ui::challenge_bar::ChallengeView;
 use std::rc::Rc;
@@ -51,6 +52,14 @@ impl App {
     /// Replace the scene with `sc` (from a file or the library).
     pub(super) fn apply_scene(&mut self, sc: scene::SceneFile) -> (usize, usize) {
         self.clear_objects();
+        self.act = None;
+        self.level = None;
+        if self.infinite() && !matches!(sc.border, BorderMode::Walls | BorderMode::Open) {
+            // An infinite world only has a floor, or nothing.
+            let mut sc = sc;
+            sc.border = BorderMode::Walls;
+            return self.apply_scene(sc);
+        }
         self.grains.clear(&mut self.world);
         self.s.gravity = sc.gravity.clamp(crate::settings::GRAVITY_RANGE.0, crate::settings::GRAVITY_RANGE.1);
         self.s.border = sc.border;
@@ -85,7 +94,43 @@ impl App {
         self.objects = made.objects;
         self.links = made.links;
         self.gadgets = made.gadgets;
+        if let Some(spec) = &sc.game {
+            let start = sc
+                .sonic
+                .map_or_else(|| self.spawn_point(screen_width() / 2.0), |[x, y]| crate::physics::to_screen(x, y));
+            self.start_game(spec, start);
+            self.camera.center = start;
+            self.level = Some(sc);
+        }
         (n, made.failed)
+    }
+
+    /// Play built-in act `i` (in the infinite world).
+    pub(super) fn open_act(&mut self, i: usize) {
+        let Some(act) = acts::ALL.get(i) else { return };
+        self.challenge = None;
+        if !self.infinite() {
+            self.set_world_size(4);
+        }
+        let (aw, ah) = self.arena();
+        self.apply_scene(act.scene(aw / 2.0 - 600.0, ah));
+        self.act = Some(i);
+        self.camera.zoom = 1.0;
+        self.paused = false;
+        self.library.fader.open = false;
+    }
+
+    /// The act after the one being played, if there is one.
+    pub(super) fn next_act(&self) -> Option<usize> {
+        self.act.map(|i| i + 1).filter(|&i| i < acts::ALL.len())
+    }
+
+    /// Start the level again (after Game Over), keeping its place in the campaign.
+    pub(super) fn restart_level(&mut self) {
+        let Some(sc) = self.level.clone() else { return };
+        let act = self.act;
+        self.apply_scene(sc);
+        self.act = act;
     }
 
     pub(super) fn open_example(&mut self, i: usize) {

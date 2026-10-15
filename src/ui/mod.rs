@@ -127,6 +127,10 @@ pub enum Action {
     ToggleSonic,
     /// Pick a sprite sheet for Sonic.
     LoadSonicSheet,
+    /// After an act's tally: the next act (or back to the library).
+    LevelContinue,
+    /// Play one of Sonic's built-in acts.
+    OpenAct(usize),
     Undo,
     Redo,
     ToggleRecording,

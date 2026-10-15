@@ -186,6 +186,12 @@ pub struct Sonic {
     /// frames spent standing idle.
     pub anim: f32,
     pub idle: u32,
+    /// Knocked back by a hit: no control until he lands.
+    pub hurt: bool,
+    /// Lost a life: he flies up and falls through everything.
+    pub dead: bool,
+    /// Speed shoes (a monitor): twice as fast.
+    pub shoes: bool,
 }
 
 /// Unit vector "down" for his feet in each ground mode.
@@ -242,7 +248,51 @@ impl Sonic {
             spin: 0.0,
             anim: 0.0,
             idle: 0,
+            hurt: false,
+            dead: false,
+            shoes: false,
         }
+    }
+
+    /// Hit: knocked up and away from `from_x` (world px).
+    pub fn knock(&mut self, from_x: f32) {
+        let away = if self.pos.x < from_x { -1.0 } else { 1.0 };
+        self.leave_ground();
+        self.hurt = true;
+        self.rolling = false;
+        self.jumping = false;
+        self.spindash = None;
+        self.xsp = 2.0 * away;
+        self.ysp = -4.0;
+    }
+
+    /// Out of rings and hit (or fallen): up he goes, and down through everything.
+    pub fn die(&mut self) {
+        self.leave_ground();
+        self.dead = true;
+        self.hurt = false;
+        self.rolling = false;
+        self.jumping = false;
+        self.spindash = None;
+        self.xsp = 0.0;
+        self.ysp = -7.0;
+    }
+
+    /// Bounced off something he destroyed in the air.
+    pub fn rebound(&mut self) {
+        if self.grounded {
+            return;
+        }
+        if self.ysp > 0.0 {
+            self.ysp = -self.ysp;
+        } else {
+            self.ysp += 1.0;
+        }
+    }
+
+    /// Attacking: curled up (rolling, jumping, spin dash).
+    pub fn attacking(&self) -> bool {
+        self.is_ball()
     }
 
     /// Back to where he started, standing still.
@@ -337,6 +387,11 @@ impl Sonic {
     /// the world's gravity relative to Earth's.
     pub fn frame(&mut self, world: &PhysWorld, env: Env, input: Input, water: Option<f32>, gravity: f32) -> Vec<Event> {
         let mut events = vec![];
+        if self.dead {
+            self.ysp = (self.ysp + DRY.grv).min(MAX_FALL);
+            self.pos += vec2(self.xsp, self.ysp) * SCALE;
+            return events;
+        }
         let under = water.is_some_and(|w| self.pos.y > w);
         if under != self.underwater {
             self.underwater = under;
@@ -349,8 +404,15 @@ impl Sonic {
             }
             events.push(Event::Splash);
         }
-        let c = if self.underwater { WET } else { DRY };
-        let grv = c.grv * gravity.max(0.0);
+        let c = if self.underwater {
+            WET
+        } else if self.shoes {
+            Consts { acc: 0.09375, frc: 0.09375, top: 12.0, air: 0.1875, ..DRY }
+        } else {
+            DRY
+        };
+        let grv = if self.hurt { 0.1875 } else { c.grv } * gravity.max(0.0);
+        let input = if self.hurt { Input::default() } else { input };
         if self.grounded {
             self.ground_frame(world, env, input, c, &mut events);
         } else {
@@ -648,6 +710,15 @@ impl Sonic {
         if hit.normal.dot(dir) > -0.6 {
             return;
         }
+        // Side springs send him back the other way along the ground.
+        if hit.ground.bounce >= 0.6 {
+            let out = SPRING * hit.ground.bounce.min(1.6);
+            self.gsp = -self.gsp.signum() * out;
+            self.facing = self.gsp.signum();
+            self.control_lock = 16;
+            events.push(Event::Spring);
+            return;
+        }
         self.pos -= dir * (PUSH - hit.dist) * SCALE;
         let speed = self.shove(world, &hit, dir, self.gsp.abs(), events);
         self.gsp = speed * self.gsp.signum();
@@ -697,6 +768,10 @@ impl Sonic {
             let dir = vec2(d, 0.0);
             if let Some(hit) = self.cast(world, env, self.pos, dir, PUSH) {
                 self.pos.x -= d * (PUSH - hit.dist) * SCALE;
+                if hit.ground.bounce >= 0.6 && self.xsp * d > 0.0 {
+                    self.spring(hit, events);
+                    continue;
+                }
                 if self.xsp * d > 0.0 {
                     let speed = self.shove(world, &hit, dir, self.xsp.abs(), events);
                     self.xsp = speed * d;
@@ -752,6 +827,11 @@ impl Sonic {
         };
         if hit.ground.mass > 0.0 {
             events.push(Event::Push { collider: hit.collider, at: hit.point, impulse: down * MASS * self.ysp });
+        }
+        if self.hurt {
+            // Landing after a hit: he stops dead.
+            self.hurt = false;
+            self.gsp = 0.0;
         }
         self.grounded = true;
         self.jumping = false;

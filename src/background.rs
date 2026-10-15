@@ -230,3 +230,53 @@ impl Background {
         }
     }
 }
+
+/// The sky behind a Sonic level: a bright day, drifting clouds and two
+/// rows of far hills that scroll slower than the level (`scroll`: the
+/// view's x in the world, px).
+pub fn level_sky(sw: f32, sh: f32, scroll: f32) {
+    let t = get_time() as f32;
+    let rgb = |r: u8, g: u8, b: u8| Color::from_rgba(r, g, b, 255);
+    gradient_v3(0.0, 0.0, sw, sh, rgb(46, 112, 220), rgb(110, 172, 245), rgb(196, 228, 255));
+    radial(sw * 0.82, sh * 0.16, 160.0, Color::from_rgba(255, 250, 220, 90), Color::from_rgba(255, 250, 220, 0));
+    draw_circle(sw * 0.82, sh * 0.16, 34.0, Color::from_rgba(255, 252, 232, 255));
+    // Clouds: puffs of circles drifting by.
+    let span = sw + 400.0;
+    for k in 0..7 {
+        let fk = k as f32;
+        let x = ((fk * 331.0 - scroll * 0.05 + t * 8.0) % span + span) % span - 200.0;
+        let y = sh * (0.1 + (fk * 0.37).fract() * 0.3);
+        let s = 0.7 + (fk * 0.61).fract() * 0.6;
+        let c = Color::new(1.0, 1.0, 1.0, 0.85);
+        for (dx, dy, r) in [(-34.0, 6.0, 20.0), (-12.0, -6.0, 26.0), (14.0, -2.0, 24.0), (36.0, 8.0, 17.0)] {
+            draw_circle(x + dx * s, y + dy * s, r * s, c);
+        }
+        draw_rectangle(x - 34.0 * s, y + 6.0 * s, 70.0 * s, 16.0 * s, c);
+    }
+    // Far hills (two rows), as triangle strips down to the bottom.
+    for (k, (speed, base, height, col)) in [
+        (0.08, 0.62, 90.0, Color::from_rgba(120, 180, 210, 255)),
+        (0.18, 0.72, 70.0, Color::from_rgba(84, 168, 120, 255)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let off = scroll * speed;
+        let step = 24.0;
+        let n = (sw / step).ceil() as usize + 1;
+        let mut vertices = Vec::with_capacity(n * 2 + 2);
+        let mut indices = Vec::with_capacity(n * 6);
+        for i in 0..=n {
+            let x = i as f32 * step;
+            let u = (x + off) / 260.0 + k as f32 * 1.7;
+            let y = sh * base - height * (0.55 + 0.3 * u.sin() + 0.15 * (u * 2.3 + 1.0).sin());
+            vertices.push(Vertex::new(x, y, 0.0, 0.0, 0.0, col));
+            vertices.push(Vertex::new(x, sh, 0.0, 0.0, 0.0, col));
+            if i > 0 {
+                let (a, b) = ((i as u16 - 1) * 2, i as u16 * 2);
+                indices.extend_from_slice(&[a, b, b + 1, a, b + 1, a + 1]);
+            }
+        }
+        draw_mesh(&Mesh { vertices, indices, texture: None });
+    }
+}
