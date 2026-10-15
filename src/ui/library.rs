@@ -28,6 +28,8 @@ pub struct LibraryData<'a> {
     pub act_scores: &'a BTreeMap<String, u32>,
     /// Who plays the acts.
     pub character: Character,
+    /// Names of "My levels".
+    pub levels: &'a [String],
 }
 
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -49,22 +51,24 @@ pub struct Library {
 
 impl Library {
     /// Cells in the current tab.
-    fn total(&self, mine: usize) -> usize {
+    /// `(mine, levels)`: how many of "My challenges" and "My levels" there are.
+    fn total(&self, (mine, levels): (usize, usize)) -> usize {
         match self.tab {
             Tab::Examples => examples::ALL.len(),
             Tab::Challenges => challenges::ALL.len(),
             Tab::Mine => mine + 1,
-            Tab::Sonic => acts::ALL.len(),
+            // "New level", the built-in acts, then the player's levels.
+            Tab::Sonic => 1 + acts::ALL.len() + levels,
         }
     }
 
     /// Cells shown (the rest is scrolled away).
-    fn count(&self, mine: usize) -> usize {
+    fn count(&self, mine: (usize, usize)) -> usize {
         self.total(mine).saturating_sub(self.scroll * COLS).min(ROWS * COLS)
     }
 
     /// Rows that can be scrolled.
-    fn max_scroll(&self, mine: usize) -> usize {
+    fn max_scroll(&self, mine: (usize, usize)) -> usize {
         self.total(mine).div_ceil(COLS).saturating_sub(ROWS)
     }
 
@@ -107,7 +111,8 @@ impl Library {
         self.scroll = 0;
     }
 
-    pub fn update(&mut self, dt: f32, mine: usize, input: &mut Input, actions: &mut Vec<Action>) {
+    /// `mine`: how many of "My challenges" and "My levels" there are.
+    pub fn update(&mut self, dt: f32, mine: (usize, usize), input: &mut Input, actions: &mut Vec<Action>) {
         self.fader.update(dt, 7.0);
         if !self.fader.open {
             return;
@@ -141,7 +146,10 @@ impl Library {
                     Tab::Mine if i == 0 => Action::OpenEditor(None),
                     Tab::Mine if edit => Action::OpenEditor(Some(i - 1)),
                     Tab::Mine => Action::StartCustom(i - 1),
-                    Tab::Sonic => Action::OpenAct(i),
+                    Tab::Sonic if i == 0 => Action::EditLevel(None),
+                    Tab::Sonic if i <= acts::ALL.len() => Action::OpenAct(i - 1),
+                    Tab::Sonic if edit => Action::EditLevel(Some(i - 1 - acts::ALL.len())),
+                    Tab::Sonic => Action::OpenLevel(i - 1 - acts::ALL.len()),
                 });
                 self.fader.open = false;
             } else if !p.contains(input.mouse) {
@@ -194,7 +202,7 @@ impl Library {
         }
 
         let t = get_time() as f32;
-        let mine = data.mine.len();
+        let mine = (data.mine.len(), data.levels.len());
         let more = self.max_scroll(mine);
         if more > 0 {
             let above = if self.scroll > 0 { "↑ " } else { "" };
@@ -238,7 +246,28 @@ impl Library {
                         text(line, r.x + 12.0, r.y + 46.0 + k as f32 * 14.0, 11.0, fade(TEXT_MUTED, f));
                     }
                 }
+                Tab::Sonic if i == 0 => {
+                    icons::zone_kind(ZoneKind::Goal, vec2(r.x + 22.0, r.y + 22.0), 18.0, fade(ACCENT_HI, f), t);
+                    text_bold("New level", r.x + 38.0, r.y + 27.0, 14.0, fade(TEXT, f));
+                    let about = "Build a Sonic level: ground, loops, badniks, monitors, a goal or a boss";
+                    for (k, line) in wrap(about, r.w - 24.0, 11.0).iter().take(2).enumerate() {
+                        text(line, r.x + 12.0, r.y + 46.0 + k as f32 * 14.0, 11.0, fade(TEXT_MUTED, f));
+                    }
+                }
+                Tab::Sonic if i > acts::ALL.len() => {
+                    let name = &data.levels[i - 1 - acts::ALL.len()];
+                    text_bold(&fit(name, r.w - 24.0 - 58.0, 14.0), r.x + 12.0, r.y + 26.0, 14.0, fade(TEXT, f));
+                    text("My level", r.x + 12.0, r.y + 46.0, 11.0, fade(TEXT_MUTED, f));
+                    if let Some(score) = data.act_scores.get(name) {
+                        let label = format!("Best {score}");
+                        text(&label, r.x + 12.0, r.y + 62.0, 11.0, fade(SUCCESS, f));
+                    }
+                    let e = Self::edit_button(r);
+                    draw_button(e, "Edit", e.contains(mouse), false, f);
+                    text("Play", r.x + r.w - 44.0, r.y + 26.0, 11.0, fade(if hov { ACCENT_HI } else { TEXT_DIM }, f));
+                }
                 Tab::Sonic => {
+                    let i = i - 1;
                     let a = &acts::ALL[i];
                     keycap(r.x + 12.0, r.y + 18.0, &(i + 1).to_string(), 10.0, f);
                     text_bold(&fit(a.name, r.w - 36.0 - 58.0, 14.0), r.x + 36.0, r.y + 23.0, 14.0, fade(TEXT, f));

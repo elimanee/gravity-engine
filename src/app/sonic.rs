@@ -162,7 +162,7 @@ impl App {
                 _ => Some(Ground::default()),
             }
         };
-        let typing = self.editor_bar.typing();
+        let typing = self.editor_bar.typing() || self.level_bar.typing();
         let key = |k| !typing && is_key_down(k);
         let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
         let water = self.s.water.then(|| {

@@ -207,6 +207,11 @@ impl App {
         if !done {
             return;
         }
+        if self.level_testing() {
+            // Tried from the editor: back to editing.
+            self.level_cmd(crate::ui::LevelCmd::Stop);
+            return;
+        }
         if let Some(g) = &self.game {
             let best = self.s.act_scores.entry(g.spec.name.clone()).or_insert(0);
             *best = (*best).max(g.score);

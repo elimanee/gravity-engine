@@ -12,6 +12,7 @@ pub mod help;
 pub mod hud;
 pub mod icons;
 pub mod inspector;
+pub mod level_bar;
 pub mod library;
 pub mod now_playing;
 pub mod skin_player;
@@ -131,6 +132,10 @@ pub enum Action {
     LevelContinue,
     /// Play one of Sonic's built-in acts.
     OpenAct(usize),
+    /// Play one of "My levels", or edit it (`None`: a new level).
+    OpenLevel(usize),
+    EditLevel(Option<usize>),
+    Level(LevelCmd),
     /// Play as the next character (or this one).
     CycleCharacter(i32),
     SetCharacter(crate::sonic::Character),
@@ -206,7 +211,18 @@ pub enum PlayerCmd {
     ClearPlaylist,
 }
 
-/// Challenge editor commands.
+/// Sonic level editor commands.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LevelCmd {
+    /// Pick what clicks place (picking it again: off, or the next monitor item).
+    Pick(level_bar::Item),
+    Play,
+    Stop,
+    Save,
+    Exit,
+}
+
+/// Commands for the challenge editor.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EditorCmd {
     PlaceBall,

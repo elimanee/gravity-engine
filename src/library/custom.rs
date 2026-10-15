@@ -156,6 +156,7 @@ mod tests {
             rings: vec![],
             endless: false,
             game: None,
+            world_size: None,
         };
         ChallengeFile::new("  My level! ", 500.0, (1100.0, 720.0), scene)
     }

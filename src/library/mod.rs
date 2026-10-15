@@ -9,6 +9,7 @@ pub mod acts;
 pub mod challenges;
 pub mod custom;
 pub mod examples;
+pub mod levels;
 
 use crate::config::PPM;
 use crate::drawing;
@@ -47,6 +48,8 @@ pub struct Builder {
     dx: f32,
     dy: f32,
     sh: f32,
+    /// Where ground blocks reach down to (design px).
+    bottom: f32,
     pub scene: SceneFile,
 }
 
@@ -56,6 +59,7 @@ impl Builder {
             dx: (sw - DESIGN_W) / 2.0,
             dy: sh - DESIGN_H,
             sh,
+            bottom: DESIGN_H,
             scene: SceneFile {
                 version: 3,
                 gravity: -9.8,
@@ -71,6 +75,7 @@ impl Builder {
                 rings: vec![],
                 endless: false,
                 game: None,
+                world_size: None,
             },
         }
     }
@@ -79,6 +84,11 @@ impl Builder {
     /// design floor on the world's floor (stretches of an endless run).
     pub fn at(x0: f32, sh: f32) -> Self {
         Builder { dx: x0, ..Builder::new(DESIGN_W, sh) }
+    }
+
+    /// A builder in world pixels, for a world `ah` px high (the level editor).
+    pub fn world(ah: f32) -> Self {
+        Builder { dx: 0.0, dy: 0.0, bottom: ah, ..Builder::new(DESIGN_W, ah) }
     }
 
     /// Design pixels → physics metres.
@@ -287,8 +297,8 @@ impl Builder {
             }
             let (a, b) = (piece[0], piece[piece.len() - 1]);
             let mut outline = piece.to_vec();
-            outline.push((b.0, DESIGN_H));
-            outline.push((a.0, DESIGN_H));
+            outline.push((b.0, self.bottom));
+            outline.push((a.0, self.bottom));
             outline.push(a);
             self.stroke(&outline, 4.0, rgb, true, m);
             self.stroke(&dense(piece), 10.0, edge, true, m);

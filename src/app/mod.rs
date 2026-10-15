@@ -60,6 +60,7 @@ mod impacts;
 mod infinite;
 mod juice;
 mod knife;
+mod level_editor;
 mod library;
 mod night;
 mod player;
@@ -174,6 +175,10 @@ pub struct App {
     game_sprites: Option<crate::game::sprites::Sprites>,
     /// Where and when Sonic last bounced off a spring.
     spring_fired: Option<(Vec2, f64)>,
+    /// The Sonic level editor, its bar, and "My levels" (file, name).
+    level_editor: Option<level_editor::LevelEditor>,
+    level_bar: crate::ui::level_bar::LevelBar,
+    levels: Vec<(std::path::PathBuf, String)>,
     /// The scene the level was opened from (to play it again), and which
     /// built-in act it is.
     level: Option<scene::SceneFile>,
@@ -295,6 +300,9 @@ impl App {
             spring_fired: None,
             level: None,
             act: None,
+            level_editor: None,
+            level_bar: Default::default(),
+            levels: Vec::new(),
             climate: Default::default(),
             pouring: false,
             pour_sound: 0.0,
@@ -444,7 +452,7 @@ impl App {
     fn keyboard(&mut self, input: &Input, actions: &mut Vec<Action>) {
         let pressed = |k| is_key_pressed(k);
         let (shift, ctrl) = (input.shift, input.ctrl);
-        if self.editor_bar.typing() {
+        if self.editor_bar.typing() || self.level_bar.typing() {
             return;
         }
         // Over the player windows, Del / Enter act on the playlist.
@@ -476,6 +484,12 @@ impl App {
                 self.spawner.fader.open = false;
             } else if self.paused {
                 self.paused = false;
+            } else if self.level_editor.as_ref().is_some_and(|e| e.item.is_some()) {
+                actions.push(Action::Level(crate::ui::LevelCmd::Pick(
+                    self.level_editor.as_ref().and_then(|e| e.item).unwrap_or(crate::ui::level_bar::Item::Erase),
+                )));
+            } else if self.level_testing() {
+                actions.push(Action::Level(crate::ui::LevelCmd::Stop));
             } else if self.editor.as_ref().is_some_and(|e| e.place.is_some()) {
                 if let Some(e) = self.editor.as_mut() {
                     e.place = None;
@@ -706,7 +720,7 @@ impl App {
     fn update_ui(&mut self, dt: f32, input: &mut Input, actions: &mut Vec<Action>) {
         // Top-most first, so overlays swallow clicks meant for them.
         self.help.update(dt, input);
-        self.library.update(dt, self.custom.len(), input, actions);
+        self.library.update(dt, (self.custom.len(), self.levels.len()), input, actions);
         self.picker.update(dt, input, actions);
         self.menu.update(dt, input, actions);
         self.update_inspector(dt, input);
@@ -727,6 +741,11 @@ impl App {
         if self.editor_view().is_some() {
             if let Some(ed) = self.editor.as_mut() {
                 self.editor_bar.update(&mut ed.name, top, input, actions);
+            }
+        }
+        if let Some(v) = self.level_view() {
+            if let Some(ed) = self.level_editor.as_mut() {
+                self.level_bar.update(&v, &mut ed.name, top, input, actions);
             }
         }
         let np = self.audio.now_playing();
@@ -842,7 +861,9 @@ impl App {
             }
         }
 
-        if input.left_pressed && !input.consumed && self.challenge.is_none() && self.editor_press(m) {
+        if input.left_pressed && !input.consumed && self.challenge.is_none() && self.level_press(m) {
+            // Placing something in a Sonic level.
+        } else if input.left_pressed && !input.consumed && self.challenge.is_none() && self.editor_press(m) {
             // Placing the challenge ball or goal.
         } else if input.left_pressed && !input.consumed {
             if self.spawner.is_open() {
@@ -929,6 +950,7 @@ impl App {
         }
         if input.left_down {
             self.knife_drag(m);
+            self.level_drag(m);
         }
 
         if input.left_released || !input.left_down {
@@ -939,6 +961,7 @@ impl App {
             self.fire.lit = false;
             self.gadget_release(m);
             self.editor_release(m);
+            self.level_release(m);
             self.knife_release(m);
             if let Some(g) = self.grab.take() {
                 g.release(&mut self.world.bodies, to_phys(m.x, m.y));
@@ -1192,6 +1215,9 @@ impl App {
             Action::LoadSonicSheet => self.pick_sonic_sheet(),
             Action::LevelContinue => self.level_continue(),
             Action::OpenAct(i) => self.open_act(i),
+            Action::OpenLevel(i) => self.open_level(i),
+            Action::EditLevel(i) => self.open_level_editor(i),
+            Action::Level(cmd) => self.level_cmd(cmd),
             Action::CycleCharacter(d) => self.set_character(self.s.character.cycle(d)),
             Action::SetCharacter(c) => self.set_character(c),
             Action::ToggleNight => {
@@ -1274,6 +1300,7 @@ impl App {
                 let open = !self.library.fader.open;
                 if open {
                     self.refresh_custom();
+                    self.refresh_levels();
                     self.library.open(self.challenge.is_some());
                 } else {
                     self.library.fader.open = false;
@@ -1504,6 +1531,7 @@ impl App {
 
     fn clear_objects(&mut self) {
         self.stop_game();
+        self.drop_level_preview();
         self.grab = None;
         self.link_drag = None;
         self.menu.close();
@@ -1918,7 +1946,7 @@ impl App {
         let screen = vec2(sw, sh);
         let (aw, ah) = self.arena();
         let m = input.world;
-        if self.game.is_some() {
+        if self.game.is_some() || self.level_editor.is_some() {
             crate::background::level_sky(sw, sh, self.camera.center.x);
         } else {
             self.bg.draw(sw, sh);
@@ -1955,6 +1983,7 @@ impl App {
         }
         self.draw_player_body();
         self.draw_game();
+        self.draw_level_editor(m);
         self.draw_sonic();
         self.draw_game_over_sonic();
         self.draw_gadgets();
@@ -1964,7 +1993,7 @@ impl App {
         }
         let t = get_time() as f32;
         // A level shows its scenery without the sandbox's badges.
-        for o in self.objects.iter().filter(|_| self.game.is_none()) {
+        for o in self.objects.iter().filter(|_| self.game.is_none() && self.level_editor.is_none()) {
             let (p, _) = o.screen_pos(&self.world);
             let mut badges = vec![];
             if o.pinned && o.material.layer == 0 {
@@ -2114,6 +2143,9 @@ impl App {
         if let (Some(v), Some(ed)) = (self.editor_view(), self.editor.as_ref()) {
             self.editor_bar.draw(&v, &ed.name, top, m);
         }
+        if let (Some(v), Some(ed)) = (self.level_view(), self.level_editor.as_ref()) {
+            self.level_bar.draw(&v, &ed.name, top, m);
+        }
         if self.library.fader.visible() {
             let mine: Vec<(String, String, f32)> = self
                 .custom
@@ -2123,12 +2155,14 @@ impl App {
                     (c.name.clone(), format!("custom:{stem}"), c.ink)
                 })
                 .collect();
+            let levels: Vec<String> = self.levels.iter().map(|(_, n)| n.clone()).collect();
             let data = LibraryData {
                 done: &self.s.challenges_done,
                 stars: &self.s.challenge_stars,
                 mine: &mine,
                 act_scores: &self.s.act_scores,
                 character: self.s.character,
+                levels: &levels,
             };
             self.library.draw(&data, m);
         }

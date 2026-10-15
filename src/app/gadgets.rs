@@ -131,7 +131,7 @@ impl App {
 
     /// Whether an arrow key (or anything else) makes `t` work right now.
     fn trigger_held(&self, t: Trigger) -> bool {
-        let typing = self.editor_bar.typing();
+        let typing = self.editor_bar.typing() || self.level_bar.typing();
         let key = |k| !typing && is_key_down(k);
         let gp = self.pad.state();
         match t {
