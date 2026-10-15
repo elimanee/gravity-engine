@@ -156,6 +156,8 @@ pub struct App {
     sky: Sky,
     /// Sonic (Shift+O) and the rings left to collect (world px).
     sonic: Option<sonic::SonicRun>,
+    /// A game controller, if one is plugged in.
+    pad: crate::gamepad::Gamepad,
     /// The user's Sonic sprite sheet (loaded when he first appears).
     sonic_sheet: Option<crate::sonic::sheet::Sheet>,
     sonic_sheet_tried: bool,
@@ -267,6 +269,7 @@ impl App {
             sky: Sky::default(),
             lights: Default::default(),
             sonic: None,
+            pad: Default::default(),
             sonic_sheet: None,
             sonic_sheet_tried: false,
             rings: Vec::new(),
@@ -368,6 +371,7 @@ impl App {
         }
 
         self.recentre();
+        self.poll_pad();
         let mut input = Input::gather();
         input.world = self.view().to_world(input.mouse);
         let mut actions = Vec::new();
@@ -502,6 +506,13 @@ impl App {
             self.quit = true;
         }
         let challenge = self.challenge.as_ref().map(|r| (r.started, r.won));
+        // The controller's Start pauses (or starts a challenge).
+        if self.pad.pressed(crate::gamepad::Button::Start) {
+            actions.push(match challenge {
+                Some((false, _)) => Action::ChallengeGo,
+                _ => Action::TogglePause,
+            });
+        }
         if pressed(KeyCode::Space) && self.sonic.is_some() && !shift {
             // Sonic's jump button (Shift+Space pauses).
             if let Some(run) = &mut self.sonic {

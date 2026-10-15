@@ -127,14 +127,16 @@ impl App {
             crate::physics::to_screen(0.0, rest).y
         });
         let gravity = -self.s.gravity / 9.8;
+        let gp = self.pad.state();
+        let gp_jump = self.pad.jump_pressed();
         let Some(run) = &mut self.sonic else { return };
         let mut pad = Pad {
-            left: key(KeyCode::Left),
-            right: key(KeyCode::Right),
-            up: key(KeyCode::Up),
-            down: key(KeyCode::Down),
-            jump: key(KeyCode::Space) && !shift,
-            jump_pressed: run.jump,
+            left: key(KeyCode::Left) || gp.left(),
+            right: key(KeyCode::Right) || gp.right(),
+            up: key(KeyCode::Up) || gp.up(),
+            down: key(KeyCode::Down) || gp.down(),
+            jump: (key(KeyCode::Space) && !shift) || gp.jump(),
+            jump_pressed: run.jump || gp_jump,
         };
         let mut events = vec![];
         if run.held.is_none() {
@@ -190,6 +192,7 @@ impl App {
                     let (x, y) = to_phys(at.x, at.y);
                     if self.shatter(h, Point::new(x, y)) {
                         self.sound(Sound::Shatter, at, 0.6);
+                        self.pad.rumble(0.6, 0.15);
                     }
                 }
                 Event::Jump => self.sound(Sound::Jump, s.pos, 0.5),
@@ -198,9 +201,15 @@ impl App {
                     let rev = s.spindash.unwrap_or(0.0);
                     self.sound(Sound::Rev, s.pos, 0.35 + rev * 0.04);
                 }
-                Event::Dash => self.sound(Sound::Dash, s.pos, 0.6),
+                Event::Dash => {
+                    self.sound(Sound::Dash, s.pos, 0.6);
+                    self.pad.rumble(0.5, 0.2);
+                }
                 Event::Skid => self.sound(Sound::Skid, feet, 0.5),
-                Event::Spring => self.sound(Sound::Spring, s.pos, 0.6),
+                Event::Spring => {
+                    self.sound(Sound::Spring, s.pos, 0.6);
+                    self.pad.rumble(0.35, 0.12);
+                }
                 Event::Splash => {
                     self.effects.splash(s.pos, 0.8);
                 }
@@ -307,5 +316,18 @@ impl App {
         let pos = run.sonic.pos;
         run.sonic.throw(pos, v);
         run.sonic.jumping = true;
+    }
+}
+
+impl App {
+    /// Read the game controller, and say when one comes or goes.
+    pub(super) fn poll_pad(&mut self) {
+        let was = self.pad.connected();
+        self.pad.poll();
+        match (was, self.pad.name.clone()) {
+            (false, Some(name)) => self.toasts.status("pad", format!("Controller connected: {name}")),
+            (true, None) => self.toasts.status("pad", "Controller disconnected"),
+            _ => {}
+        }
     }
 }

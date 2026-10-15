@@ -18,6 +18,7 @@ mod camera;
 mod config;
 mod drawing;
 mod effects;
+mod gamepad;
 mod history;
 mod library;
 mod lighting;

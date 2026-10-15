@@ -133,12 +133,13 @@ impl App {
     fn trigger_held(&self, t: Trigger) -> bool {
         let typing = self.editor_bar.typing();
         let key = |k| !typing && is_key_down(k);
+        let gp = self.pad.state();
         match t {
             Trigger::Always => true,
-            Trigger::Up => key(KeyCode::Up),
-            Trigger::Down => key(KeyCode::Down),
-            Trigger::Left => key(KeyCode::Left),
-            Trigger::Right => key(KeyCode::Right),
+            Trigger::Up => key(KeyCode::Up) || gp.up(),
+            Trigger::Down => key(KeyCode::Down) || gp.down(),
+            Trigger::Left => key(KeyCode::Left) || gp.left(),
+            Trigger::Right => key(KeyCode::Right) || gp.right(),
             Trigger::Beat => false,
         }
     }
