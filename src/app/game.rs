@@ -44,7 +44,8 @@ impl App {
         self.popups.clear();
         self.paused = false;
         let name = if spec.name.is_empty() { "Act" } else { spec.name.as_str() };
-        self.toasts.status("game", format!("{name}  ·  reach the goal!  ·  curl up to destroy badniks"));
+        let aim = if spec.goal.is_some() || spec.boss.is_some() { "reach the goal!" } else { "run as far as you can!" };
+        self.toasts.status("game", format!("{name}  ·  {aim}  ·  curl up to destroy badniks"));
     }
 
     /// Leave the game mode (its bodies go too).

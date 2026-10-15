@@ -174,6 +174,8 @@ impl App {
         let gp_jump = self.pad.jump_pressed();
         let gp_action = self.pad.pressed(crate::gamepad::Button::West);
         let locked = self.game.as_ref().is_some_and(|g| g.locks_input());
+        let (aw, ah) = self.arena();
+        let floor = world.walls().floor.then_some(ah - WALL_T * PPM);
         let Some(run) = &mut self.sonic else { return };
         let mut pad = Pad {
             left: key(KeyCode::Left) || gp.left(),
@@ -200,9 +202,13 @@ impl App {
                 run.action = false;
             }
         }
+        // Never lost under the world's floor (something heavy pushed him in).
+        if let Some(top) = floor.filter(|&top| !run.sonic.dead && run.sonic.pos.y > top) {
+            run.sonic.pos.y = top - run.sonic.radii().1 * SCALE;
+            run.sonic.ysp = run.sonic.ysp.min(0.0);
+        }
         let s = run.sonic.clone();
         // Fell out of the world: back to the start (a level takes a life instead).
-        let (aw, ah) = self.arena();
         if self.game.is_none()
             && (s.pos.x < -300.0 || s.pos.x > aw + 300.0 || s.pos.y > ah + 300.0 || s.pos.y < -1500.0)
         {

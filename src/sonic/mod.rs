@@ -57,6 +57,9 @@ const SLOPE_ROLL_DOWN: f32 = 0.3125;
 const ROLL_DEC: f32 = 0.125;
 const MAX_SPEED: f32 = 16.0;
 const MAX_FALL: f32 = 16.0;
+/// Fastest a platform carries him (guide px per frame): bits of a smashed
+/// crate flying off do not take him with them through the floor.
+const MAX_CARRY: f32 = 6.0;
 /// Below this ground speed he slips off walls and ceilings.
 const SLIP_SPEED: f32 = 2.5;
 /// Frames of no steering after slipping.
@@ -407,9 +410,32 @@ impl Sonic {
 
     /// Cast a sensor from `from` (world px) along `dir` for `len` guide px.
     fn cast(&self, world: &PhysWorld, env: Env, from: Vec2, dir: Vec2, len: f32) -> Option<Hit> {
+        self.cast_skipping(world, env, from, dir, len, None)
+    }
+
+    /// Like [`Sonic::cast`], but a sensor that starts inside something
+    /// that moves (a crate fallen on him) looks past it for the ground.
+    fn cast_past(&self, world: &PhysWorld, env: Env, from: Vec2, dir: Vec2, len: f32) -> Option<Hit> {
+        let hit = self.cast(world, env, from, dir, len)?;
+        if hit.dist > 0.0 || hit.ground.mass <= 0.0 {
+            return Some(hit);
+        }
+        self.cast_skipping(world, env, from, dir, len, Some(hit.collider))
+    }
+
+    fn cast_skipping(
+        &self,
+        world: &PhysWorld,
+        env: Env,
+        from: Vec2,
+        dir: Vec2,
+        len: f32,
+        skip: Option<ColliderHandle>,
+    ) -> Option<Hit> {
         let solid = |c: ColliderHandle| env(c).filter(|g| self.solid(g));
         let pred = |h: ColliderHandle, _: &Collider| solid(h).is_some();
-        let filter = QueryFilter::default().exclude_sensors().predicate(&pred);
+        let mut filter = QueryFilter::default().exclude_sensors().predicate(&pred);
+        filter.exclude_collider = skip;
         let (x, y) = to_phys(from.x, from.y);
         let (c, toi, n) = world.cast_ray(Point::new(x, y), vector![dir.x, -dir.y], len * SCALE / PPM, filter)?;
         let p = Point::new(x, y) + vector![dir.x, -dir.y] * toi;
@@ -432,7 +458,7 @@ impl Sonic {
         let back = self.pos - down * LIFT * SCALE;
         [-1.0, 1.0]
             .into_iter()
-            .filter_map(|k| self.cast(world, env, back + side * k * wr * SCALE, down, hr + LIFT + extra))
+            .filter_map(|k| self.cast_past(world, env, back + side * k * wr * SCALE, down, hr + LIFT + extra))
             .filter(|h| h.dist > 0.0)
             .map(|h| Hit { dist: h.dist - hr - LIFT, ..h })
             .filter(|h| h.dist >= -deepest)
@@ -705,7 +731,7 @@ impl Sonic {
             if !b.is_fixed() {
                 let (x, y) = to_phys(hit.point.x, hit.point.y);
                 let v = b.velocity_at_point(&Point::new(x, y));
-                self.carry = vec2(v.x, -v.y) * PPM / (SCALE * FPS);
+                self.carry = (vec2(v.x, -v.y) * PPM / (SCALE * FPS)).clamp_length_max(MAX_CARRY);
             }
         }
     }
@@ -1097,6 +1123,33 @@ mod tests {
         let events = run(&mut s, &w, &env, right, 120);
         assert!(!events.iter().any(|e| matches!(e, Event::Break { .. })));
         assert!(events.iter().any(|e| matches!(e, Event::Push { .. })));
+    }
+
+    #[test]
+    fn debris_on_him_or_under_him_does_not_sink_him() {
+        let mut w = world();
+        // A bit of a smashed crate right where his floor sensors start.
+        let (x, y) = to_phys(300.0, floor_y() - 19.0 * SCALE);
+        let b = w.bodies.insert(RigidBodyBuilder::dynamic().translation(vector![x, y]).linvel(vector![30.0, -40.0]));
+        let bit = w.colliders.insert_with_parent(ColliderBuilder::cuboid(0.4, 0.4), b, &mut w.bodies);
+        w.refresh_queries();
+        let env = |c: ColliderHandle| Some(Ground { mass: if c == bit { 0.2 } else { 0.0 }, ..Ground::default() });
+        let mut s = standing(300.0);
+        run(&mut s, &w, &env, Input::default(), 5);
+        assert!(s.grounded, "still finds the floor under it");
+        assert!(s.pos.y < floor_y(), "not pushed into the floor: {}", s.pos.y);
+        // Standing on a bit flying off fast, he is not flung with it.
+        let mut s = Sonic::new(vec2(300.0, floor_y() - 60.0));
+        s.ysp = 1.0;
+        let hit = Hit {
+            collider: bit,
+            dist: 0.0,
+            point: vec2(300.0, floor_y() - 40.0),
+            normal: vec2(0.0, -1.0),
+            ground: Ground { mass: 0.2, ..Ground::default() },
+        };
+        s.land_on(&w, hit, &mut vec![]);
+        assert!(s.carry.length() <= MAX_CARRY + 1e-3, "carried at {:?}", s.carry);
     }
 
     #[test]

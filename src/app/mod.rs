@@ -1893,7 +1893,7 @@ impl App {
             self.update_fire(step, mouse);
             self.update_sonic(step);
             self.update_game(step);
-            self.update_endless();
+            self.update_endless(step);
             self.soft_after_step(step, mouse);
             links::prune(&mut self.links, &self.world);
 
@@ -1942,12 +1942,13 @@ impl App {
         if self.player_body.is_some() {
             self.render_player_body(input.world);
         }
+        self.render_endless_ghost();
         let (sw, sh) = (screen_width(), screen_height());
         let screen = vec2(sw, sh);
         let (aw, ah) = self.arena();
         let m = input.world;
         if self.game.is_some() || self.level_editor.is_some() {
-            crate::background::level_sky(sw, sh, self.camera.center.x);
+            crate::background::level_sky(sw, sh, self.camera.center.x, &self.level_sky());
         } else {
             self.bg.draw(sw, sh);
         }
@@ -1984,6 +1985,7 @@ impl App {
         self.draw_player_body();
         self.draw_game();
         self.draw_level_editor(m);
+        self.draw_endless_ghost();
         self.draw_sonic();
         self.draw_game_over_sonic();
         self.draw_gadgets();

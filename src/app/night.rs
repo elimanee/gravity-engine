@@ -92,6 +92,13 @@ impl App {
             l.glow(p, r, Color::new(1.0, 0.55, 0.22, 0.75 * k));
         }
         self.effects.lights(|p, r, c| l.glow(p, r, c));
+        // Sonic carries a soft light, and his rings gleam.
+        if let Some(run) = &self.sonic {
+            l.glow(run.sonic.pos, 230.0, Color::new(0.85, 0.9, 1.0, 0.55));
+        }
+        for r in self.rings.iter().filter(|r| visible.contains(**r)) {
+            l.glow(*r, 30.0, Color::new(1.0, 0.85, 0.3, 0.55));
+        }
         // Laser beams.
         for beam in &self.beams {
             for (w, c) in beam.points.windows(2).zip(&beam.colours) {

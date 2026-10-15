@@ -231,15 +231,103 @@ impl Background {
     }
 }
 
-/// The sky behind a Sonic level: a bright day, drifting clouds and two
-/// rows of far hills that scroll slower than the level (`scroll`: the
-/// view's x in the world, px).
-pub fn level_sky(sw: f32, sh: f32, scroll: f32) {
+/// Colours of a Sonic level's sky: the gradient, the far and near hills,
+/// the clouds and how much the sun shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LevelSky {
+    pub top: Color,
+    pub mid: Color,
+    pub low: Color,
+    pub far: Color,
+    pub near: Color,
+    pub cloud: Color,
+    pub sun: f32,
+}
+
+const fn rgb(r: u8, g: u8, b: u8) -> Color {
+    Color::new(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0)
+}
+
+impl LevelSky {
+    /// A bright day over green hills.
+    pub const DAY: LevelSky = LevelSky {
+        top: rgb(46, 112, 220),
+        mid: rgb(110, 172, 245),
+        low: rgb(196, 228, 255),
+        far: rgb(120, 180, 210),
+        near: rgb(84, 168, 120),
+        cloud: Color::new(1.0, 1.0, 1.0, 0.85),
+        sun: 1.0,
+    };
+    /// Dusk: violet over a red glow.
+    pub const DUSK: LevelSky = LevelSky {
+        top: rgb(40, 30, 92),
+        mid: rgb(122, 70, 150),
+        low: rgb(240, 150, 120),
+        far: rgb(112, 88, 150),
+        near: rgb(70, 58, 112),
+        cloud: Color::new(0.95, 0.75, 0.8, 0.6),
+        sun: 0.0,
+    };
+    /// Pale sky over snowy hills.
+    pub const SNOW: LevelSky = LevelSky {
+        top: rgb(92, 140, 208),
+        mid: rgb(170, 200, 235),
+        low: rgb(232, 240, 250),
+        far: rgb(196, 212, 234),
+        near: rgb(236, 242, 250),
+        cloud: Color::new(1.0, 1.0, 1.0, 0.9),
+        sun: 0.6,
+    };
+    /// Tropical: deep blue sky over teal islands.
+    pub const TROPIC: LevelSky = LevelSky {
+        top: rgb(18, 128, 212),
+        mid: rgb(88, 200, 236),
+        low: rgb(212, 246, 240),
+        far: rgb(88, 190, 192),
+        near: rgb(56, 168, 136),
+        cloud: Color::new(1.0, 1.0, 1.0, 0.9),
+        sun: 1.0,
+    };
+    /// Storm: low grey clouds over dark peaks.
+    pub const STORM: LevelSky = LevelSky {
+        top: rgb(48, 54, 70),
+        mid: rgb(88, 94, 110),
+        low: rgb(140, 145, 156),
+        far: rgb(84, 94, 110),
+        near: rgb(62, 72, 84),
+        cloud: Color::new(0.55, 0.58, 0.64, 0.9),
+        sun: 0.0,
+    };
+
+    /// From `self` to `other` as `t` goes from 0 to 1.
+    pub fn mix(&self, other: &LevelSky, t: f32) -> LevelSky {
+        let t = t.clamp(0.0, 1.0);
+        let m = |a: Color, b: Color| {
+            Color::new(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t)
+        };
+        LevelSky {
+            top: m(self.top, other.top),
+            mid: m(self.mid, other.mid),
+            low: m(self.low, other.low),
+            far: m(self.far, other.far),
+            near: m(self.near, other.near),
+            cloud: m(self.cloud, other.cloud),
+            sun: self.sun + (other.sun - self.sun) * t,
+        }
+    }
+}
+
+/// The sky behind a Sonic level: gradient, sun, drifting clouds and two
+/// rows of hills scrolling with the camera (`scroll`, world px).
+pub fn level_sky(sw: f32, sh: f32, scroll: f32, sky: &LevelSky) {
     let t = get_time() as f32;
-    let rgb = |r: u8, g: u8, b: u8| Color::from_rgba(r, g, b, 255);
-    gradient_v3(0.0, 0.0, sw, sh, rgb(46, 112, 220), rgb(110, 172, 245), rgb(196, 228, 255));
-    radial(sw * 0.82, sh * 0.16, 160.0, Color::from_rgba(255, 250, 220, 90), Color::from_rgba(255, 250, 220, 0));
-    draw_circle(sw * 0.82, sh * 0.16, 34.0, Color::from_rgba(255, 252, 232, 255));
+    gradient_v3(0.0, 0.0, sw, sh, sky.top, sky.mid, sky.low);
+    if sky.sun > 0.0 {
+        let a = sky.sun;
+        radial(sw * 0.82, sh * 0.16, 160.0, Color::new(1.0, 0.98, 0.86, 0.35 * a), Color::new(1.0, 0.98, 0.86, 0.0));
+        draw_circle(sw * 0.82, sh * 0.16, 34.0, Color::new(1.0, 0.99, 0.91, a));
+    }
     // Clouds: puffs of circles drifting by.
     let span = sw + 400.0;
     for k in 0..7 {
@@ -247,19 +335,15 @@ pub fn level_sky(sw: f32, sh: f32, scroll: f32) {
         let x = ((fk * 331.0 - scroll * 0.05 + t * 8.0) % span + span) % span - 200.0;
         let y = sh * (0.1 + (fk * 0.37).fract() * 0.3);
         let s = 0.7 + (fk * 0.61).fract() * 0.6;
-        let c = Color::new(1.0, 1.0, 1.0, 0.85);
+        let c = sky.cloud;
         for (dx, dy, r) in [(-34.0, 6.0, 20.0), (-12.0, -6.0, 26.0), (14.0, -2.0, 24.0), (36.0, 8.0, 17.0)] {
             draw_circle(x + dx * s, y + dy * s, r * s, c);
         }
         draw_rectangle(x - 34.0 * s, y + 6.0 * s, 70.0 * s, 16.0 * s, c);
     }
     // Far hills (two rows), as triangle strips down to the bottom.
-    for (k, (speed, base, height, col)) in [
-        (0.08, 0.62, 90.0, Color::from_rgba(120, 180, 210, 255)),
-        (0.18, 0.72, 70.0, Color::from_rgba(84, 168, 120, 255)),
-    ]
-    .into_iter()
-    .enumerate()
+    for (k, (speed, base, height, col)) in
+        [(0.08, 0.62, 90.0, sky.far), (0.18, 0.72, 70.0, sky.near)].into_iter().enumerate()
     {
         let off = scroll * speed;
         let step = 24.0;
