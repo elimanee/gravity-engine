@@ -168,6 +168,12 @@ pub struct App {
     /// A Sonic level being played: badniks, hazards, items, score.
     game: Option<crate::game::Game>,
     popups: Vec<game::Popup>,
+    /// Explosions and ring sparkles drawn from the sprite sheets.
+    booms: Vec<game::Boom>,
+    /// The objects' sprite sheets (rings, monitors, posts…), if the user has them.
+    game_sprites: Option<crate::game::sprites::Sprites>,
+    /// Where and when Sonic last bounced off a spring.
+    spring_fired: Option<(Vec2, f64)>,
     /// The scene the level was opened from (to play it again), and which
     /// built-in act it is.
     level: Option<scene::SceneFile>,
@@ -284,6 +290,9 @@ impl App {
             endless: None,
             game: None,
             popups: Vec::new(),
+            booms: Vec::new(),
+            game_sprites: None,
+            spring_fired: None,
             level: None,
             act: None,
             climate: Default::default(),
@@ -1927,7 +1936,7 @@ impl App {
             if o.is_visualizer() {
                 let (p, angle) = o.screen_pos(&self.world);
                 visualizer::draw_object(self.s.vis_object, &self.audio.analyzer, p, angle, o.size, 1.0);
-            } else {
+            } else if !self.draw_spring_sprite(o) {
                 let tint = self.fire.tint(o.body);
                 // Mirrors get a cool sheen.
                 let tint = if o.material.mirror { Color::new(tint.r * 0.8, tint.g * 0.95, tint.b, 1.0) } else { tint };

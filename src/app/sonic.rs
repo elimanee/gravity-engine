@@ -50,7 +50,7 @@ impl App {
         self.sonic = Some(SonicRun { sonic, acc: 0.0, jump: false, rings: 0, held: None });
     }
 
-    /// (Re)load the sprite sheet from the Sonic folder.
+    /// (Re)load the sprite sheets from the Sonic folder: Sonic's, and the objects'.
     fn load_sonic_sheet(&mut self) {
         match Sheet::load() {
             Ok(sheet) => self.sonic_sheet = sheet,
@@ -59,17 +59,34 @@ impl App {
                 self.toasts.warn(format!("Sonic sprite sheet not used: {e}"));
             }
         }
+        match crate::game::sprites::Sprites::load() {
+            Ok(sprites) => self.game_sprites = sprites,
+            Err(e) => {
+                self.game_sprites = None;
+                self.toasts.warn(format!("Object sprites not used: {e}"));
+            }
+        }
     }
 
     /// Pick a sprite sheet (PNG, with its sheet.json if it has one).
     pub(super) fn pick_sonic_sheet(&mut self) {
         let Some(png) = FileDialog::new().add_filter("Sprite sheet", &["png", "PNG"]).pick_file() else { return };
-        if let Err(e) = Sheet::install(&png) {
-            self.toasts.error(format!("Could not copy the sheet: {e}"));
-            return;
-        }
+        let installed = match Sheet::install(&png) {
+            Ok(name) => name,
+            Err(e) => {
+                self.toasts.error(format!("Could not copy the sheet: {e}"));
+                return;
+            }
+        };
         self.sonic_sheet_tried = true;
         self.load_sonic_sheet();
+        if installed != "sheet.png" {
+            if let Some(sp) = &self.game_sprites {
+                let msg = format!("The game's objects now use the {}", sp.describe());
+                self.toasts.success(msg);
+            }
+            return;
+        }
         if let Some(sheet) = &self.sonic_sheet {
             let msg = format!("Sonic now uses {}", sheet.name);
             self.toasts.success(msg);
@@ -223,6 +240,7 @@ impl App {
                 }
                 Event::Skid => self.sound(Sound::Skid, feet, 0.5),
                 Event::Spring => {
+                    self.spring_fired = Some((s.pos, get_time()));
                     self.sound(Sound::Spring, s.pos, 0.6);
                     self.pad.rumble(0.35, 0.12);
                 }
@@ -252,7 +270,9 @@ impl App {
             .partition(|r| (r.x - s.pos.x).abs() < reach.x && (r.y - s.pos.y).abs() < reach.y);
         self.rings = left;
         for r in &got {
-            if self.s.effects {
+            if self.game_sprites.is_some() {
+                self.booms.push(super::game::Boom::sparkle(*r));
+            } else if self.s.effects {
                 self.effects.sparks(*r, vec2(0.0, -1.0), 6.0);
             }
         }
@@ -294,8 +314,11 @@ impl App {
     /// Rings and Sonic (world pass).
     pub(super) fn draw_sonic(&self) {
         let t = get_time() as f32;
+        let sp = self.game_sprites.as_ref();
         for (k, r) in self.rings.iter().enumerate() {
-            art::ring(*r, t + k as f32 * 0.07, SCALE);
+            if !sp.is_some_and(|sp| sp.ring(*r, t)) {
+                art::ring(*r, t + k as f32 * 0.07, SCALE);
+            }
         }
         if let Some(run) = self.sonic.as_ref().filter(|_| !self.sonic_blinks()) {
             match &self.sonic_sheet {

@@ -46,6 +46,13 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 Each frame is the top-left corner of a `cell`-sized box whose centre is Sonic's centre, facing right; `transparent` lists background colours to cut out and `scale` is sheet pixels per original game pixel. Animations: `idle` (required), `bored`, `walk`, `run`, `roll` (also the spin dash), `skid`, `push`, `crouch`, `look_up`, `spring`; missing ones fall back to `walk` or `idle`. Frames play at the games' speed (held for 8 − speed frames, 4 − speed curled up) and turn with the ground.
 
+The game mode's objects can come from sheets too, picked the same way (they are recognised by their size and kept beside Sonic's):
+
+- `objects.png`: the Sonic 1 *Common Objects* sheet (712 × 1014): rings, monitors, spikes, star posts, the goal signpost, springs, explosions, the shield, invincibility stars, score numbers and *GAME OVER*;
+- `monitors.png`: the Sonic 3 *Monitors* sheet (822 × 813): its monitors when there is no `objects.png`, and the 1-up faces of Tails and Knuckles.
+
+Without them, everything is drawn with shapes.
+
 ## What's new in 2.9
 
 | Night: lamps cast shadows | Storm: lightning sets things on fire |

@@ -14,6 +14,26 @@ pub(super) struct Popup {
     age: f32,
 }
 
+/// An explosion or a ring's sparkle from the sprite sheets.
+pub(super) struct Boom {
+    pub at: Vec2,
+    age: f32,
+    kind: BoomKind,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum BoomKind {
+    Puff,
+    Fire,
+    Sparkle,
+}
+
+impl Boom {
+    pub fn sparkle(at: Vec2) -> Self {
+        Boom { at, age: 0.0, kind: BoomKind::Sparkle }
+    }
+}
+
 impl App {
     /// Start the level `spec` with Sonic at `start` (after the scene is built).
     pub(super) fn start_game(&mut self, spec: &LevelSpec, start: Vec2) {
@@ -29,6 +49,7 @@ impl App {
 
     /// Leave the game mode (its bodies go too).
     pub(super) fn stop_game(&mut self) {
+        self.booms.clear();
         if let Some(g) = self.game.take() {
             g.remove(&mut self.world);
         }
@@ -41,6 +62,10 @@ impl App {
             p.at.y -= 40.0 * step;
         }
         self.popups.retain(|p| p.age < 1.2);
+        for b in &mut self.booms {
+            b.age += step;
+        }
+        self.booms.retain(|b| b.age < 0.6);
         let (Some(game), Some(run)) = (&mut self.game, &mut self.sonic) else { return };
         let grains: HashSet<RigidBodyHandle> = self.grains.bodies().collect();
         let world = &self.world;
@@ -66,6 +91,7 @@ impl App {
         for e in fx {
             match e {
                 Effect::EnemyDown { at, score } => {
+                    self.boom(at, BoomKind::Puff);
                     self.sound(Sound::Boom, at, 0.35);
                     if self.s.effects {
                         self.effects.debris(at, 18.0, Color::new(0.7, 0.72, 0.8, 1.0));
@@ -79,13 +105,17 @@ impl App {
                     self.pad.rumble(0.7, 0.3);
                 }
                 Effect::RingsLost(at) => self.sound(Sound::Scatter, at, 0.6),
-                Effect::RingCaught(at) => self.sound(Sound::Ring, at, 0.4),
+                Effect::RingCaught(at) => {
+                    self.boom(at, BoomKind::Sparkle);
+                    self.sound(Sound::Ring, at, 0.4);
+                }
                 Effect::ShieldLost(at) => self.sound(Sound::Pop, at, 0.6),
                 Effect::Died(at) => {
                     self.sound(Sound::Hurt, at, 0.8);
                     self.pad.rumble(1.0, 0.5);
                 }
                 Effect::Monitor(kind, at) => {
+                    self.boom(at, BoomKind::Puff);
                     self.sound(Sound::Pop, at, 0.7);
                     if self.s.effects {
                         self.effects.debris(at, 16.0, Color::new(0.7, 0.75, 0.85, 1.0));
@@ -97,7 +127,10 @@ impl App {
                         MonitorKind::Shoes => "Speed shoes!",
                         MonitorKind::Life => "1-up!",
                     };
-                    self.popups.push(Popup { at, text: msg.to_string(), age: 0.0 });
+                    // The sprites show the item popping out instead.
+                    if self.game_sprites.is_none() {
+                        self.popups.push(Popup { at, text: msg.to_string(), age: 0.0 });
+                    }
                     if kind == MonitorKind::Rings {
                         self.sound(Sound::Ring, at, 0.5);
                     }
@@ -111,6 +144,7 @@ impl App {
                 Effect::Cleared => self.sound(Sound::Win, vec2(screen_width() / 2.0, 0.0), 0.7),
                 Effect::Shot(at) => self.sound(Sound::Shot, at, 0.25),
                 Effect::BombBlast(at) | Effect::Explosion(at) => {
+                    self.boom(at, BoomKind::Fire);
                     self.sound(Sound::Boom, at, 0.4);
                     if self.s.effects {
                         self.effects.debris(at, 22.0, Color::new(1.0, 0.6, 0.2, 1.0));
@@ -142,6 +176,31 @@ impl App {
         }
     }
 
+    /// An explosion or sparkle, when the sprite sheets have them.
+    fn boom(&mut self, at: Vec2, kind: BoomKind) {
+        if self.game_sprites.is_some() {
+            self.booms.push(Boom { at, age: 0.0, kind });
+        }
+    }
+
+    /// A spring pad drawn from the sprite sheet over its plank, in a level:
+    /// true when it was.
+    pub(super) fn draw_spring_sprite(&self, o: &crate::physics::object::Object) -> bool {
+        let Some(sp) = self.game_sprites.as_ref().filter(|_| self.game.is_some()) else { return false };
+        if !o.pinned || o.material.bounce < 0.6 || o.size.x < o.size.y * 2.0 {
+            return false;
+        }
+        let (p, angle) = o.screen_pos(&self.world);
+        if angle.sin().abs() > 0.1 {
+            return false;
+        }
+        let foot = p + vec2(0.0, o.size.y / 2.0);
+        let out = self
+            .spring_fired
+            .is_some_and(|(at, when)| get_time() - when < 0.25 && (at.x - p.x).abs() < o.size.x && at.y < p.y);
+        sp.spring(foot, o.size.x, out)
+    }
+
     /// Space / A / Enter after the tally: the next act, or back to the library.
     pub(super) fn level_continue(&mut self) {
         let done = self.game.as_ref().is_some_and(|g| matches!(g.phase, Phase::Cleared(t) if t.done()));
@@ -170,19 +229,31 @@ impl App {
     /// The level (world pass), before Sonic is drawn.
     pub(super) fn draw_game(&self) {
         let Some(g) = &self.game else { return };
-        game_art::draw(g, get_time() as f32);
+        game_art::draw(g, get_time() as f32, self.game_sprites.as_ref());
     }
 
     /// Shield, sparkles and score popups (world pass), after Sonic.
     pub(super) fn draw_game_over_sonic(&self) {
         let t = get_time() as f32;
+        let sp = self.game_sprites.as_ref();
         if let (Some(g), Some(run)) = (&self.game, &self.sonic) {
             if !run.sonic.dead {
-                game_art::draw_around(g, run.sonic.pos, t);
+                game_art::draw_around(g, run.sonic.pos, t, sp);
+            }
+        }
+        if let Some(sp) = sp {
+            for b in &self.booms {
+                match b.kind {
+                    BoomKind::Sparkle => sp.sparkle(b.at, b.age),
+                    kind => sp.explosion(b.at, b.age, kind == BoomKind::Fire),
+                };
             }
         }
         for p in &self.popups {
             let a = (1.0 - p.age / 1.2).clamp(0.0, 1.0);
+            if sp.is_some_and(|sp| sp.score(&p.text, p.at, a)) {
+                continue;
+            }
             let w = theme::measure_bold(&p.text, 16.0);
             theme::text_bold(&p.text, p.at.x - w / 2.0 + 1.0, p.at.y + 1.0, 16.0, Color::new(0.0, 0.0, 0.0, 0.6 * a));
             theme::text_bold(&p.text, p.at.x - w / 2.0, p.at.y, 16.0, Color::new(1.0, 1.0, 1.0, a));
@@ -213,8 +284,10 @@ impl App {
         line("RINGS", g.rings.to_string(), top + 72.0, g.rings == 0);
         if !g.endless {
             let y = screen_height() - 24.0;
-            draw_circle(30.0, y - 6.0, 13.0, Color::new(0.12, 0.36, 0.9, 1.0));
-            draw_circle(34.0, y - 9.0, 4.0, WHITE);
+            if !self.game_sprites.as_ref().is_some_and(|sp| sp.face("sonic", vec2(30.0, y - 6.0), 28.0)) {
+                draw_circle(30.0, y - 6.0, 13.0, Color::new(0.12, 0.36, 0.9, 1.0));
+                draw_circle(34.0, y - 9.0, 4.0, WHITE);
+            }
             theme::text_bold(&format!("×  {}", g.lives), 50.0, y, 20.0, WHITE);
         }
         let (sw, sh) = (screen_width(), screen_height());
@@ -244,7 +317,10 @@ impl App {
             }
             Phase::Over(_) if !g.endless => {
                 draw_rectangle(0.0, sh * 0.4, sw, 80.0, Color::new(0.0, 0.0, 0.0, 0.6));
-                theme::text_bold_centered("GAME  OVER", sw / 2.0, sh * 0.4 + 46.0, 40.0, yellow);
+                let centre = vec2(sw / 2.0, sh * 0.4 + 40.0);
+                if !self.game_sprites.as_ref().is_some_and(|sp| sp.game_over(centre, 3.0)) {
+                    theme::text_bold_centered("GAME  OVER", sw / 2.0, sh * 0.4 + 46.0, 40.0, yellow);
+                }
             }
             _ => {}
         }

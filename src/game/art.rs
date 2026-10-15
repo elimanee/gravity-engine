@@ -1,7 +1,9 @@
 //! Drawings of the game mode (world pass): badniks, shots, spikes,
 //! monitors, star posts, the goal signpost, the boss, scattered rings and
-//! the shield / invincibility around Sonic. All made of shapes.
+//! the shield / invincibility around Sonic. Made of shapes, or taken from
+//! the user's sprite sheets when there are some ([`super::sprites`]).
 
+use super::sprites::Sprites;
 use super::*;
 use macroquad::prelude::*;
 
@@ -10,18 +12,27 @@ const STEEL_DARK: Color = Color::new(0.36, 0.38, 0.48, 1.0);
 const INK: Color = Color::new(0.06, 0.06, 0.1, 1.0);
 
 /// Everything of the level (world pass), behind and around Sonic.
-pub fn draw(g: &Game, t: f32) {
+pub fn draw(g: &Game, t: f32, sp: Option<&Sprites>) {
     for s in &g.spikes {
-        spikes(s.pos);
+        if !sp.is_some_and(|sp| sp.spikes(s.pos)) {
+            spikes(s.pos);
+        }
     }
     for p in &g.posts {
-        post(p, t);
+        if !sp.is_some_and(|sp| sp.post(p.pos + vec2(0.0, 40.0), p.lit)) {
+            post(p, t);
+        }
     }
     if let Some(goal) = g.goal {
-        signpost(goal, g.goal_passed, t);
+        let spin = g.goal_passed.map(sign_spin);
+        if !sp.is_some_and(|sp| sp.signpost(goal + vec2(0.0, 40.0), spin)) {
+            signpost(goal, g.goal_passed, t);
+        }
     }
     for m in &g.monitors {
-        monitor(m, t);
+        if !sp.is_some_and(|sp| sp.monitor(m.kind, m.pos, m.broken, t)) {
+            monitor(m, t);
+        }
     }
     for e in &g.enemies {
         enemy(e, t);
@@ -37,21 +48,21 @@ pub fn draw(g: &Game, t: f32) {
     for r in &g.lost {
         // Blink in their last second.
         let left = RING_LIFE - r.age;
-        if left > 1.0 || (t * 16.0) as i32 % 2 == 0 {
+        if (left > 1.0 || (t * 16.0) as i32 % 2 == 0) && !sp.is_some_and(|sp| sp.ring(r.pos, t * 1.6 + r.age)) {
             crate::sonic::art::ring(r.pos, t * 1.6 + r.age, SCALE);
         }
     }
 }
 
 /// Shield bubble and invincibility sparkles around Sonic.
-pub fn draw_around(g: &Game, at: Vec2, t: f32) {
-    if g.shield {
+pub fn draw_around(g: &Game, at: Vec2, t: f32, sp: Option<&Sprites>) {
+    if g.shield && !sp.is_some_and(|sp| sp.shield(at, t)) {
         let pulse = 0.85 + 0.15 * (t * 6.0).sin();
         draw_circle(at.x, at.y, 40.0 * pulse, Color::new(0.35, 0.7, 1.0, 0.16));
         draw_circle_lines(at.x, at.y, 40.0 * pulse, 2.0, Color::new(0.6, 0.85, 1.0, 0.7));
         draw_circle(at.x - 14.0, at.y - 18.0, 5.0, Color::new(1.0, 1.0, 1.0, 0.35));
     }
-    if g.invincible > 0.0 {
+    if g.invincible > 0.0 && !sp.is_some_and(|sp| sp.stars(at, t)) {
         for k in 0..8 {
             let a = t * 7.0 + k as f32 * std::f32::consts::TAU / 8.0;
             let r = 34.0 + 8.0 * (t * 9.0 + k as f32).sin();
@@ -162,18 +173,26 @@ fn post(p: &Post, t: f32) {
     draw_circle(ball.x - 2.0, ball.y - 2.0, 2.0, Color::new(1.0, 1.0, 1.0, 0.7));
 }
 
+/// How far the signpost has turned (rad), `passed` s after Sonic ran by:
+/// fast at first, slowing down to about one and a half turns.
+fn sign_spin(passed: f32) -> f32 {
+    passed * 14.0 / (1.0 + passed * 1.5)
+}
+
+/// Past this turn (rad) the signpost shows Sonic instead of Robotnik.
+pub const SIGN_FLIP: f32 = 1.5 * std::f32::consts::PI;
+
 /// The goal signpost; it spins when Sonic runs past.
 fn signpost(at: Vec2, passed: Option<f32>, t: f32) {
     let foot = at + vec2(0.0, 40.0);
     draw_rectangle(foot.x - 3.0, at.y - 10.0, 6.0, 50.0, STEEL_DARK);
-    let spin = passed.map_or(0.0, |p| (p * 14.0 / (1.0 + p * 1.5)).min(40.0));
+    let spin = passed.map_or(0.0, sign_spin);
     let w = 30.0 * spin.cos().abs().max(0.08);
     let panel = at - vec2(0.0, 34.0);
     draw_rectangle(panel.x - w, panel.y - 28.0, w * 2.0, 56.0, STEEL);
     draw_rectangle_lines(panel.x - w, panel.y - 28.0, w * 2.0, 56.0, 2.0, STEEL_DARK);
-    let front = spin.cos() > 0.0;
     if w > 10.0 {
-        if passed.is_some() && (front || spin > 30.0) {
+        if passed.is_some() && spin > SIGN_FLIP {
             // His blue head when done.
             draw_circle(panel.x, panel.y, w * 0.6, Color::new(0.12, 0.36, 0.9, 1.0));
             draw_circle(panel.x + w * 0.15, panel.y - 3.0, w * 0.2, WHITE);

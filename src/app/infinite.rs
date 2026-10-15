@@ -99,6 +99,9 @@ impl App {
         for p in &mut self.popups {
             p.at.x -= dx;
         }
+        for b in &mut self.booms {
+            b.at.x -= dx;
+        }
         for o in &mut self.objects {
             o.clear_trail();
         }

@@ -5,6 +5,9 @@
 //!
 //! Each frame is a cell whose centre is Sonic's centre, facing right, at
 //! one sheet pixel per guide pixel (or `scale`).
+//!
+//! The game's objects can have sheets in the same folder too (see
+//! [`crate::game::sprites`]); those names are not Sonic's.
 
 use super::Sonic;
 use macroquad::prelude::*;
@@ -64,15 +67,21 @@ pub struct Sheet {
     pub name: String,
 }
 
-/// The PNG to use in `dir`, and its layout.
+/// Is this file one of the objects' sheets rather than Sonic's?
+fn is_objects_sheet(p: &Path) -> bool {
+    use crate::game::sprites::{MONITORS, OBJECTS};
+    p.file_name().is_some_and(|n| n == OBJECTS || n == MONITORS)
+}
+
+/// The PNG to use in `dir` (`sheet.png` first), and its layout.
 fn find(dir: &Path) -> Result<(PathBuf, Option<Layout>), String> {
     let mut pngs: Vec<PathBuf> = std::fs::read_dir(dir)
         .map_err(|e| e.to_string())?
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")))
+        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")) && !is_objects_sheet(p))
         .collect();
-    pngs.sort();
+    pngs.sort_by_key(|p| (p.file_name().is_none_or(|n| n != "sheet.png"), p.clone()));
     let png = pngs.into_iter().next().ok_or("no PNG sprite sheet")?;
     let json = dir.join("sheet.json");
     let layout = match std::fs::read_to_string(&json) {
@@ -116,11 +125,21 @@ impl Sheet {
         Ok(Some(Sheet { texture, layout, name }))
     }
 
-    /// Copy a chosen PNG (and its sheet.json, if any) into the Sonic folder.
-    pub fn install(png: &Path) -> Result<(), String> {
+    /// Copy a chosen PNG (and its sheet.json, if any) into the Sonic folder:
+    /// as Sonic's sheet, or as an objects' sheet when it is one of those.
+    /// Returns what it became.
+    pub fn install(png: &Path) -> Result<&'static str, String> {
         let dir = dir().ok_or("no config directory")?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let size = image::image_dimensions(png).map_err(|e| e.to_string())?;
+        if let Some(name) = crate::game::sprites::sheet_name(size) {
+            std::fs::copy(png, dir.join(name)).map_err(|e| e.to_string())?;
+            return Ok(name);
+        }
         for old in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+            if is_objects_sheet(&old.path()) {
+                continue;
+            }
             if old.path().extension().is_some_and(|e| e.eq_ignore_ascii_case("png") || e == "json") {
                 let _ = std::fs::remove_file(old.path());
             }
@@ -129,7 +148,7 @@ impl Sheet {
         if let Some(json) = png.parent().map(|p| p.join("sheet.json")).filter(|j| j.is_file()) {
             std::fs::copy(json, dir.join("sheet.json")).map_err(|e| e.to_string())?;
         }
-        Ok(())
+        Ok("sheet.png")
     }
 
     fn frames(&self, name: &str) -> Option<&Vec<[u32; 2]>> {

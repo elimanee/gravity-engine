@@ -7,6 +7,7 @@
 //! wants heard or seen comes back as [`Effect`]s.
 
 pub mod art;
+pub mod sprites;
 
 use crate::config::PPM;
 use crate::physics::{to_phys, to_screen, PhysWorld};
