@@ -175,7 +175,10 @@ impl App {
         self.collect_rings(&s);
         if self.pan_last.is_none() && !s.dead {
             let screen = vec2(screen_width(), screen_height());
-            self.camera.follow(s.pos, screen, FOLLOW);
+            // In a boss's arena the view holds still on it.
+            let arena = self.game.as_ref().and_then(|g| g.arena());
+            let target = arena.map_or(s.pos, |(l, r)| vec2((l + r) / 2.0, s.pos.y));
+            self.camera.follow(target, screen, FOLLOW);
         }
     }
 

@@ -37,6 +37,8 @@ pub const MONITOR: Vec2 = Vec2::new(45.0, 48.0);
 pub const SPIKES: Vec2 = Vec2::new(48.0, 24.0);
 const RING_R: f32 = 10.0;
 pub const BOSS_R: f32 = 36.0;
+/// Half the width of the boss's arena, where the view stays put (px).
+pub const ARENA_HALF: f32 = 480.0;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum EnemyKind {
@@ -187,6 +189,8 @@ pub struct Boss {
     bomb: f32,
     /// Seconds since it was beaten.
     pub beaten: Option<f32>,
+    /// Sonic has entered its arena: he cannot leave until it falls.
+    pub locked: bool,
 }
 
 /// The end-of-act tally: bonuses counted into the score.
@@ -341,6 +345,7 @@ impl Game {
                 dir: 1.0,
                 bomb: 2.0,
                 beaten: None,
+                locked: false,
             }),
             score: 0,
             lives: LIVES,
@@ -464,6 +469,12 @@ impl Game {
             .map(|c| (c, Ground { breakable: true, friction: 0.6, ..Ground::default() }));
         let spikes = self.spikes.iter().map(|s| (s.collider, Ground { friction: 0.6, ..Ground::default() }));
         monitors.chain(spikes).collect()
+    }
+
+    /// The boss's arena (left, right world x) while Sonic is shut in it.
+    pub fn arena(&self) -> Option<(f32, f32)> {
+        let b = self.boss.as_ref().filter(|b| b.locked && b.beaten.is_none())?;
+        Some((b.home.x - ARENA_HALF, b.home.x + ARENA_HALF))
     }
 
     /// Sonic is out of control (dying, past the goal, tallying).
@@ -604,6 +615,9 @@ impl Game {
                             self.invulnerable = 0.0;
                             self.lost.clear();
                             self.shots.clear();
+                            if let Some(b) = &mut self.boss {
+                                b.locked = false;
+                            }
                             self.phase = Phase::Playing;
                             out.push(Effect::Respawned(at));
                         }
@@ -652,6 +666,25 @@ impl Game {
         if let Some(s) = self.spikes.iter().find(|s| sonic.grounded && sonic.on == Some(s.collider)) {
             let from = vec2(s.pos.x - sonic.facing, s.pos.y);
             self.hurt(sonic, from, &mut out);
+        }
+        // The boss's arena closes behind him.
+        if let Some(b) = self.boss.as_mut().filter(|b| b.beaten.is_none()) {
+            let (left, right) = (b.home.x - ARENA_HALF, b.home.x + ARENA_HALF);
+            if !b.locked && sonic.pos.x > left + 80.0 && sonic.pos.x < right {
+                b.locked = true;
+            }
+            if b.locked {
+                let half = sonic.radii().0 * SCALE;
+                if sonic.pos.x < left + half {
+                    sonic.pos.x = left + half;
+                    sonic.xsp = sonic.xsp.max(0.0);
+                    sonic.gsp = sonic.gsp.max(0.0);
+                } else if sonic.pos.x > right - half {
+                    sonic.pos.x = right - half;
+                    sonic.xsp = sonic.xsp.min(0.0);
+                    sonic.gsp = sonic.gsp.min(0.0);
+                }
+            }
         }
         // Star posts and the goal.
         for p in &mut self.posts {

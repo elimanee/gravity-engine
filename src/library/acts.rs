@@ -60,13 +60,14 @@ fn meadow_1(b: &mut Builder) {
     b.hill(1500.0, 2300.0, G, 90.0, DIRT, LEAF);
     arc(b, 1700.0, G - 150.0, 7, 400.0, 30.0);
     b.ground(2300.0, 2700.0, G, DIRT, LEAF);
-    b.monitor(MonitorKind::Shield, 2380.0, G);
+    b.post(2340.0, G);
+    b.monitor(MonitorKind::Shield, 2420.0, G);
     b.spikes(2520.0, G, 2);
     // The first pit.
     arc(b, 2730.0, G - 80.0, 5, 180.0, 90.0);
     b.ground(2940.0, 4700.0, G, DIRT, LEAF);
-    b.post(3060.0, G);
     b.dash_panel(3200.0, 3320.0, G);
+    b.post(4050.0, G);
     let r = 110.0;
     b.sonic_loop(3600.0, G - r, r, STONE);
     for k in 0..8 {
@@ -135,9 +136,8 @@ fn meadow_3(b: &mut Builder) {
     b.walker(EnemyKind::Crawler, 1200.0, G);
     b.enemy(EnemyKind::Flyer, 1500.0, G - 160.0);
     b.post(1700.0, G);
-    // The boss arena, walled in on the far side.
+    // The boss's arena (it closes once Sonic is in).
     b.ground(1800.0, 3300.0, G, ROCK, SNOW);
-    b.wall(&[(3200.0, G), (3200.0, G - 420.0)], STONE);
     rings(b, 1950.0, G - 40.0, 4);
     b.boss(2500.0, G - 160.0);
 }
