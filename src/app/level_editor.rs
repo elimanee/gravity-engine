@@ -77,6 +77,8 @@ impl App {
             }
             None => self.blank_level(),
         };
+        // The world it was made in first: points in metres turn into pixels in it.
+        self.level_world(&sc);
         ed.start = sc.sonic.map(|[x, y]| crate::physics::to_screen(x, y));
         self.level_editor = Some(ed);
         self.edit_scene(sc);
@@ -110,12 +112,17 @@ impl App {
     fn edit_scene(&mut self, mut sc: scene::SceneFile) {
         sc.game = None;
         sc.sonic = None;
-        if let Some(size) = sc.world_size.filter(|&s| s != self.s.world_size && (1..=4).contains(&s)) {
-            self.set_world_size(size);
-        }
+        self.level_world(&sc);
         self.apply_scene(sc);
         self.sonic = None;
         self.level_preview();
+    }
+
+    /// Switch to the world size `sc` was made in.
+    fn level_world(&mut self, sc: &scene::SceneFile) {
+        if let Some(size) = sc.world_size.filter(|&s| s != self.s.world_size && (1..=4).contains(&s)) {
+            self.set_world_size(size);
+        }
     }
 
     /// Rebuild the still picture of the level's things.
@@ -469,9 +476,7 @@ impl App {
                 self.editor = None;
                 self.drop_level_preview();
                 self.level_editor = None;
-                if let Some(size) = sc.world_size.filter(|&s| s != self.s.world_size && (1..=4).contains(&s)) {
-                    self.set_world_size(size);
-                }
+                self.level_world(&sc);
                 self.apply_scene(sc);
                 self.camera.zoom = 1.0;
                 self.library.fader.open = false;

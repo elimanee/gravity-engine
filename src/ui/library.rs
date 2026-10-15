@@ -86,7 +86,7 @@ impl Library {
 
     /// The character buttons (Sonic tab), right of the tabs.
     fn characters(p: Rect) -> [Rect; 4] {
-        let w = 66.0;
+        let w = 58.0;
         let x0 = p.x + p.w - PAD - 4.0 * (w + 4.0) + 4.0;
         [0.0, 1.0, 2.0, 3.0].map(|k| Rect::new(x0 + k * (w + 4.0), p.y + 44.0, w, 26.0))
     }
@@ -195,7 +195,8 @@ impl Library {
         }
         if self.tab == Tab::Sonic {
             let r = Self::characters(p);
-            text("Play as", r[0].x - 52.0, r[0].y + 17.0, 12.0, fade(TEXT_MUTED, f));
+            let label = "Play as";
+            text(label, r[0].x - 8.0 - measure(label, 12.0), r[0].y + 17.0, 12.0, fade(TEXT_MUTED, f));
             for (k, c) in Character::ALL.into_iter().enumerate() {
                 draw_button(r[k], c.label(), r[k].contains(mouse), data.character == c, f);
             }
