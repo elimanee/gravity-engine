@@ -96,6 +96,10 @@ impl App {
         if let Some(run) = &self.sonic {
             l.glow(run.sonic.pos, 230.0, Color::new(0.85, 0.9, 1.0, 0.55));
         }
+        // The best run's ghost shows faintly.
+        if let Some(ghost) = self.ghost_now() {
+            l.glow(ghost.pos, 70.0, Color::new(0.6, 0.75, 1.0, 0.45));
+        }
         for r in self.rings.iter().filter(|r| visible.contains(**r)) {
             l.glow(*r, 30.0, Color::new(1.0, 0.85, 0.3, 0.55));
         }

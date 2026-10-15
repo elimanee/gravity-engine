@@ -479,7 +479,7 @@ impl App {
     }
 
     /// Where the best run's ghost is now, as a character to draw.
-    fn ghost_now(&self) -> Option<crate::sonic::Sonic> {
+    pub(super) fn ghost_now(&self) -> Option<crate::sonic::Sonic> {
         let e = self.endless.as_ref()?;
         let g = e.ghost.as_ref()?;
         let last = g.track.len().checked_sub(1)?;

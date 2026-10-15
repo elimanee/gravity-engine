@@ -4,21 +4,30 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
-## [2.10.0]
+## [3.0.0]
 
 ### Added
 - **Playable Sonic** (`Shift+O`, or *Sonic* in the settings): `←` `→` run, `↓` crouch / roll, `Space` jump (hold for a higher jump), `↓` + `Space` spin dash, `↑` look up; `Shift+Space` pauses while he is in the scene. He moves after the Sonic Physics Guide: ground speed with the games' acceleration, braking and friction, slope factor, floor sensors that follow walls and ceilings so he runs round loops, slipping off walls when too slow, rolling, the spin dash, variable jumps, air drag and underwater physics
-- Sonic pushes objects (curled up he bowls them over), stands and rides on them, bounces off springs (any bouncy surface), slides on ice, is blown away by bombs and can be thrown with the Spring tool. The camera follows him
+- Sonic pushes objects (curled up he bowls them over and smashes breakable ones), stands and rides on them, bounces off springs (any bouncy surface), slides on ice, is launched by conveyors like dash panels, is blown away by bombs and can be thrown with the Spring tool. The camera follows him
 - Rings to collect, with a counter, and the example scene *Sonic loop*. Sonic and the rings are saved in scenes
-- Sounds for jumping, the spin dash, braking, springs and rings
-- **Your own Sonic sprite sheet** (*Sonic sprites…* in the settings, or a PNG in `~/.config/gravity_engine/sonic/`): Triangly's Sonic 1 sheet is recognised as it is, other sheets are cut up by a `sheet.json` (see the README). None ships with the program
-
+- **Tails, Knuckles and Amy** (`Shift+N`, the controller's Select, or *Play as* in Library → Sonic): Tails flies (tap `Space` to flap, tired after 8 s), Knuckles glides faster and faster, climbs walls, pulls himself over ledges and slides on landing, Amy swings her hammer (`X`) and spins with it in the air
+- **Sonic's game mode**: three *Meadow* acts in Library → Sonic, with badniks (a crawler, a flyer that shoots, a crab that lobs shots; chained hits score 100, 200, 500, 1000…), item monitors (10 rings, shield, invincibility, speed shoes, extra life), spikes, bottomless pits, star posts, the goal signpost and a boss who takes eight hits in an arena the view locks on. Hit with rings, Sonic loses them in a circle and can catch some back; 100 rings give an extra life; three lives, then *Game Over*. Score, time, rings and lives on screen and the end-of-act tally with time and ring bonuses
+- **Level editor** (Library → Sonic → *New level*): place the start, rings (drag for a row), badniks, monitors, spikes, star posts, the goal, the boss, springs, ground, ledges and loops in the infinite world, *Play* to try the level and *Stop* to go back, *Save* to keep it in `~/.config/gravity_engine/levels/`; saved levels are listed in Library → Sonic to play or edit
 - **Infinite world** (*World size* → `∞` in the settings): a floor that goes on forever with no walls or ceiling; the world is moved back under the view as it travels so positions stay precise. Weather and water follow the view
-- **Endless run** (example scene): Sonic in the infinite world, with hills, loops with dash panels, ramps, springs, platforms, crates and rings made ahead of him and cleared behind him; distance run and best run (kept between sessions)
-- Curled up, Sonic smashes breakable objects; conveyor surfaces launch him like dash panels; too slow for a loop, he slips out of it instead of being trapped
+- **Endless run** (example scene): Sonic in the infinite world, with hills, loops with dash panels, ramps, springs, platforms, crates and rings made ahead of him and cleared behind him, through five zones (Meadow, Twilight at night, Snowfield, Lagoon with water, Storm peak) with their own skies, and more badniks and spikes the further he gets. One life; the best run is kept as a ghost that races you on the same course
+- **Open** border mode: no walls and no floor, what falls off is gone
+- **Game controllers** (Linux joystick devices, XInput on Windows): stick or d-pad, A / B / Y jump, X action, Select changes character, Start pauses; rumble on Windows
+- **Your own sprite sheets** (*Sonic sprites…* in the settings, or PNGs in `~/.config/gravity_engine/sonic/`): Triangly's Sonic 1 sheet is recognised as it is, other sheets are cut up by a `sheet.json`; the Sonic 3 Tails, Sonic 3 & Knuckles Knuckles and CartoonsAnimate22's Amy sheets, the Sonic 1 *Common Objects* sheet and the Sonic 3 *Monitors* sheet are recognised by their size (see the README). None ships with the program: everything is drawn with shapes otherwise
+- At night Sonic carries a soft light, rings gleam and the endless run's ghost glows
+- `--benchmark`: five stress scenes run at a fixed 60 Hz, then a report of the frame times and where they go (physics, each part of the drawing, waiting for the screen)
+- CI uploads Linux and Windows test builds for every run
 
 ### Changed
-- While Sonic is in the scene, `Space` is his jump button and `←` does not rewind (`Shift+←` still does)
+- While someone plays, `Space` is the jump button, `X` the action button and `←` does not rewind (`Shift+←` still does)
+- Objects and grains outside the view are not drawn (faster in big and infinite worlds)
+
+### Fixed
+- Sonic could be pushed through the floor by bits of smashed crates (or a crate fallen on him)
 
 ### Downloads
 - `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
