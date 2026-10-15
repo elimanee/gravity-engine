@@ -160,7 +160,7 @@ pub struct App {
     /// A game controller, if one is plugged in.
     pad: crate::gamepad::Gamepad,
     /// The user's Sonic sprite sheet (loaded when he first appears).
-    sonic_sheet: Option<crate::sonic::sheet::Sheet>,
+    sonic_sheet: crate::sonic::sheet::Sheets,
     sonic_sheet_tried: bool,
     rings: Vec<Vec2>,
     /// Sonic's endless run (terrain made as he goes).
@@ -284,7 +284,7 @@ impl App {
             lights: Default::default(),
             sonic: None,
             pad: Default::default(),
-            sonic_sheet: None,
+            sonic_sheet: Default::default(),
             sonic_sheet_tried: false,
             rings: Vec::new(),
             endless: None,
@@ -527,7 +527,10 @@ impl App {
             self.quit = true;
         }
         let challenge = self.challenge.as_ref().map(|r| (r.started, r.won));
-        // The controller's Start pauses (or starts a challenge).
+        // The controller's Select changes character, Start pauses (or starts a challenge).
+        if self.pad.pressed(crate::gamepad::Button::Select) {
+            actions.push(Action::CycleCharacter(1));
+        }
         if self.pad.pressed(crate::gamepad::Button::Start) {
             actions.push(match challenge {
                 Some((false, _)) => Action::ChallengeGo,
@@ -604,7 +607,12 @@ impl App {
         if pressed(KeyCode::H) {
             actions.push(if shift { Action::CycleWeather(1) } else { Action::ToggleWater });
         }
-        if pressed(KeyCode::X) {
+        if pressed(KeyCode::X) && !shift && self.sonic.is_some() {
+            // The action button while someone plays (Amy's hammer).
+            if let Some(run) = &mut self.sonic {
+                run.action = true;
+            }
+        } else if pressed(KeyCode::X) {
             actions.push(if shift { Action::TogglePlayerPhysics } else { Action::TogglePlayer });
         }
         if pressed(KeyCode::O) {
@@ -643,7 +651,7 @@ impl App {
             self.toasts.status("trails", format!("Trails {}", if self.s.trails { "on" } else { "off" }));
         }
         if pressed(KeyCode::N) {
-            actions.push(Action::ToggleSpawner);
+            actions.push(if shift { Action::CycleCharacter(1) } else { Action::ToggleSpawner });
         }
         if pressed(KeyCode::D) {
             self.debug = !self.debug;
@@ -1184,6 +1192,8 @@ impl App {
             Action::LoadSonicSheet => self.pick_sonic_sheet(),
             Action::LevelContinue => self.level_continue(),
             Action::OpenAct(i) => self.open_act(i),
+            Action::CycleCharacter(d) => self.set_character(self.s.character.cycle(d)),
+            Action::SetCharacter(c) => self.set_character(c),
             Action::ToggleNight => {
                 self.s.night = !self.s.night;
                 self.toasts.status(
@@ -2118,6 +2128,7 @@ impl App {
                 stars: &self.s.challenge_stars,
                 mine: &mine,
                 act_scores: &self.s.act_scores,
+                character: self.s.character,
             };
             self.library.draw(&data, m);
         }

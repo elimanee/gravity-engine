@@ -220,12 +220,13 @@ impl Sprites {
         true
     }
 
-    /// The 1-up face of a character ("sonic", "tails", "knuckles"), for the
-    /// lives counter (screen pass), `size` px high.
-    pub fn face(&self, character: &str, at: Vec2, size: f32) -> bool {
+    /// The 1-up face of a character, for the lives counter (screen pass),
+    /// `size` px high (Sonic's for Amy, who has none on the sheets).
+    pub fn face(&self, character: crate::sonic::Character, at: Vec2, size: f32) -> bool {
+        use crate::sonic::Character;
         let pick = match character {
-            "tails" => self.s3.as_ref().map(|t| (t, S3_TAILS)),
-            "knuckles" => self.s3.as_ref().map(|t| (t, S3_KNUCKLES)),
+            Character::Tails => self.s3.as_ref().map(|t| (t, S3_TAILS)),
+            Character::Knuckles => self.s3.as_ref().map(|t| (t, S3_KNUCKLES)),
             _ => None,
         };
         let pick = pick.or_else(|| self.monitor_sheet().map(|(t, m)| (t, m.icons[4])));

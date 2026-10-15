@@ -6,6 +6,7 @@ use super::widgets::*;
 use super::{icons, Action, Fader, Input};
 use crate::library::{acts, challenges, examples};
 use crate::physics::zones::ZoneKind;
+use crate::sonic::Character;
 use macroquad::prelude::*;
 use std::collections::BTreeMap;
 
@@ -25,6 +26,8 @@ pub struct LibraryData<'a> {
     pub mine: &'a [(String, String, f32)],
     /// Best score per act cleared.
     pub act_scores: &'a BTreeMap<String, u32>,
+    /// Who plays the acts.
+    pub character: Character,
 }
 
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -77,6 +80,13 @@ impl Library {
         [0.0, 1.0, 2.0, 3.0].map(|k| Rect::new(p.x + PAD + k * 136.0, y, 130.0, 26.0))
     }
 
+    /// The character buttons (Sonic tab), right of the tabs.
+    fn characters(p: Rect) -> [Rect; 4] {
+        let w = 66.0;
+        let x0 = p.x + p.w - PAD - 4.0 * (w + 4.0) + 4.0;
+        [0.0, 1.0, 2.0, 3.0].map(|k| Rect::new(x0 + k * (w + 4.0), p.y + 44.0, w, 26.0))
+    }
+
     /// The "Edit" button of a "My challenges" cell.
     fn edit_button(cell: Rect) -> Rect {
         Rect::new(cell.x + cell.w - 52.0, cell.y + cell.h - 28.0, 42.0, 20.0)
@@ -118,6 +128,10 @@ impl Library {
                 self.tab = Tab::Mine;
             } else if tabs[3].contains(input.mouse) {
                 self.tab = Tab::Sonic;
+            } else if let Some(k) =
+                (0..4).find(|&k| self.tab == Tab::Sonic && Self::characters(p)[k].contains(input.mouse))
+            {
+                actions.push(Action::SetCharacter(Character::ALL[k]));
             } else if let Some(slot) = (0..self.count(mine)).find(|&i| Self::cell(p, i).contains(input.mouse)) {
                 let i = self.scroll * COLS + slot;
                 let edit = Self::edit_button(Self::cell(p, slot)).contains(input.mouse);
@@ -170,6 +184,13 @@ impl Library {
         ];
         for (i, (label, tab)) in tab_list.into_iter().enumerate() {
             draw_button(tabs[i], label, tabs[i].contains(mouse), self.tab == tab, f);
+        }
+        if self.tab == Tab::Sonic {
+            let r = Self::characters(p);
+            text("Play as", r[0].x - 52.0, r[0].y + 17.0, 12.0, fade(TEXT_MUTED, f));
+            for (k, c) in Character::ALL.into_iter().enumerate() {
+                draw_button(r[k], c.label(), r[k].contains(mouse), data.character == c, f);
+            }
         }
 
         let t = get_time() as f32;

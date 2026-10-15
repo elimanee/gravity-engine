@@ -4,6 +4,10 @@
 //! round loops), rolling, the spin dash, variable jumps and the slower
 //! physics underwater.
 //!
+//! Tails, Knuckles and Amy move the same way, with their own moves on
+//! top (see [`moves`]): Tails flies, Knuckles glides and climbs, Amy swings
+//! her hammer.
+//!
 //! He is not a rapier body: his sensors are ray casts into the physics
 //! world, and what he does to the objects he pushes, lands on or stands
 //! on comes back as [`Event`]s for the app to apply. Lengths and speeds
@@ -11,7 +15,10 @@
 //! larger in the world.
 
 pub mod art;
+mod moves;
 pub mod sheet;
+
+pub use moves::Character;
 
 use crate::config::PPM;
 use crate::physics::{to_phys, to_screen, PhysWorld};
@@ -59,7 +66,7 @@ const ROLL_START: f32 = 1.03125;
 const ROLL_END: f32 = 0.5;
 /// Push sensors reach this far from his centre.
 const PUSH: f32 = 10.0;
-/// Size: half widths and half heights standing and curled up.
+/// Size: half widths and half heights standing (Sonic) and curled up.
 const STAND: (f32, f32) = (9.0, 19.0);
 const BALL: (f32, f32) = (7.0, 14.0);
 /// Launch speed of a spring (a surface with bounce 1).
@@ -102,6 +109,8 @@ pub struct Input {
     /// Jump held, and pressed since the last frame.
     pub jump: bool,
     pub jump_pressed: bool,
+    /// The action button (Amy's hammer) pressed since the last frame.
+    pub action_pressed: bool,
 }
 
 /// Things that happened during a frame.
@@ -133,6 +142,12 @@ pub enum Event {
         collider: ColliderHandle,
         at: Vec2,
     },
+    /// Tails flaps (flying), Knuckles starts gliding or grabs a wall, Amy
+    /// swings her hammer.
+    Flap,
+    Glide,
+    Grab,
+    Hammer,
 }
 
 /// A sensor's find.
@@ -192,6 +207,23 @@ pub struct Sonic {
     pub dead: bool,
     /// Speed shoes (a monitor): twice as fast.
     pub shoes: bool,
+    /// Who this is, and their own moves (see [`moves`]).
+    pub character: Character,
+    /// Tails: frames flown since taking off (tired after 8 s).
+    pub flying: Option<u32>,
+    flap: bool,
+    /// Knuckles: gliding at this speed, falling after letting go, sliding
+    /// along the ground after landing from a glide.
+    pub gliding: Option<f32>,
+    pub dropping: bool,
+    pub sliding: bool,
+    /// Knuckles: holding on to a wall on this side (1 right, -1 left), and
+    /// pulling himself up over its top (frames, from, to).
+    pub climbing: Option<f32>,
+    pub climb_up: Option<(u32, Vec2, Vec2)>,
+    /// Amy: frames into a hammer swing, and whether it is the spin in the air.
+    pub hammer: Option<u32>,
+    pub hammer_air: bool,
 }
 
 /// Unit vector "down" for his feet in each ground mode.
@@ -251,7 +283,27 @@ impl Sonic {
             hurt: false,
             dead: false,
             shoes: false,
+            character: Character::Sonic,
+            flying: None,
+            flap: false,
+            gliding: None,
+            dropping: false,
+            sliding: false,
+            climbing: None,
+            climb_up: None,
+            hammer: None,
+            hammer_air: false,
         }
+    }
+
+    /// `character` standing at `at`.
+    pub fn as_character(at: Vec2, character: Character) -> Self {
+        Sonic { character, ..Sonic::new(at) }
+    }
+
+    /// Back at `at` after losing a life: the same character, fresh.
+    pub fn reborn(&mut self, at: Vec2) {
+        *self = Sonic::as_character(at, self.character);
     }
 
     /// Hit: knocked up and away from `from_x` (world px).
@@ -262,6 +314,7 @@ impl Sonic {
         self.rolling = false;
         self.jumping = false;
         self.spindash = None;
+        self.end_moves();
         self.xsp = 2.0 * away;
         self.ysp = -4.0;
     }
@@ -274,6 +327,7 @@ impl Sonic {
         self.rolling = false;
         self.jumping = false;
         self.spindash = None;
+        self.end_moves();
         self.xsp = 0.0;
         self.ysp = -7.0;
     }
@@ -290,14 +344,15 @@ impl Sonic {
         }
     }
 
-    /// Attacking: curled up (rolling, jumping, spin dash).
+    /// Attacking: curled up (rolling, jumping, spin dash), gliding, or
+    /// swinging the hammer.
     pub fn attacking(&self) -> bool {
-        self.is_ball()
+        self.is_ball() || self.gliding.is_some() || self.hammer_hits()
     }
 
     /// Back to where he started, standing still.
     pub fn respawn(&mut self) {
-        *self = Sonic { facing: self.facing, ..Sonic::new(self.spawn) };
+        *self = Sonic { facing: self.facing, ..Sonic::as_character(self.spawn, self.character) };
     }
 
     /// Curled up (smaller sensors).
@@ -310,7 +365,7 @@ impl Sonic {
         if self.is_ball() {
             BALL
         } else {
-            STAND
+            self.character.stand()
         }
     }
 
@@ -330,12 +385,13 @@ impl Sonic {
         self.rolling = false;
         self.spindash = None;
         self.on = None;
+        self.end_moves();
     }
 
     /// Curl up (or stand up) on the ground, keeping his feet where they are.
     fn curl(&mut self, ball: bool) {
         let before = self.radii().1;
-        let after = if ball { BALL.1 } else { STAND.1 };
+        let after = if ball { BALL.1 } else { self.character.stand().1 };
         if self.grounded {
             self.pos += mode_down(self.angle) * (before - after) * SCALE;
         }
@@ -413,15 +469,19 @@ impl Sonic {
         };
         let grv = if self.hurt { 0.1875 } else { c.grv } * gravity.max(0.0);
         let input = if self.hurt { Input::default() } else { input };
-        if self.grounded {
+        if self.climbing.is_some() || self.climb_up.is_some() {
+            self.climb_frame(world, env, input, &mut events);
+        } else if self.grounded {
             self.ground_frame(world, env, input, c, &mut events);
         } else {
-            self.air_frame(world, env, input, c, grv, &mut events);
+            self.air_frame(world, env, input, c, (grv, gravity.max(0.0)), &mut events);
         }
         self.stride += self.gsp.abs().max(0.6) * 0.07;
         // The games hold each frame for (8 − speed) frames, (4 − speed) curled up.
         let speed = if self.grounded { self.gsp.abs() } else { self.xsp.abs() };
-        let hold = if self.spindash.is_some() {
+        let hold = if let Some(hold) = self.move_hold() {
+            hold
+        } else if self.spindash.is_some() {
             0.0
         } else if self.is_ball() {
             (4.0 - speed).max(0.0)
@@ -441,6 +501,7 @@ impl Sonic {
         let ground = self.on.and_then(env).unwrap_or_default();
         let grip = (ground.friction / 0.5).clamp(0.12, 1.0);
         let (sin, cos) = self.angle.sin_cos();
+        let input = self.ground_moves(world, env, input, events);
 
         // Spin dash: rev with jump while crouching, let go of ↓ to dash.
         if let Some(rev) = self.spindash {
@@ -470,8 +531,9 @@ impl Sonic {
                 return;
             }
             // Jump straight out from the surface.
-            self.xsp -= c.jmp * sin;
-            self.ysp -= c.jmp * cos;
+            let jmp = self.jump_speed(c);
+            self.xsp -= jmp * sin;
+            self.ysp -= jmp * cos;
             self.grounded = false;
             self.jumping = true;
             self.rolling = false;
@@ -725,27 +787,37 @@ impl Sonic {
         self.pushing = (input.right && dir.x > 0.0) || (input.left && dir.x < 0.0);
     }
 
-    fn air_frame(&mut self, world: &PhysWorld, env: Env, input: Input, c: Consts, grv: f32, events: &mut Vec<Event>) {
+    /// `(grv, k)`: this frame's gravity, and the world's relative to Earth's.
+    fn air_frame(
+        &mut self,
+        world: &PhysWorld,
+        env: Env,
+        input: Input,
+        c: Consts,
+        (grv, k): (f32, f32),
+        events: &mut Vec<Event>,
+    ) {
         self.crouching = false;
         self.looking_up = false;
         self.skidding = false;
         self.pushing = false;
+        let steer = self.air_moves(input, events);
         if self.jumping && !input.jump && self.ysp < -c.release {
             self.ysp = -c.release;
         }
-        if input.right {
+        if steer && input.right {
             if self.xsp < c.top {
                 self.xsp = (self.xsp + c.air).min(c.top);
             }
             self.facing = 1.0;
-        } else if input.left {
+        } else if steer && input.left {
             if self.xsp > -c.top {
                 self.xsp = (self.xsp - c.air).max(-c.top);
             }
             self.facing = -1.0;
         }
         // Air drag near the top of a jump.
-        if self.ysp < 0.0 && self.ysp > -4.0 {
+        if steer && self.ysp < 0.0 && self.ysp > -4.0 {
             self.xsp -= (self.xsp / 0.125).trunc() / 256.0;
         }
         let step = vec2(self.xsp, self.ysp);
@@ -756,7 +828,7 @@ impl Sonic {
                 return;
             }
         }
-        self.ysp = (self.ysp + grv).min(MAX_FALL);
+        self.ysp = self.fall(grv, k);
         // Turn back upright.
         let a = (self.angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
         self.angle = (a * 0.85).rem_euclid(std::f32::consts::TAU);
@@ -768,6 +840,9 @@ impl Sonic {
             let dir = vec2(d, 0.0);
             if let Some(hit) = self.cast(world, env, self.pos, dir, PUSH) {
                 self.pos.x -= d * (PUSH - hit.dist) * SCALE;
+                if self.grab(&hit, d, events) {
+                    return true;
+                }
                 if hit.ground.bounce >= 0.6 && self.xsp * d > 0.0 {
                     self.spring(hit, events);
                     continue;
@@ -833,6 +908,7 @@ impl Sonic {
             self.hurt = false;
             self.gsp = 0.0;
         }
+        self.land_moves();
         self.grounded = true;
         self.jumping = false;
         self.rolling = false;

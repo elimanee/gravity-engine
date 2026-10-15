@@ -127,6 +127,8 @@ pub struct Settings {
     pub show_title: bool,
     /// Longest endless run (m).
     pub sonic_best: f32,
+    /// Who plays: Sonic, Tails, Knuckles or Amy.
+    pub character: crate::sonic::Character,
     /// Best score per Sonic act cleared (by act name).
     pub act_scores: std::collections::BTreeMap<String, u32>,
 
@@ -206,6 +208,7 @@ impl Default for Settings {
             show_title: true,
             sonic_best: 0.0,
             act_scores: Default::default(),
+            character: Default::default(),
             weather: Default::default(),
             night: false,
             darkness: 0.8,

@@ -4,8 +4,8 @@
 
 use super::*;
 use crate::audio::sfx::Sound;
-use crate::sonic::sheet::Sheet;
-use crate::sonic::{art, Event, Ground, Input as Pad, Sonic, FPS, MASS, SCALE};
+use crate::sonic::sheet::{Sheet, Sheets};
+use crate::sonic::{art, Character, Event, Ground, Input as Pad, Sonic, FPS, MASS, SCALE};
 use rapier2d::prelude::{nalgebra, vector, ColliderHandle};
 
 /// Most frames run to catch up after a slow one.
@@ -17,8 +17,9 @@ pub(super) struct SonicRun {
     pub sonic: Sonic,
     /// Simulated time not yet run (s).
     acc: f32,
-    /// Jump pressed since the last frame.
+    /// Jump and the action button pressed since the last frame.
     pub jump: bool,
+    pub action: bool,
     pub rings: u32,
     /// Held by the pointer: where it was last frame.
     held: Option<Vec2>,
@@ -35,10 +36,26 @@ impl App {
             return;
         }
         self.spawn_sonic(at);
-        self.toasts.status(
-            "sonic",
-            "Sonic  ·  ← → run  ·  ↓ roll  ·  Space jump  ·  ↓ + Space spin dash  ·  Shift+Space pause",
-        );
+        self.character_toast();
+    }
+
+    fn character_toast(&mut self) {
+        let c = self.s.character;
+        let msg =
+            format!("{}  ·  ← → run  ·  ↓ roll  ·  Space jump  ·  {}  ·  Shift+N next character", c.label(), c.moves());
+        self.toasts.status("sonic", msg);
+    }
+
+    /// Play as `c` (the one in play changes on the spot).
+    pub(super) fn set_character(&mut self, c: Character) {
+        self.s.character = c;
+        match &mut self.sonic {
+            Some(run) => {
+                run.sonic.become_character(c);
+                self.character_toast();
+            }
+            None => self.toasts.status("sonic", format!("{} will play  ·  Shift+O to start", c.label())),
+        }
     }
 
     pub(super) fn spawn_sonic(&mut self, at: Vec2) {
@@ -46,18 +63,16 @@ impl App {
             self.sonic_sheet_tried = true;
             self.load_sonic_sheet();
         }
-        let sonic = Sonic::new(at);
-        self.sonic = Some(SonicRun { sonic, acc: 0.0, jump: false, rings: 0, held: None });
+        let sonic = Sonic::as_character(at, self.s.character);
+        self.sonic = Some(SonicRun { sonic, acc: 0.0, jump: false, action: false, rings: 0, held: None });
     }
 
-    /// (Re)load the sprite sheets from the Sonic folder: Sonic's, and the objects'.
+    /// (Re)load the sprite sheets from the Sonic folder: the characters', and the objects'.
     fn load_sonic_sheet(&mut self) {
-        match Sheet::load() {
-            Ok(sheet) => self.sonic_sheet = sheet,
-            Err(e) => {
-                self.sonic_sheet = None;
-                self.toasts.warn(format!("Sonic sprite sheet not used: {e}"));
-            }
+        let (sheets, errors) = Sheets::load();
+        self.sonic_sheet = sheets;
+        for e in errors {
+            self.toasts.warn(format!("Sprite sheet not used: {e}"));
         }
         match crate::game::sprites::Sprites::load() {
             Ok(sprites) => self.game_sprites = sprites,
@@ -70,7 +85,8 @@ impl App {
 
     /// Pick a sprite sheet (PNG, with its sheet.json if it has one).
     pub(super) fn pick_sonic_sheet(&mut self) {
-        let Some(png) = FileDialog::new().add_filter("Sprite sheet", &["png", "PNG"]).pick_file() else { return };
+        let filter = FileDialog::new().add_filter("Sprite sheet", &["png", "PNG", "webp", "WEBP"]);
+        let Some(png) = filter.pick_file() else { return };
         let installed = match Sheet::install(&png) {
             Ok(name) => name,
             Err(e) => {
@@ -80,6 +96,13 @@ impl App {
         };
         self.sonic_sheet_tried = true;
         self.load_sonic_sheet();
+        if let Some(c) = Character::ALL
+            .into_iter()
+            .find(|&c| self.sonic_sheet.get(c).is_some_and(|s| s.name == installed) && c != Character::Sonic)
+        {
+            self.toasts.success(format!("{} now uses {installed}", c.label()));
+            return;
+        }
         if installed != "sheet.png" {
             if let Some(sp) = &self.game_sprites {
                 let msg = format!("The game's objects now use the {}", sp.describe());
@@ -87,7 +110,7 @@ impl App {
             }
             return;
         }
-        if let Some(sheet) = &self.sonic_sheet {
+        if let Some(sheet) = self.sonic_sheet.get(Character::Sonic) {
             let msg = format!("Sonic now uses {}", sheet.name);
             self.toasts.success(msg);
             if self.sonic.is_none() && self.challenge.is_none() {
@@ -149,6 +172,7 @@ impl App {
         let gravity = -self.s.gravity / 9.8;
         let gp = self.pad.state();
         let gp_jump = self.pad.jump_pressed();
+        let gp_action = self.pad.pressed(crate::gamepad::Button::West);
         let locked = self.game.as_ref().is_some_and(|g| g.locks_input());
         let Some(run) = &mut self.sonic else { return };
         let mut pad = Pad {
@@ -158,6 +182,7 @@ impl App {
             down: key(KeyCode::Down) || gp.down(),
             jump: (key(KeyCode::Space) && !shift) || gp.jump(),
             jump_pressed: run.jump || gp_jump,
+            action_pressed: run.action || gp_action,
         };
         if locked {
             pad = Pad::default();
@@ -170,7 +195,9 @@ impl App {
                 run.acc -= 1.0 / FPS;
                 events.extend(run.sonic.frame(world, &env, pad, water, gravity));
                 pad.jump_pressed = false;
+                pad.action_pressed = false;
                 run.jump = false;
+                run.action = false;
             }
         }
         let s = run.sonic.clone();
@@ -247,6 +274,13 @@ impl App {
                 Event::Splash => {
                     self.effects.splash(s.pos, 0.8);
                 }
+                Event::Flap => self.sound(Sound::Dash, s.pos, 0.15),
+                Event::Glide => self.sound(Sound::Dash, s.pos, 0.3),
+                Event::Grab => self.sound(Sound::Hit { size: 40.0, hard: 0.2 }, s.pos, 0.5),
+                Event::Hammer => {
+                    self.sound(Sound::Dash, s.pos, 0.45);
+                    self.pad.rumble(0.3, 0.1);
+                }
                 Event::Land => {
                     if self.s.effects && s.gsp.abs() > 4.0 {
                         self.effects.dust(feet, s.gsp.abs());
@@ -321,7 +355,7 @@ impl App {
             }
         }
         if let Some(run) = self.sonic.as_ref().filter(|_| !self.sonic_blinks()) {
-            match &self.sonic_sheet {
+            match self.sonic_sheet.get(run.sonic.character) {
                 Some(sheet) => sheet.draw(&run.sonic),
                 None => art::draw(&run.sonic),
             }

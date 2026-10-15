@@ -26,6 +26,19 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 ![Sonic on an endless run over hills, collecting rings](docs/screenshots/endless-run.png)
 - Sonic is drawn with shapes: no graphics or sounds from the games are included. You can give him **your own sprite sheet** (see below).
 
+### Tails, Knuckles and Amy
+
+`Shift+N` (or the controller's Select, or *Play as* in the library's Sonic tab) changes who plays:
+
+| | |
+|---|---|
+| **Sonic** | ↓ + Space spin dash |
+| **Tails** | Space again in the air: fly; tap Space to flap; tired after 8 s |
+| **Knuckles** | jumps lower; Space again in the air: glide (hold), faster and faster; into a wall: climb ↑ ↓, over the top, or jump off; slides on landing |
+| **Amy** | `X` (controller X / □): hammer; Space again in the air: hammer spin; both destroy badniks and break monitors |
+
+While someone plays, `X` is the action button (the Winamp player is on `X` otherwise). The controller's A, B and Y jump.
+
 ### Sonic sprite sheets
 
 *Sonic sprites…* in the settings (or putting a PNG in `~/.config/gravity_engine/sonic/`) makes Sonic use a sprite sheet you provide. Nothing is copied into the program: the sheet stays on your computer. Triangly's Sonic 1 sheet from The Spriters Resource (690 × 1558) is recognised as it is. For any other sheet, put a `sheet.json` next to it:
@@ -45,6 +58,8 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 ```
 
 Each frame is the top-left corner of a `cell`-sized box whose centre is Sonic's centre, facing right; `transparent` lists background colours to cut out and `scale` is sheet pixels per original game pixel. Animations: `idle` (required), `bored`, `walk`, `run`, `roll` (also the spin dash), `skid`, `push`, `crouch`, `look_up`, `spring`; missing ones fall back to `walk` or `idle`. Frames play at the games' speed (held for 8 − speed frames, 4 − speed curled up) and turn with the ground.
+
+Tails, Knuckles and Amy can have theirs as well, recognised by their size and kept as `tails.png`, `knuckles.png` and `amy.png` / `amy.webp`: the Sonic 3 Tails sheet (1174 × 1820) and the Sonic 3 & Knuckles Knuckles sheet (1131 × 1862) from The Spriters Resource, and CartoonsAnimate22's Amy sheet (1274 × 2000, its Sonic Mania style). Where each character's centre sits in a picture is worked out from its pixels.
 
 The game mode's objects can come from sheets too, picked the same way (they are recognised by their size and kept beside Sonic's):
 

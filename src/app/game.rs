@@ -221,6 +221,11 @@ impl App {
         }
     }
 
+    /// Who is playing.
+    fn player(&self) -> crate::sonic::Character {
+        self.sonic.as_ref().map_or(self.s.character, |r| r.sonic.character)
+    }
+
     /// Whether the tally is finished (waiting for the player).
     pub(super) fn tally_done(&self) -> bool {
         self.game.as_ref().is_some_and(|g| matches!(g.phase, Phase::Cleared(t) if t.done()))
@@ -284,7 +289,7 @@ impl App {
         line("RINGS", g.rings.to_string(), top + 72.0, g.rings == 0);
         if !g.endless {
             let y = screen_height() - 24.0;
-            if !self.game_sprites.as_ref().is_some_and(|sp| sp.face("sonic", vec2(30.0, y - 6.0), 28.0)) {
+            if !self.game_sprites.as_ref().is_some_and(|sp| sp.face(self.player(), vec2(30.0, y - 6.0), 28.0)) {
                 draw_circle(30.0, y - 6.0, 13.0, Color::new(0.12, 0.36, 0.9, 1.0));
                 draw_circle(34.0, y - 9.0, 4.0, WHITE);
             }
@@ -296,7 +301,7 @@ impl App {
                 draw_rectangle(0.0, sh * 0.25, sw, 210.0, Color::new(0.0, 0.0, 0.0, 0.55));
                 let name = if g.spec.name.is_empty() { "THE ACT" } else { g.spec.name.as_str() };
                 theme::text_bold_centered(
-                    &format!("SONIC GOT THROUGH {}", name.to_uppercase()),
+                    &format!("{} GOT THROUGH {}", self.player().label().to_uppercase(), name.to_uppercase()),
                     sw / 2.0,
                     sh * 0.25 + 34.0,
                     26.0,

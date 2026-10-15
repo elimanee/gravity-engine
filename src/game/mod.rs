@@ -614,7 +614,7 @@ impl Game {
                             out.push(Effect::GameOver);
                         } else {
                             let (at, time) = self.checkpoint.unwrap_or((self.start, 0.0));
-                            *sonic = Sonic::new(at);
+                            sonic.reborn(at);
                             self.rings = 0;
                             self.ring_lives = 0;
                             self.time = time;
@@ -735,6 +735,7 @@ impl Game {
 
         // Badniks.
         let attacking = self.attacking(sonic);
+        let reach = sonic.reach();
         let mut killed = vec![];
         let mut hurt_from = None;
         for (i, e) in self.enemies.iter_mut().enumerate() {
@@ -812,7 +813,11 @@ impl Game {
                     }
                 }
             }
-            if live && overlap(me, my_half, e.pos, e.kind.half()) {
+            // Amy's hammer reaches further than she does.
+            let hammered = reach.is_some_and(|(c, h)| overlap(c, h, e.pos, e.kind.half()));
+            if live && hammered {
+                killed.push((i, true));
+            } else if live && overlap(me, my_half, e.pos, e.kind.half()) {
                 if attacking {
                     killed.push((i, true));
                 } else {
@@ -937,8 +942,9 @@ impl Game {
                         });
                         out.push(Effect::Shot(b.pos));
                     }
-                    if live && (b.pos - me).length() < BOSS_R + my_half.x.max(my_half.y) {
-                        if attacking {
+                    let hammered = reach.is_some_and(|(c, h)| overlap(c, h, b.pos, Vec2::splat(BOSS_R)));
+                    if live && (hammered || (b.pos - me).length() < BOSS_R + my_half.x.max(my_half.y)) {
+                        if attacking || hammered {
                             if b.flash <= 0.0 {
                                 b.hp -= 1;
                                 b.flash = 1.2;

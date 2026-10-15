@@ -131,6 +131,9 @@ pub enum Action {
     LevelContinue,
     /// Play one of Sonic's built-in acts.
     OpenAct(usize),
+    /// Play as the next character (or this one).
+    CycleCharacter(i32),
+    SetCharacter(crate::sonic::Character),
     Undo,
     Redo,
     ToggleRecording,

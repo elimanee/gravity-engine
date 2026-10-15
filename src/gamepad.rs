@@ -60,9 +60,9 @@ impl State {
         self.dy > 0.5 || self.ly > DEADZONE
     }
 
-    /// Any face button (they all jump, as in the games).
+    /// A, B or Y jump (X is the action button: Amy's hammer).
     pub fn jump(&self) -> bool {
-        [Button::South, Button::East, Button::West, Button::North].into_iter().any(|b| self.held(b))
+        [Button::South, Button::East, Button::North].into_iter().any(|b| self.held(b))
     }
 }
 
@@ -322,10 +322,11 @@ mod tests {
         assert!(!s.right(), "inside the dead zone");
         s.dy = 1.0;
         assert!(s.down());
+        s.set(Button::East, true);
+        assert!(s.jump() && s.held(Button::East) && !s.held(Button::South));
+        s.set(Button::East, false);
         s.set(Button::West, true);
-        assert!(s.jump() && s.held(Button::West) && !s.held(Button::South));
-        s.set(Button::West, false);
-        assert!(!s.jump());
+        assert!(!s.jump(), "X is the action button");
     }
 
     #[cfg(target_os = "linux")]
