@@ -50,6 +50,11 @@ pub enum Sound {
     Skid,
     Spring,
     Ring,
+    /// Game mode: Sonic hurt, his rings scattering, a star post, the boss hit.
+    Hurt,
+    Scatter,
+    Post,
+    Clang,
     /// Challenge solved.
     Win,
 }
@@ -369,6 +374,59 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
             );
             out
         }
+        Sound::Hurt => {
+            // A falling buzz.
+            let mut out = secs(0.45);
+            let dt = 1.0 / RATE as f32;
+            let mut phase = 0.0;
+            for (k, s) in out.iter_mut().enumerate() {
+                let t = k as f32 * dt;
+                phase += std::f32::consts::TAU * (520.0 - 600.0 * t) * p * dt;
+                let saw = (phase / std::f32::consts::TAU).fract() * 2.0 - 1.0;
+                *s = saw * 0.22 * (t / 0.005).min(1.0) * ((0.45 - t) / 0.15).clamp(0.0, 1.0);
+            }
+            out
+        }
+        Sound::Scatter => {
+            // Rings spilling: a quick cascade of bell notes.
+            let mut out = secs(0.9);
+            let notes: Vec<Partial> = (0..8)
+                .map(|i| {
+                    let f = (2400.0 - i as f32 * 110.0 + n.range(-60.0, 60.0)) * p;
+                    Partial(f, 0.14, 0.09, i as f32 * 0.045)
+                })
+                .collect();
+            add_partials(&mut out, &notes);
+            out
+        }
+        Sound::Post => {
+            // A star post: a rising ding-ding.
+            let mut out = secs(0.7);
+            add_partials(
+                &mut out,
+                &[
+                    Partial(1318.5 * p, 0.25, 0.1, 0.0),
+                    Partial(1975.5 * p, 0.25, 0.2, 0.08),
+                    Partial(3951.0 * p, 0.05, 0.1, 0.08),
+                ],
+            );
+            out
+        }
+        Sound::Clang => {
+            // Metal struck: inharmonic partials and a click.
+            let mut out = secs(0.9);
+            add_partials(
+                &mut out,
+                &[
+                    Partial(310.0 * p, 0.3, 0.14, 0.0),
+                    Partial(687.0 * p, 0.2, 0.1, 0.0),
+                    Partial(1123.0 * p, 0.15, 0.07, 0.0),
+                    Partial(1789.0 * p, 0.08, 0.05, 0.0),
+                ],
+            );
+            add_noise(&mut out, &mut n, |_| 6000.0 * p, |t| 0.6 * (-t / 0.01).exp());
+            out
+        }
         Sound::Win => {
             let mut out = secs(1.6);
             // C major arpeggio of soft bells.
@@ -389,7 +447,7 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
 mod tests {
     use super::*;
 
-    const ALL: [Sound; 21] = [
+    const ALL: [Sound; 25] = [
         Sound::Hit { size: 80.0, hard: 0.2 },
         Sound::Hit { size: 20.0, hard: 1.0 },
         Sound::Shatter,
@@ -410,6 +468,10 @@ mod tests {
         Sound::Skid,
         Sound::Spring,
         Sound::Ring,
+        Sound::Hurt,
+        Sound::Scatter,
+        Sound::Post,
+        Sound::Clang,
         Sound::Win,
     ];
 

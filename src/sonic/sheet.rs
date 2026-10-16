@@ -1,23 +1,33 @@
-//! Sonic drawn from a sprite sheet the user provides (none ships with the
-//! program): a PNG in `~/.config/gravity_engine/sonic/`, cut up by a
-//! `sheet.json` beside it, or by the built-in layout of Triangly's Sonic 1
-//! sheet (The Spriters Resource) when the PNG is that sheet.
+//! The characters drawn from sprite sheets the user provides (none ships
+//! with the program), in `~/.config/gravity_engine/sonic/`:
 //!
-//! Each frame is a cell whose centre is Sonic's centre, facing right, at
-//! one sheet pixel per guide pixel (or `scale`).
+//! - Sonic: a PNG cut up by a `sheet.json` beside it, or by the built-in
+//!   layout of Triangly's Sonic 1 sheet (The Spriters Resource);
+//! - `tails.png`, `knuckles.png`, `amy.png` / `amy.webp`: the Sonic 3
+//!   Tails and Sonic 3 & Knuckles Knuckles sheets (The Spriters Resource)
+//!   and CartoonsAnimate22's Amy sheet (its Sonic Mania style), each
+//!   recognised by its size.
+//!
+//! A picture is drawn with the character's centre at the point the layout
+//! gives (for the built-in sheets, worked out from the pixels: the feet,
+//! or the middle of a ball), facing right, one sheet pixel per guide
+//! pixel (or `scale`).
+//!
+//! The game's objects can have sheets in the same folder too (see
+//! [`crate::game::sprites`]); those names are not Sonic's.
 
-use super::Sonic;
+use super::{Character, Sonic};
 use macroquad::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Where the sheet lives.
+/// Where the sheets live.
 pub fn dir() -> Option<PathBuf> {
     crate::config::config_dir().map(|c| c.join("sonic"))
 }
 
-/// How to cut a sheet up.
+/// How to cut Sonic's sheet up (`sheet.json`).
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Layout {
@@ -57,22 +67,381 @@ fn sonic1() -> Layout {
     Layout { cell: [66, 66], transparent: vec![[13, 72, 7], [37, 102, 26], [67, 153, 49]], scale: 1.0, animations: a }
 }
 
+/// Where a character's centre sits in a built-in picture.
+#[derive(Clone, Copy, PartialEq)]
+enum Fit {
+    /// Standing: its feet are the bottom of the picture.
+    Feet,
+    /// Curled up, flying, gliding: the middle of the picture.
+    Middle,
+}
+
+/// An animation of a built-in sheet: its pictures (x, y, w, h), and
+/// pictures drawn behind them (Tails' tails).
+struct Spec {
+    name: &'static str,
+    fit: Fit,
+    pics: &'static [[u16; 4]],
+    behind: &'static [[u16; 4]],
+}
+
+const fn spec(name: &'static str, fit: Fit, pics: &'static [[u16; 4]]) -> Spec {
+    Spec { name, fit, pics, behind: &[] }
+}
+
+/// A built-in sheet: its size, background colours, whether its pictures
+/// sit in boxes laid out as in the game (else each is cut tight around
+/// the character), and its animations.
+struct Builtin {
+    character: Character,
+    size: (u32, u32),
+    background: &'static [[u8; 3]],
+    /// Lossy (WebP): backgrounds are cut out by closeness, not exactly.
+    lossy: bool,
+    boxed: bool,
+    specs: &'static [Spec],
+}
+
+const fn b48(x: u16, y: u16) -> [u16; 4] {
+    [x, y, 48, 48]
+}
+
+// Sonic 3 Tails (1174 × 1820): the body and the tails are separate pieces
+// for standing, rolling and the spin dash.
+const TAILS_WAG: &[[u16; 4]] =
+    &[[24, 264, 50, 48], [78, 264, 50, 48], [132, 264, 50, 48], [186, 264, 50, 48], [240, 264, 50, 48]];
+const TAILS_ROLL: &[[u16; 4]] = &[[314, 264, 60, 48], [378, 264, 60, 48], [442, 264, 60, 48], [506, 264, 60, 48]];
+const TAILS_DASH: &[[u16; 4]] = &[[590, 264, 52, 48], [646, 264, 52, 48], [702, 264, 52, 48], [758, 264, 52, 48]];
+const TAILS_ROTOR: &[[u16; 4]] = &[[1044, 264, 51, 48], [1099, 264, 51, 48]];
+const TAILS: Builtin = Builtin {
+    character: Character::Tails,
+    size: (1174, 1820),
+    background: &[[37, 102, 26], [13, 72, 7], [34, 177, 76], [168, 230, 29]],
+    lossy: false,
+    boxed: true,
+    specs: &[
+        Spec { name: "idle", fit: Fit::Feet, pics: &[b48(24, 335)], behind: TAILS_WAG },
+        Spec {
+            name: "bored",
+            fit: Fit::Feet,
+            pics: &[b48(24, 408), b48(76, 408), b48(128, 408), b48(180, 408), b48(232, 408)],
+            behind: TAILS_WAG,
+        },
+        Spec { name: "look_up", fit: Fit::Feet, pics: &[b48(24, 481)], behind: TAILS_WAG },
+        Spec { name: "crouch", fit: Fit::Feet, pics: &[b48(76, 481)], behind: TAILS_WAG },
+        spec(
+            "walk",
+            Fit::Feet,
+            &[
+                [24, 647, 54, 48],
+                [82, 647, 54, 48],
+                [140, 647, 54, 48],
+                [198, 647, 54, 48],
+                [256, 647, 54, 48],
+                [314, 647, 54, 48],
+                [372, 647, 54, 48],
+                [430, 647, 54, 48],
+            ],
+        ),
+        spec("run", Fit::Feet, &[b48(504, 647), b48(556, 647), b48(608, 647), b48(660, 647)]),
+        Spec {
+            name: "roll",
+            fit: Fit::Middle,
+            pics: &[b48(314, 401), b48(366, 401), b48(418, 401)],
+            behind: TAILS_ROLL,
+        },
+        Spec {
+            name: "spindash",
+            fit: Fit::Feet,
+            pics: &[b48(590, 337), b48(642, 337), b48(694, 337)],
+            behind: TAILS_DASH,
+        },
+        Spec { name: "skid", fit: Fit::Feet, pics: &[b48(590, 466), b48(642, 466)], behind: TAILS_DASH },
+        Spec {
+            name: "push",
+            fit: Fit::Feet,
+            pics: &[b48(590, 539), b48(642, 539), b48(694, 539), b48(746, 539)],
+            behind: TAILS_DASH,
+        },
+        spec("spring", Fit::Middle, &[[808, 720, 48, 57], [860, 720, 48, 57]]),
+        spec("hurt", Fit::Middle, &[b48(848, 647)]),
+        spec("dead", Fit::Middle, &[b48(968, 647)]),
+        spec("balance", Fit::Feet, &[b48(1036, 647), b48(1088, 647)]),
+        Spec { name: "fly", fit: Fit::Middle, pics: &[b48(1044, 337)], behind: TAILS_ROTOR },
+        spec("fly_tired", Fit::Middle, &[b48(1044, 410), b48(1096, 410)]),
+    ],
+};
+
+// Sonic 3 & Knuckles Knuckles (1131 × 1862), 48 px boxes.
+const KNUCKLES: Builtin = Builtin {
+    character: Character::Knuckles,
+    size: (1131, 1862),
+    background: &[[65, 169, 184], [16, 112, 132], [153, 217, 234]],
+    lossy: false,
+    boxed: true,
+    specs: &[
+        spec("idle", Fit::Feet, &[b48(24, 277)]),
+        spec("bored", Fit::Feet, &[b48(76, 277), b48(128, 277)]),
+        spec("look_up", Fit::Feet, &[b48(725, 277)]),
+        spec("crouch", Fit::Feet, &[b48(845, 277)]),
+        spec(
+            "walk",
+            Fit::Feet,
+            &[
+                b48(664, 350),
+                b48(716, 350),
+                b48(768, 350),
+                b48(820, 350),
+                b48(872, 350),
+                b48(924, 350),
+                b48(976, 350),
+                b48(1028, 350),
+            ],
+        ),
+        spec("run", Fit::Feet, &[b48(24, 423), b48(76, 423), b48(128, 423), b48(180, 423)]),
+        spec(
+            "roll",
+            Fit::Middle,
+            &[
+                b48(248, 423),
+                b48(456, 423),
+                b48(300, 423),
+                b48(456, 423),
+                b48(352, 423),
+                b48(456, 423),
+                b48(404, 423),
+                b48(456, 423),
+            ],
+        ),
+        spec(
+            "spindash",
+            Fit::Feet,
+            &[
+                b48(24, 508),
+                b48(284, 508),
+                b48(76, 508),
+                b48(284, 508),
+                b48(128, 508),
+                b48(284, 508),
+                b48(180, 508),
+                b48(284, 508),
+            ],
+        ),
+        spec("skid", Fit::Feet, &[b48(412, 633), b48(464, 633)]),
+        spec("push", Fit::Feet, &[b48(736, 779), b48(788, 779), b48(840, 779), b48(892, 779)]),
+        spec("spring", Fit::Middle, &[b48(636, 633)]),
+        spec("hurt", Fit::Middle, &[b48(960, 556)]),
+        spec("dead", Fit::Middle, &[b48(728, 884)]),
+        spec("balance", Fit::Feet, &[b48(740, 524), b48(792, 524), b48(845, 524)]),
+        spec("glide", Fit::Middle, &[[24, 1009, 48, 34]]),
+        spec("drop", Fit::Middle, &[b48(128, 1009)]),
+        spec("slide", Fit::Feet, &[[184, 1009, 48, 34]]),
+        spec(
+            "climb",
+            Fit::Middle,
+            &[b48(24, 1085), b48(76, 1085), b48(128, 1085), b48(180, 1085), b48(232, 1085), b48(284, 1085)],
+        ),
+        spec("climb_up", Fit::Middle, &[b48(24, 1137), b48(76, 1137), b48(128, 1137)]),
+    ],
+};
+
+// CartoonsAnimate22's Amy (1274 × 2000, WebP), its Sonic Mania style:
+// pictures cut tight around her.
+const AMY: Builtin = Builtin {
+    character: Character::Amy,
+    size: (1274, 2000),
+    // The boxes, the page, and the blur between them.
+    background: &[[0, 190, 220], [0, 97, 128], [0, 145, 176]],
+    lossy: true,
+    boxed: false,
+    specs: &[
+        spec("idle", Fit::Feet, &[[545, 670, 19, 32]]),
+        spec("bored", Fit::Feet, &[[568, 671, 20, 31], [591, 671, 20, 31], [614, 671, 21, 31], [637, 671, 22, 31]]),
+        spec("look_up", Fit::Feet, &[[548, 1221, 19, 36]]),
+        spec("crouch", Fit::Feet, &[[1016, 678, 22, 24]]),
+        spec(
+            "walk",
+            Fit::Feet,
+            &[
+                [547, 708, 21, 31],
+                [576, 707, 24, 32],
+                [606, 706, 26, 32],
+                [636, 706, 26, 30],
+                [668, 708, 24, 30],
+                [700, 708, 21, 31],
+                [731, 708, 21, 31],
+                [757, 707, 25, 32],
+                [787, 706, 28, 31],
+                [818, 706, 28, 31],
+                [851, 707, 23, 31],
+                [883, 708, 20, 31],
+            ],
+        ),
+        spec(
+            "run",
+            Fit::Feet,
+            &[
+                [547, 789, 25, 31],
+                [578, 789, 24, 32],
+                [610, 791, 22, 30],
+                [639, 790, 24, 31],
+                [668, 789, 25, 32],
+                [698, 789, 25, 31],
+                [730, 789, 24, 32],
+                [762, 791, 22, 30],
+                [790, 790, 25, 31],
+                [821, 789, 24, 32],
+            ],
+        ),
+        spec(
+            "roll",
+            Fit::Middle,
+            &[
+                [608, 908, 24, 24],
+                [639, 908, 23, 24],
+                [669, 909, 24, 24],
+                [700, 909, 23, 23],
+                [730, 908, 22, 25],
+                [759, 908, 23, 25],
+                [789, 908, 25, 22],
+                [820, 908, 24, 23],
+            ],
+        ),
+        spec(
+            "spindash",
+            Fit::Middle,
+            &[
+                [909, 871, 25, 22],
+                [939, 871, 24, 22],
+                [970, 871, 24, 22],
+                [1000, 871, 24, 22],
+                [1030, 871, 24, 22],
+                [1060, 871, 25, 23],
+                [1091, 871, 24, 22],
+                [1121, 871, 24, 22],
+                [1152, 871, 24, 23],
+            ],
+        ),
+        spec("push", Fit::Feet, &[[548, 1153, 23, 29], [579, 1153, 24, 29], [671, 1153, 22, 29], [702, 1153, 21, 29]]),
+        spec(
+            "spring",
+            Fit::Middle,
+            &[
+                [548, 1186, 28, 33],
+                [584, 1186, 29, 33],
+                [624, 1187, 26, 31],
+                [662, 1186, 26, 33],
+                [700, 1187, 26, 32],
+                [737, 1186, 26, 32],
+            ],
+        ),
+        spec("hurt", Fit::Middle, &[[942, 1154, 30, 26]]),
+        spec("dead", Fit::Middle, &[[642, 1263, 21, 38]]),
+        spec(
+            "hammer",
+            Fit::Feet,
+            &[[550, 1031, 28, 33], [582, 1026, 32, 36], [619, 1030, 37, 30], [658, 1029, 34, 30], [700, 1026, 28, 36]],
+        ),
+        spec(
+            "hammer_air",
+            Fit::Middle,
+            &[
+                [851, 908, 34, 24],
+                [940, 901, 24, 34],
+                [968, 898, 43, 45],
+                [1019, 908, 33, 24],
+                [1056, 899, 44, 43],
+                [1104, 905, 24, 33],
+                [1131, 898, 44, 44],
+            ],
+        ),
+    ],
+};
+
+const BUILTINS: [&Builtin; 3] = [&TAILS, &KNUCKLES, &AMY];
+
+/// The file a character's sheet is kept in (Sonic: any other PNG).
+fn file_names(c: Character) -> &'static [&'static str] {
+    match c {
+        Character::Sonic => &["sheet.png"],
+        Character::Tails => &["tails.png"],
+        Character::Knuckles => &["knuckles.png"],
+        Character::Amy => &["amy.png", "amy.webp"],
+    }
+}
+
+/// Which character's built-in sheet an image of this size is.
+pub fn character_of(size: (u32, u32)) -> Option<Character> {
+    BUILTINS.iter().find(|b| b.size == size).map(|b| b.character)
+}
+
+/// A picture: where it is on the sheet, and where the character's centre
+/// is in it (sheet px from its top-left).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Pic {
+    src: Rect,
+    centre: Vec2,
+}
+
+#[derive(Default)]
+struct Anim {
+    pics: Vec<Pic>,
+    behind: Vec<Pic>,
+}
+
 /// A loaded sheet.
 pub struct Sheet {
     texture: Texture2D,
-    layout: Layout,
+    anims: HashMap<String, Anim>,
+    scale: f32,
     pub name: String,
 }
 
-/// The PNG to use in `dir`, and its layout.
+/// The sheets of all the characters (each one optional).
+#[derive(Default)]
+pub struct Sheets {
+    sheets: Vec<(Character, Sheet)>,
+}
+
+impl Sheets {
+    pub fn get(&self, c: Character) -> Option<&Sheet> {
+        self.sheets.iter().find(|(k, _)| *k == c).map(|(_, s)| s)
+    }
+
+    /// Load every character's sheet in the Sonic folder; problems are
+    /// returned beside what did load.
+    pub fn load() -> (Sheets, Vec<String>) {
+        let mut out = Sheets::default();
+        let mut errors = vec![];
+        for c in Character::ALL {
+            match Sheet::load(c) {
+                Ok(Some(s)) => out.sheets.push((c, s)),
+                Ok(None) => {}
+                Err(e) => errors.push(format!("{}: {e}", c.label())),
+            }
+        }
+        (out, errors)
+    }
+}
+
+/// Is this file one of the other sheets rather than Sonic's?
+fn is_not_sonics(p: &Path) -> bool {
+    use crate::game::sprites::{MONITORS, OBJECTS};
+    let others = Character::ALL.iter().skip(1).flat_map(|&c| file_names(c).iter().copied());
+    p.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n == OBJECTS || n == MONITORS || others.clone().any(|o| o == n))
+}
+
+/// Sonic's PNG in `dir` (`sheet.png` first), and its layout.
 fn find(dir: &Path) -> Result<(PathBuf, Option<Layout>), String> {
     let mut pngs: Vec<PathBuf> = std::fs::read_dir(dir)
         .map_err(|e| e.to_string())?
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")))
+        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")) && !is_not_sonics(p))
         .collect();
-    pngs.sort();
+    pngs.sort_by_key(|p| (p.file_name().is_none_or(|n| n != "sheet.png"), p.clone()));
     let png = pngs.into_iter().next().ok_or("no PNG sprite sheet")?;
     let json = dir.join("sheet.json");
     let layout = match std::fs::read_to_string(&json) {
@@ -91,11 +460,121 @@ pub fn clear_background(img: &mut image::RgbaImage, colours: &[[u8; 3]]) {
     }
 }
 
+/// Cut out colours near the background ones, softly (for lossy images):
+/// edge pixels keep their own colour without the background's tint.
+pub fn clear_background_near(img: &mut image::RgbaImage, colours: &[[u8; 3]]) {
+    const CLEAR: f32 = 40.0;
+    const SOLID: f32 = 80.0;
+    for p in img.pixels_mut() {
+        let dist = |c: &[u8; 3]| (0..3).map(|k| (p[k] as f32 - c[k] as f32).powi(2)).sum::<f32>().sqrt();
+        let Some(near) = colours.iter().min_by(|a, b| dist(a).total_cmp(&dist(b))) else { return };
+        let a = ((dist(near) - CLEAR) / (SOLID - CLEAR)).clamp(0.0, 1.0);
+        if a > 0.0 && a < 1.0 {
+            for k in 0..3 {
+                p[k] = ((p[k] as f32 - (1.0 - a) * near[k] as f32) / a).clamp(0.0, 255.0) as u8;
+            }
+        }
+        p[3] = (p[3] as f32 * a) as u8;
+    }
+}
+
+/// The opaque part of `r` in `img`: its bounding box (x0, y0, x1, y1) and
+/// the middle of its upper part (the head and body, steadier than the
+/// limbs).
+fn measure(img: &image::RgbaImage, r: [u16; 4]) -> Option<([f32; 4], f32)> {
+    let [x, y, w, h] = r.map(u32::from);
+    let opaque = |px: u32, py: u32| px < img.width() && py < img.height() && img.get_pixel(px, py)[3] > 96;
+    let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0, 0);
+    for py in y..y + h {
+        for px in x..x + w {
+            if opaque(px, py) {
+                (x0, y0, x1, y1) = (x0.min(px), y0.min(py), x1.max(px + 1), y1.max(py + 1));
+            }
+        }
+    }
+    if x0 == u32::MAX {
+        return None;
+    }
+    let top = y0 + (y1 - y0) * 45 / 100;
+    let (mut sum, mut n) = (0.0, 0.0);
+    for py in y0..top.max(y0 + 1) {
+        for px in x0..x1 {
+            if opaque(px, py) {
+                sum += px as f32 + 0.5;
+                n += 1.0;
+            }
+        }
+    }
+    let head = if n > 0.0 { sum / n } else { (x0 + x1) as f32 / 2.0 };
+    Some(([x0 as f32, y0 as f32, x1 as f32, y1 as f32], head))
+}
+
+fn median(mut v: Vec<f32>) -> f32 {
+    if v.is_empty() {
+        return 0.0;
+    }
+    v.sort_by(f32::total_cmp);
+    v[v.len() / 2]
+}
+
+/// The pictures of a built-in animation, with the character's centre in
+/// each. Boxed sheets keep the game's placement (one offset for the whole
+/// animation); tight pictures each get their own.
+fn cut(img: &image::RgbaImage, b: &Builtin, s: &Spec) -> Anim {
+    let hr = b.character.stand().1;
+    let measured: Vec<_> = s.pics.iter().map(|&r| (r, measure(img, r))).collect();
+    let centre_of = |(bx, head): ([f32; 4], f32)| -> Vec2 {
+        match s.fit {
+            Fit::Feet => vec2(head, bx[3] - hr),
+            Fit::Middle => vec2((bx[0] + bx[2]) / 2.0, (bx[1] + bx[3]) / 2.0),
+        }
+    };
+    let rect = |r: [u16; 4]| Rect::new(r[0] as f32, r[1] as f32, r[2] as f32, r[3] as f32);
+    let (dx, dy) = {
+        let offs: Vec<Vec2> =
+            measured.iter().filter_map(|(r, m)| m.map(|m| centre_of(m) - vec2(r[0] as f32, r[1] as f32))).collect();
+        (median(offs.iter().map(|o| o.x).collect()), median(offs.iter().map(|o| o.y).collect()))
+    };
+    let pics = measured
+        .iter()
+        .map(|&(r, m)| {
+            let centre = match m {
+                Some(m) if !b.boxed => centre_of(m) - vec2(r[0] as f32, r[1] as f32),
+                _ => vec2(dx, dy),
+            };
+            Pic { src: rect(r), centre }
+        })
+        .collect();
+    // Pieces behind are boxed like the body: same place in their box.
+    let behind = s.behind.iter().map(|&r| Pic { src: rect(r), centre: vec2(dx, dy) }).collect();
+    Anim { pics, behind }
+}
+
 impl Sheet {
-    /// The sheet in the Sonic folder, if there is one.
-    pub fn load() -> Result<Option<Sheet>, String> {
+    /// `c`'s sheet in the Sonic folder, if there is one.
+    pub fn load(c: Character) -> Result<Option<Sheet>, String> {
         let Some(dir) = dir().filter(|d| d.is_dir()) else { return Ok(None) };
-        let (png, layout) = match find(&dir) {
+        if c == Character::Sonic {
+            return Self::load_sonic(&dir);
+        }
+        let Some(path) = file_names(c).iter().map(|n| dir.join(n)).find(|p| p.is_file()) else { return Ok(None) };
+        let mut img = image::open(&path).map_err(|e| e.to_string())?.to_rgba8();
+        let Some(b) = BUILTINS.iter().find(|b| b.character == c) else { return Ok(None) };
+        if img.dimensions() != b.size {
+            return Err(format!("not the expected sheet ({}×{})", img.width(), img.height()));
+        }
+        if b.lossy {
+            clear_background_near(&mut img, b.background);
+        } else {
+            clear_background(&mut img, b.background);
+        }
+        let anims = b.specs.iter().map(|s| (s.name.to_string(), cut(&img, b, s))).collect();
+        let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        Ok(Some(Sheet { texture: upload(&img), anims, scale: 1.0, name }))
+    }
+
+    fn load_sonic(dir: &Path) -> Result<Option<Sheet>, String> {
+        let (png, layout) = match find(dir) {
             Ok(found) => found,
             Err(e) if e == "no PNG sprite sheet" => return Ok(None),
             Err(e) => return Err(e),
@@ -110,17 +589,46 @@ impl Sheet {
             return Err("the sheet has no \"idle\" animation".into());
         }
         clear_background(&mut img, &layout.transparent);
-        let texture = Texture2D::from_rgba8(img.width() as u16, img.height() as u16, &img);
-        texture.set_filter(FilterMode::Nearest);
+        let [w, h] = layout.cell.map(|v| v as f32);
+        let anims = layout
+            .animations
+            .iter()
+            .map(|(name, cells)| {
+                let pics = cells
+                    .iter()
+                    .map(|&[x, y]| Pic { src: Rect::new(x as f32, y as f32, w, h), centre: vec2(w, h) / 2.0 })
+                    .collect();
+                (name.clone(), Anim { pics, behind: vec![] })
+            })
+            .collect();
         let name = png.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-        Ok(Some(Sheet { texture, layout, name }))
+        Ok(Some(Sheet { texture: upload(&img), anims, scale: layout.scale, name }))
     }
 
-    /// Copy a chosen PNG (and its sheet.json, if any) into the Sonic folder.
-    pub fn install(png: &Path) -> Result<(), String> {
+    /// Copy a chosen sheet into the Sonic folder: as the character or the
+    /// objects' sheet its size says it is, else as Sonic's (with its
+    /// sheet.json, if any). Returns the file it became.
+    pub fn install(png: &Path) -> Result<String, String> {
         let dir = dir().ok_or("no config directory")?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let size = image::image_dimensions(png).map_err(|e| e.to_string())?;
+        if let Some(name) = crate::game::sprites::sheet_name(size) {
+            std::fs::copy(png, dir.join(name)).map_err(|e| e.to_string())?;
+            return Ok(name.to_string());
+        }
+        if let Some(c) = character_of(size) {
+            for n in file_names(c) {
+                let _ = std::fs::remove_file(dir.join(n));
+            }
+            let ext = png.extension().map_or("png".into(), |e| e.to_string_lossy().to_lowercase());
+            let name = file_names(c).iter().find(|n| n.ends_with(&ext)).unwrap_or(&file_names(c)[0]).to_string();
+            std::fs::copy(png, dir.join(&name)).map_err(|e| e.to_string())?;
+            return Ok(name);
+        }
         for old in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+            if is_not_sonics(&old.path()) {
+                continue;
+            }
             if old.path().extension().is_some_and(|e| e.eq_ignore_ascii_case("png") || e == "json") {
                 let _ = std::fs::remove_file(old.path());
             }
@@ -129,17 +637,42 @@ impl Sheet {
         if let Some(json) = png.parent().map(|p| p.join("sheet.json")).filter(|j| j.is_file()) {
             std::fs::copy(json, dir.join("sheet.json")).map_err(|e| e.to_string())?;
         }
-        Ok(())
+        Ok("sheet.png".into())
     }
 
-    fn frames(&self, name: &str) -> Option<&Vec<[u32; 2]>> {
-        self.layout.animations.get(name).filter(|f| !f.is_empty())
+    fn anim(&self, name: &str) -> Option<&Anim> {
+        self.anims.get(name).filter(|a| !a.pics.is_empty())
     }
 
-    /// The animation and frame for Sonic's state.
-    fn pick(&self, s: &Sonic) -> [u32; 2] {
+    /// The animation for his state, and which of its pictures.
+    fn pick(&self, s: &Sonic) -> Option<(&Anim, usize)> {
         let speed = if s.grounded { s.gsp.abs() } else { s.xsp.abs() };
-        let name = if s.is_ball() {
+        let has = |n: &str| self.anim(n).is_some();
+        let name = if s.dead && has("dead") {
+            "dead"
+        } else if (s.hurt || s.dead) && has("hurt") {
+            "hurt"
+        } else if s.climb_up.is_some() && has("climb_up") {
+            "climb_up"
+        } else if s.climbing.is_some() && has("climb") {
+            "climb"
+        } else if s.gliding.is_some() && has("glide") {
+            "glide"
+        } else if s.sliding && has("slide") {
+            "slide"
+        } else if s.dropping && has("drop") {
+            "drop"
+        } else if s.flying.is_some() && s.tired() && has("fly_tired") {
+            "fly_tired"
+        } else if s.flying.is_some() && has("fly") {
+            "fly"
+        } else if s.hammer.is_some() && s.hammer_air && has("hammer_air") {
+            "hammer_air"
+        } else if s.hammer.is_some() && !s.hammer_air && has("hammer") {
+            "hammer"
+        } else if s.spindash.is_some() && has("spindash") {
+            "spindash"
+        } else if s.is_ball() {
             "roll"
         } else if !s.grounded && s.ysp < 0.0 {
             "spring"
@@ -152,50 +685,69 @@ impl Sheet {
         } else if s.looking_up {
             "look_up"
         } else if s.grounded && speed == 0.0 {
-            if s.idle > 180 && self.frames("bored").is_some() {
+            if s.idle > 180 && has("bored") {
                 "bored"
             } else {
                 "idle"
             }
-        } else if speed >= 6.0 && self.frames("run").is_some() {
+        } else if speed >= 6.0 && has("run") {
             "run"
         } else {
             "walk"
         };
-        let frames = self.frames(name).or_else(|| self.frames("walk")).or_else(|| self.frames("idle"));
-        let Some(frames) = frames else { return [0, 0] };
-        let k = if name == "bored" {
-            ((s.idle - 180) / 30) as usize
-        } else if name == "push" {
-            (s.anim / 8.0) as usize
-        } else {
-            s.anim as usize
+        let anim = self.anim(name).or_else(|| self.anim("walk")).or_else(|| self.anim("idle"))?;
+        let n = anim.pics.len();
+        let k = match name {
+            "bored" => ((s.idle - 180) / 30) as usize,
+            "push" => (s.anim / 8.0) as usize,
+            // Played once through.
+            "hammer" => s.hammer.map_or(0, |h| (h as usize * n / 22).min(n - 1)),
+            "climb_up" => s.climb_up.map_or(0, |(t, _, _)| (t as usize * n / 18).min(n - 1)),
+            _ => s.anim as usize,
         };
-        frames[k % frames.len()]
+        Some((anim, k % n))
     }
 
-    /// Draw Sonic from the sheet (world pass).
-    pub fn draw(&self, s: &Sonic) {
-        let [x, y] = self.pick(s);
-        let [w, h] = self.layout.cell;
-        let k = super::SCALE / self.layout.scale.max(0.01);
-        let size = vec2(w as f32, h as f32) * k;
-        let upright = !s.grounded || (s.gsp == 0.0 && super::mode_down(s.angle).y > 0.5 && s.angle.sin().abs() < 0.4);
-        let angle = if upright && s.grounded { 0.0 } else { s.angle };
+    fn blit(&self, pic: Pic, s: &Sonic, angle: f32) {
+        let k = super::SCALE / self.scale.max(0.01);
+        let size = vec2(pic.src.w, pic.src.h) * k;
+        let flip = s.facing < 0.0;
+        let cx = if flip { pic.src.w - pic.centre.x } else { pic.centre.x };
+        let top_left = s.pos - vec2(cx, pic.centre.y) * k;
         draw_texture_ex(
             &self.texture,
-            s.pos.x - size.x / 2.0,
-            s.pos.y - size.y / 2.0,
+            top_left.x,
+            top_left.y,
             WHITE,
             DrawTextureParams {
                 dest_size: Some(size),
-                source: Some(Rect::new(x as f32, y as f32, w as f32, h as f32)),
+                source: Some(pic.src),
                 rotation: -angle,
-                flip_x: s.facing < 0.0,
+                flip_x: flip,
+                pivot: Some(s.pos),
                 ..Default::default()
             },
         );
     }
+
+    /// Draw him from the sheet (world pass).
+    pub fn draw(&self, s: &Sonic) {
+        let Some((anim, k)) = self.pick(s) else { return };
+        let upright = !s.grounded || (s.gsp == 0.0 && super::mode_down(s.angle).y > 0.5 && s.angle.sin().abs() < 0.4);
+        let angle = if upright && s.grounded { 0.0 } else { s.angle };
+        if !anim.behind.is_empty() {
+            // Tails' tails swish on their own clock.
+            let t = (get_time() * if s.flying.is_some() { 20.0 } else { 8.0 }) as usize;
+            self.blit(anim.behind[t % anim.behind.len()], s, angle);
+        }
+        self.blit(anim.pics[k], s, angle);
+    }
+}
+
+fn upload(img: &image::RgbaImage) -> Texture2D {
+    let texture = Texture2D::from_rgba8(img.width() as u16, img.height() as u16, img);
+    texture.set_filter(FilterMode::Nearest);
+    texture
 }
 
 #[cfg(test)]
@@ -220,5 +772,42 @@ mod tests {
                 assert!(f[0] + 66 <= 690 && f[1] + 66 <= 1558, "{name} cell inside the sheet");
             }
         }
+    }
+
+    #[test]
+    fn built_in_pictures_lie_inside_their_sheets() {
+        for b in BUILTINS {
+            assert!(b.specs.iter().any(|s| s.name == "idle"), "{:?} has idle", b.character);
+            for s in b.specs {
+                for r in s.pics.iter().chain(s.behind) {
+                    let (w, h) = b.size;
+                    assert!((r[0] + r[2]) as u32 <= w && (r[1] + r[3]) as u32 <= h, "{} {r:?}", s.name);
+                }
+            }
+            assert_eq!(character_of(b.size), Some(b.character));
+        }
+    }
+
+    #[test]
+    fn centres_come_from_the_pixels() {
+        // A 10 × 20 figure standing at the bottom of a 48 px box.
+        let mut img = image::RgbaImage::from_pixel(48, 48, image::Rgba([0, 0, 0, 0]));
+        for y in 28..48 {
+            for x in 19..29 {
+                img.put_pixel(x, y, image::Rgba([255, 0, 0, 255]));
+            }
+        }
+        let ([x0, y0, x1, y1], head) = measure(&img, [0, 0, 48, 48]).unwrap();
+        assert_eq!((x0, y0, x1, y1), (19.0, 28.0, 29.0, 48.0));
+        assert_eq!(head, 24.0);
+        let anim = cut(&img, &TAILS, &spec("idle", Fit::Feet, &[[0, 0, 48, 48]]));
+        // Tails stands 15 guide px tall above his feet.
+        assert_eq!(anim.pics[0].centre, vec2(24.0, 48.0 - 15.0));
+        // Soft cut-out of near colours.
+        let mut img = image::RgbaImage::from_pixel(2, 1, image::Rgba([2, 188, 222, 255]));
+        img.put_pixel(1, 0, image::Rgba([240, 80, 140, 255]));
+        clear_background_near(&mut img, AMY.background);
+        assert_eq!(img.get_pixel(0, 0)[3], 0);
+        assert_eq!(img.get_pixel(1, 0)[3], 255);
     }
 }

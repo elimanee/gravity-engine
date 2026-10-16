@@ -74,6 +74,11 @@ pub fn scene_dir() -> Option<PathBuf> {
     config_dir().map(|c| c.join("scenes"))
 }
 
+/// Folder for Sonic levels made in the level editor.
+pub fn level_dir() -> Option<PathBuf> {
+    config_dir().map(|c| c.join("levels"))
+}
+
 /// Folder for challenges made in the editor.
 pub fn challenge_dir() -> Option<PathBuf> {
     config_dir().map(|c| c.join("challenges"))

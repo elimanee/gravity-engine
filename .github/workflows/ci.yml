@@ -39,6 +39,13 @@ jobs:
       - name: Release build
         run: cargo build --release
 
+      # Test builds of any branch, downloadable from the run's page.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gravity_engine-linux-x86_64
+          path: target/release/gravity_engine
+          retention-days: 14
+
   windows:
     runs-on: windows-latest
     steps:
@@ -68,3 +75,16 @@ jobs:
 
       - name: Release build
         run: cargo build --release
+
+      - name: Package the test build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path test-build | Out-Null
+          Copy-Item target\release\gravity_engine.exe test-build\
+          Copy-Item "$env:OPENMPT_BIN_DIR\*.dll" test-build\
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gravity_engine-windows-x86_64
+          path: test-build/*
+          retention-days: 14

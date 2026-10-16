@@ -4,7 +4,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
-![Version](https://img.shields.io/badge/version-2.10-8b78ff)
+![Version](https://img.shields.io/badge/version-3.0-8b78ff)
 
 ![Title screen](docs/screenshots/title.png)
 
@@ -12,19 +12,68 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
 
-## What's new in 2.10
+## What's new in 3.0
+
+![Sonic hurt in Meadow Act 1: his rings fly out in a circle between two badniks](docs/screenshots/act.png)
+
+Gravity Engine 3.0 is also a Sonic game: Sonic and his friends play in the sandbox with the physics of the Mega Drive games, through acts with badniks and a boss, an endless run and levels you make yourself. Everything is drawn with shapes; no graphics or sounds from the games are included, but you can give them **your own sprite sheets** (see below).
+
+### Playable Sonic
 
 ![Sonic running upside down round a loop, collecting rings](docs/screenshots/sonic-loop.png)
 
-- **Playable Sonic** (`Shift+O`, or *Sonic* in the settings) — Sonic joins the scene and is played with the keyboard: `←` `→` run, `↓` crouches or rolls, `Space` jumps (hold for higher), `↓` + `Space` charges a spin dash, `↑` looks up. He moves the way he does in the Mega Drive games, after the [Sonic Physics Guide](https://info.sonicretro.org/Sonic_Physics_Guide): acceleration, braking and friction, slopes that slow him down or speed him up, floor sensors that follow walls and ceilings (he runs round loops), slipping off when too slow, rolling, variable jump height, air drag, and slower physics underwater.
-- He pushes objects (curled up, he bowls them over), stands and rides on them, weighs down seesaws, bounces off bouncy surfaces like springs, slides on ice, is blown away by bombs and can be picked up and thrown with the Spring tool. The camera follows him in a big world. `Shift+Space` pauses while he is around.
+- **`Shift+O`** (or *Sonic* in the settings) — Sonic joins the scene and is played with the keyboard or a controller: `←` `→` run, `↓` crouches or rolls, `Space` jumps (hold for higher), `↓` + `Space` charges a spin dash, `↑` looks up. He moves the way he does in the Mega Drive games, after the [Sonic Physics Guide](https://info.sonicretro.org/Sonic_Physics_Guide): acceleration, braking and friction, slopes that slow him down or speed him up, floor sensors that follow walls and ceilings (he runs round loops), slipping off when too slow, rolling, variable jump height, air drag, and slower physics underwater.
+- He pushes objects (curled up, he bowls them over and smashes breakable ones), stands and rides on them, weighs down seesaws, bounces off bouncy surfaces like springs, slides on ice, is launched by conveyors like dash panels, is blown away by bombs and can be picked up and thrown with the Spring tool. The camera follows him in a big world. `Shift+Space` pauses while he is around.
 - **Rings** to collect, with a counter; example scene *Sonic loop* (a loop, a spring, a ramp and crates). Sonic and the rings are saved in scene files.
 - **Infinite world** (*World size* → `∞` in the settings) — a floor that goes on forever, no walls or ceiling: travel with the middle mouse button, or let the camera follow Sonic. Everything is quietly moved back towards the middle as you go, so it never loses precision.
-- **Endless run** (example scene) — Sonic in the infinite world, with terrain made ahead of him as he runs: hills, loops with dash panels, ramps, springs up to platforms, crates to smash curled up, and rings everywhere. The distance and your best run are shown under the ring counter.
-- Curled up, Sonic smashes breakable objects (rolling into them or landing on them), and conveyor surfaces launch him like dash panels.
 
-![Sonic on an endless run over hills, collecting rings](docs/screenshots/endless-run.png)
-- Sonic is drawn with shapes: no graphics or sounds from the games are included. You can give him **your own sprite sheet** (see below).
+### Sonic's game mode
+
+**Library → Sonic** (`E`) holds three acts: *Meadow Act 1* (badniks and spikes), *Act 2* (platforms over pits, flyers and crabs) and *Act 3*, where the boss waits.
+
+- **Badniks** — a crawler, a flyer that shoots at Sonic and a crab that lobs shots; jump on them or roll into them (100, 200, 500, 1000… points for each one in a row without landing).
+- **Item monitors** to smash: 10 rings, a shield, invincibility, speed shoes and an extra life. **Spikes**, bottomless **pits** and the **boss**, who flies over his arena and takes eight hits (the view locks on the arena until he is beaten).
+- Hit while holding rings, Sonic loses them in a circle and has a moment to catch some back; hit without rings, he loses a life. 100 rings make an extra life. **Star posts** are checkpoints.
+- **Score, time, rings and lives** on screen; the **goal signpost** spins to end the act, then the tally counts the time and ring bonuses and the next act starts (`Space` / `Enter` / the controller's A). Three lives, then *Game Over*.
+
+### Tails, Knuckles and Amy
+
+![Tails flying, Knuckles gliding and Amy swinging her hammer](docs/screenshots/characters.png)
+
+`Shift+N` (or the controller's Select, or *Play as* in the library's Sonic tab) changes who plays:
+
+| | |
+|---|---|
+| **Sonic** | ↓ + Space spin dash |
+| **Tails** | Space again in the air: fly; tap Space to flap; tired after 8 s |
+| **Knuckles** | jumps lower; Space again in the air: glide (hold), faster and faster; into a wall: climb ↑ ↓, over the top, or jump off; slides on landing |
+| **Amy** | `X` (controller X / □): hammer; Space again in the air: hammer spin; both destroy badniks and break monitors |
+
+While someone plays, `X` is the action button (the Winamp player is on `X` otherwise). The controller's A, B and Y jump.
+
+### Make your own levels
+
+![The level editor: a start, rows of rings, a ledge, a flyer, a crawler, a crab, a spring, a monitor and a star post](docs/screenshots/level-editor.png)
+
+**Library → Sonic → New level** opens the level editor, in the infinite world. Name the level, then pick what to place in the bar and click (or drag) in the world: the start, rings (drag for a row), the three badniks, monitors (click *Monitor* again for the next item), spikes, star posts, the goal, the boss, springs, ground (drag across), ledges and loops; *Erase* takes things away. Things are dropped onto the ground under the pointer. The sandbox tools still work to build the scenery.
+
+*Play* tries the level straight away from its start, *Stop* comes back to the editor. *Save* keeps it in `~/.config/gravity_engine/levels/`: your levels are listed in Library → Sonic after the acts, to play or to edit again (they are ordinary `.gscene` files, so they can be shared).
+
+### A richer endless run
+
+![The Twilight zone at night: Sonic lit up among crates, the best run's ghost glowing beside him and rings gleaming](docs/screenshots/endless-twilight.png)
+
+The *Endless run* example (Sonic in the infinite world, with hills, loops, ramps, springs, platforms, crates and rings made ahead of him) now goes through **five zones** — Meadow, Twilight (at night: Sonic carries a light and the rings gleam), Snowfield (snow), Lagoon (water) and Storm peak (rain and lightning) — each with its own colours and sky, and round again. The further you go, the more **badniks, flyers, crabs and spikes**, with the odd monitor.
+
+One life: at the first fall the run is over and starts again. The best run is kept as a **ghost** that races you on the same course next time (`ghost.json`); the distance, your best and the zone are shown under the counters.
+
+### Controllers
+
+A game controller plays Sonic and his friends (Linux joystick devices and XInput on Windows; no extra library): the left stick or d-pad runs, A / B / Y jump, X is the action button, Select changes character and Start pauses. On Windows, hits and explosions make it rumble.
+
+### Performance
+
+`gravity_engine --benchmark` runs five stress scenes (400 shapes, sand and water, a night storm, ragdolls, Sonic's endless run) at a fixed 60 Hz and prints the frame times and where they go — physics, each part of the drawing, waiting for the screen — then quits without touching your settings. Objects and grains outside the view are no longer drawn, which helps in big and infinite worlds.
 
 ### Sonic sprite sheets
 
@@ -45,6 +94,15 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 ```
 
 Each frame is the top-left corner of a `cell`-sized box whose centre is Sonic's centre, facing right; `transparent` lists background colours to cut out and `scale` is sheet pixels per original game pixel. Animations: `idle` (required), `bored`, `walk`, `run`, `roll` (also the spin dash), `skid`, `push`, `crouch`, `look_up`, `spring`; missing ones fall back to `walk` or `idle`. Frames play at the games' speed (held for 8 − speed frames, 4 − speed curled up) and turn with the ground.
+
+Tails, Knuckles and Amy can have theirs as well, recognised by their size and kept as `tails.png`, `knuckles.png` and `amy.png` / `amy.webp`: the Sonic 3 Tails sheet (1174 × 1820) and the Sonic 3 & Knuckles Knuckles sheet (1131 × 1862) from The Spriters Resource, and CartoonsAnimate22's Amy sheet (1274 × 2000, its Sonic Mania style). Where each character's centre sits in a picture is worked out from its pixels.
+
+The game mode's objects can come from sheets too, picked the same way (they are recognised by their size and kept beside Sonic's):
+
+- `objects.png`: the Sonic 1 *Common Objects* sheet (712 × 1014): rings, monitors, spikes, star posts, the goal signpost, springs, explosions, the shield, invincibility stars, score numbers and *GAME OVER*;
+- `monitors.png`: the Sonic 3 *Monitors* sheet (822 × 813): its monitors when there is no `objects.png`, and the 1-up faces of Tails and Knuckles.
+
+Without them, everything is drawn with shapes.
 
 ## What's new in 2.9
 
@@ -193,7 +251,7 @@ Each frame is the top-left corner of a `cell`-sized box whose centre is Sonic's 
   | L | Gadgets | Lasers, thrusters (or fans), cannons, lamps and grappling hooks, always on, on an arrow key or on the beat |
 
   The tool card (bottom left) holds each tool's settings: radius / strength for area tools (mouse wheel: radius, `Shift`+wheel: strength), thickness, colour and pinning for Draw, the kind of link (and motor speed) for Link, the kind of zone for Zone, the selection commands for Select and the kind of grain for Pour.
-- **7 border modes** — `B` to cycle (`Shift+B` backwards):
+- **8 border modes** — `B` to cycle (`Shift+B` backwards):
 
   | Mode | Description |
   |------|-------------|
@@ -204,6 +262,7 @@ Each frame is the top-left corner of a `cell`-sized box whose centre is Sonic's 
   | Bounce | Springy trampolines on the sides |
   | Repulse | Soft force field on every edge |
   | Portal | No floor — every edge is a portal, animated rainbow borders |
+  | Open | No walls and no floor: what falls off is gone (pits in Sonic's levels) |
 - **7 backgrounds** — `G` to cycle: Dark, Space, Grid, Sunset, Ocean, Aurora, Custom (`Shift+G` picks an image)
 - **Water** (`H`) — a pool with buoyancy and drag; level and density in the settings drawer, waves react to splashes and to the music
 - **Object properties** — bounce, friction, mass, gravity, planet gravity, breakable, flammable, mirror, magnet and conveyor per object (right-click → *Properties…*, or `I`)
@@ -224,7 +283,11 @@ Each frame is the top-left corner of a `cell`-sized box whose centre is Sonic's 
 - **Jelly and cloth** (`U` / `Shift+U`) — soft bodies from any image or shape, and fabric that drapes, flaps in the wind and tears
 - **Gadgets** (`L`) — lasers that reflect off mirrors and cross glass, thrusters, fans, cannons, lamps and grappling hooks; motors driven with the arrow keys
 - **Planets** — objects with their own gravity that others orbit
-- **Playable Sonic** (`Shift+O`) — arrows and `Space`, with the physics of the Mega Drive games: loops, rolling, spin dash, rings
+- **Playable Sonic** (`Shift+O`) — arrows and `Space`, with the physics of the Mega Drive games: loops, rolling, spin dash, rings; **Tails, Knuckles and Amy** (`Shift+N`) fly, glide and climb, and swing a hammer
+- **Sonic's game mode** (Library → Sonic) — three acts with badniks, monitors, spikes, pits, star posts, a boss and the goal signpost; score, time, lives and the end-of-act tally
+- **Level editor** (Library → Sonic → *New level*) — make Sonic levels, try them and keep them in *My levels*
+- **Endless run** — five zones, more and more badniks, and the best run's ghost to race
+- **Game controllers** — play with a pad (Linux and Windows; it rumbles on Windows)
 - **Weather and night** (`Shift+H` / `Shift+T`) — rain, snow and storms with lightning; a night lit by lamps with shadows, fire and lasers
 - **Screenshots** (`F12`) and **GIF recording** (`F11`, up to 30 s) of the scene, without the interface
 - **Debug overlay** (`D`) — FPS, collider outlines, velocities and details of the object under the cursor
@@ -242,8 +305,10 @@ Press **F1** in the app for the full list.
 | `←` `↑` `→` `↓` | Drive motors, work the gadgets set to an arrow (a grappling hook shoots at the pointer) |
 | `O` | Drop a ragdoll (over an image: it becomes the head) |
 | `Shift+O` | Sonic joins (or leaves): `←` `→` run, `↓` roll, `Space` jump, `↓` + `Space` spin dash, `Shift+Space` pause |
+| `Shift+N` / `X` | Next character (Sonic, Tails, Knuckles, Amy) / action button while someone plays (Amy's hammer) |
+| Controller | Stick or d-pad: run · A / B / Y: jump · X: action · Select: next character · Start: pause |
 | `U` / `Shift+U` | Jelly / cloth (over an object: it turns to jelly / is hung as a flag) |
-| `E` / `Shift+E` | Examples & challenges / challenge editor |
+| `E` / `Shift+E` | Library (examples, challenges, Sonic's acts and levels) / challenge editor |
 | `Ctrl`+Wheel, `+` / `-`, `Home` | Zoom at the pointer, zoom in / out, fit the world |
 | Middle-drag | Pan the view |
 | `Ctrl+C` / `Ctrl+V` / `Ctrl+D` / `Ctrl+A` / `Ctrl+G` | Copy / paste / duplicate / select all / glue (Select tool) |
@@ -287,7 +352,9 @@ sudo apt install pkg-config libopenmpt-dev libasound2-dev libx11-dev libxi-dev \
 cargo run --release
 ```
 
-Command line: `gravity_engine [--no-title] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins.
+Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins.
+
+`gravity_engine --benchmark` runs five stress scenes for a few seconds each at a fixed 60 Hz and prints the frame times (average, 95th percentile, worst), the bodies still moving, the time spent waiting for the screen and where each frame's time goes, then quits without saving anything.
 
 `gravity_engine --verify-challenges` plays every built-in challenge with its reference solution (and once without drawing) and reports whether each one is solvable within its ink — handy when designing levels.
 
@@ -308,6 +375,9 @@ Everything lives in `~/.config/gravity_engine/` (or `$XDG_CONFIG_HOME/gravity_en
 | `settings.json` | Your preferences, saved on exit. Set `"show_title": false` to skip the title screen. |
 | `scenes/` | Default folder for saved scenes |
 | `challenges/` | Challenges made in the editor (`.gchallenge`), listed in Library → *My challenges* |
+| `levels/` | Sonic levels made in the level editor (`.gscene`), listed in Library → *Sonic* |
+| `sonic/` | Your sprite sheets for Sonic, Tails, Knuckles, Amy and the game's objects (see *Sonic sprite sheets*) |
+| `ghost.json` | The endless run's best run, raced as a ghost |
 | `skins/` | Extra Winamp / Audacious skins (`.wsz` files or folders) for the classic player |
 | `sgdb_key` | SteamGridDB API key for the logo fetcher (or set `SGDB_API_KEY`) |
 
@@ -321,7 +391,8 @@ src/
 ├── app/               app state and frame loop (input → UI → actions → simulation → render),
 │                      building tools, selection, impacts and shattering, fire, jelly and
 │                      cloth, gadgets, grappling hooks, weather, night lights, the physical
-│                      player, sounds and slow motion, challenge mode, challenge editor and verifier
+│                      player, sounds and slow motion, challenge mode, challenge editor and verifier,
+│                      Sonic's game, the level editor, the endless run and the benchmark
 ├── camera.rs          zoom / pan and the world ↔ screen mapping
 ├── config.rs          constants and paths          settings.rs   persisted preferences
 ├── skin.rs            Winamp 2 / Audacious skins (.wsz, folders, skin.hints)
@@ -329,9 +400,14 @@ src/
 ├── scene.rs           .gscene save / load          background.rs animated backgrounds
 ├── drawing.rs         Draw-tool strokes → shapes   history.rs    undo / redo
 ├── recorder.rs        GIF recording                net.rs        web fetchers
-├── effects.rs         particles                    library/      example scenes and challenges
+├── effects.rs         particles                    library/      examples, challenges, acts, levels
 ├── weather.rs         rain, snow and lightning     lighting.rs   the night's light map and shadows
-├── sonic/             playable Sonic: movement after the Sonic Physics Guide, and his drawing
+├── sonic/             Sonic, Tails, Knuckles and Amy: movement after the Sonic Physics Guide, their
+│                      moves, their drawing with shapes and from sprite sheets
+├── game/              Sonic's game mode: badniks, monitors, spikes, star posts, the boss, lives and
+│                      score, and its objects drawn with shapes or from sprite sheets
+├── gamepad.rs         game controllers (Linux joystick devices, XInput)
+├── profile.rs         the benchmark's frame profiler
 ├── window_tracker.rs  window shake
 ├── audio/             tracker modules, streams, playlists, the visualizer's analyzer, sound effects
 ├── physics/           world, objects, tools, links, zones, water, grains, soft bodies, gadgets, magnets,
@@ -339,7 +415,7 @@ src/
 └── ui/                theme, widgets, HUD, drawer, tool card, menus, properties panel, overlays, title screen
 ```
 
-`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, snow, jelly, cloth, laser beams, gadgets, planets, rope reeling, weather, night light, Sonic's running, jumping, spin dash, underwater speed and loops, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
+`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, snow, jelly, cloth, laser beams, gadgets, planets, rope reeling, weather, night light, Sonic's running, jumping, spin dash, underwater speed and loops, Tails' flight, Knuckles' glide and climb, Amy's hammer, badniks, monitors, rings, lives and the boss, sprite sheets, the endless run's zones, controllers, the profiler, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
 
 `gravity_engine --verify-challenges` (needs a display) checks that every built-in challenge can be solved.
 

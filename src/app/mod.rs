@@ -49,16 +49,19 @@ use rfd::FileDialog;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+mod bench;
 mod build;
 mod editor;
 mod endless;
 mod fire;
 mod gadgets;
+mod game;
 mod grapple;
 mod impacts;
 mod infinite;
 mod juice;
 mod knife;
+mod level_editor;
 mod library;
 mod night;
 mod player;
@@ -156,12 +159,33 @@ pub struct App {
     sky: Sky,
     /// Sonic (Shift+O) and the rings left to collect (world px).
     sonic: Option<sonic::SonicRun>,
+    /// A game controller, if one is plugged in.
+    pad: crate::gamepad::Gamepad,
     /// The user's Sonic sprite sheet (loaded when he first appears).
-    sonic_sheet: Option<crate::sonic::sheet::Sheet>,
+    sonic_sheet: crate::sonic::sheet::Sheets,
     sonic_sheet_tried: bool,
     rings: Vec<Vec2>,
     /// Sonic's endless run (terrain made as he goes).
     endless: Option<endless::Endless>,
+    /// `--benchmark` is running.
+    bench: Option<bench::Bench>,
+    /// A Sonic level being played: badniks, hazards, items, score.
+    game: Option<crate::game::Game>,
+    popups: Vec<game::Popup>,
+    /// Explosions and ring sparkles drawn from the sprite sheets.
+    booms: Vec<game::Boom>,
+    /// The objects' sprite sheets (rings, monitors, posts…), if the user has them.
+    game_sprites: Option<crate::game::sprites::Sprites>,
+    /// Where and when Sonic last bounced off a spring.
+    spring_fired: Option<(Vec2, f64)>,
+    /// The Sonic level editor, its bar, and "My levels" (file, name).
+    level_editor: Option<level_editor::LevelEditor>,
+    level_bar: crate::ui::level_bar::LevelBar,
+    levels: Vec<(std::path::PathBuf, String)>,
+    /// The scene the level was opened from (to play it again), and which
+    /// built-in act it is.
+    level: Option<scene::SceneFile>,
+    act: Option<usize>,
     /// The night's light map.
     lights: crate::lighting::Lights,
     climate: weather::Climate,
@@ -207,7 +231,7 @@ impl App {
     pub fn new(preload: Vec<String>, skip_title: bool) -> Self {
         let mut s = Settings::load();
         let infinite = s.world_size >= 4;
-        if infinite {
+        if infinite && s.border != crate::physics::borders::BorderMode::Open {
             s.border = crate::physics::borders::BorderMode::Walls;
         }
         let k = s.world_size as f32;
@@ -267,10 +291,22 @@ impl App {
             sky: Sky::default(),
             lights: Default::default(),
             sonic: None,
-            sonic_sheet: None,
+            pad: Default::default(),
+            sonic_sheet: Default::default(),
             sonic_sheet_tried: false,
             rings: Vec::new(),
             endless: None,
+            bench: None,
+            game: None,
+            popups: Vec::new(),
+            booms: Vec::new(),
+            game_sprites: None,
+            spring_fired: None,
+            level: None,
+            act: None,
+            level_editor: None,
+            level_bar: Default::default(),
+            levels: Vec::new(),
             climate: Default::default(),
             pouring: false,
             pour_sound: 0.0,
@@ -343,7 +379,14 @@ impl App {
     // Frame
     // ═══════════════════════════════════════════════════════════
     pub fn frame(&mut self) {
-        let dt = get_frame_time().min(0.1);
+        self.bench_begin();
+        self.run_frame();
+        self.bench_end();
+    }
+
+    fn run_frame(&mut self) {
+        // The benchmark steps at exactly 60 Hz, however long frames take.
+        let dt = if self.bench.is_some() { 1.0 / 60.0 } else { get_frame_time().min(0.1) };
         let (sw, sh) = (screen_width(), screen_height());
 
         if let Some(Title::Showing) = self.title {
@@ -368,6 +411,7 @@ impl App {
         }
 
         self.recentre();
+        self.poll_pad();
         let mut input = Input::gather();
         input.world = self.view().to_world(input.mouse);
         let mut actions = Vec::new();
@@ -377,7 +421,10 @@ impl App {
         } else {
             input.consumed = true;
         }
-        self.update_ui(dt, &mut input, &mut actions);
+        {
+            let _t = crate::profile::span("interface");
+            self.update_ui(dt, &mut input, &mut actions);
+        }
         self.handle_drops(input.world);
         if !in_transition {
             self.world_input(dt, &mut input);
@@ -395,6 +442,7 @@ impl App {
         let rewind_key = is_key_down(KeyCode::Left) && (input.shift || !self.listens_to_left());
         let holding = rewind_key && !in_transition && !self.editor_bar.typing();
         if !self.rewind_tick(holding) {
+            let _t = crate::profile::span("simulate");
             self.simulate(dt, input.world);
         }
         self.update_challenge(dt);
@@ -403,7 +451,10 @@ impl App {
             self.selection.retain(|h| objects.iter().any(|o| o.body == *h));
         }
 
-        self.draw(dt, &input);
+        {
+            let _t = crate::profile::span("draw");
+            self.draw(dt, &input);
+        }
 
         if let Some(Title::Leaving(po)) = &mut self.title {
             po.draw();
@@ -419,7 +470,7 @@ impl App {
     fn keyboard(&mut self, input: &Input, actions: &mut Vec<Action>) {
         let pressed = |k| is_key_pressed(k);
         let (shift, ctrl) = (input.shift, input.ctrl);
-        if self.editor_bar.typing() {
+        if self.editor_bar.typing() || self.level_bar.typing() {
             return;
         }
         // Over the player windows, Del / Enter act on the playlist.
@@ -451,6 +502,12 @@ impl App {
                 self.spawner.fader.open = false;
             } else if self.paused {
                 self.paused = false;
+            } else if self.level_editor.as_ref().is_some_and(|e| e.item.is_some()) {
+                actions.push(Action::Level(crate::ui::LevelCmd::Pick(
+                    self.level_editor.as_ref().and_then(|e| e.item).unwrap_or(crate::ui::level_bar::Item::Erase),
+                )));
+            } else if self.level_testing() {
+                actions.push(Action::Level(crate::ui::LevelCmd::Stop));
             } else if self.editor.as_ref().is_some_and(|e| e.place.is_some()) {
                 if let Some(e) = self.editor.as_mut() {
                     e.place = None;
@@ -502,7 +559,22 @@ impl App {
             self.quit = true;
         }
         let challenge = self.challenge.as_ref().map(|r| (r.started, r.won));
-        if pressed(KeyCode::Space) && self.sonic.is_some() && !shift {
+        // The controller's Select changes character, Start pauses (or starts a challenge).
+        if self.pad.pressed(crate::gamepad::Button::Select) {
+            actions.push(Action::CycleCharacter(1));
+        }
+        if self.pad.pressed(crate::gamepad::Button::Start) {
+            actions.push(match challenge {
+                Some((false, _)) => Action::ChallengeGo,
+                _ => Action::TogglePause,
+            });
+        }
+        let tally_done = self.tally_done();
+        if tally_done
+            && (pressed(KeyCode::Space) || pressed(KeyCode::Enter) || self.pad.pressed(crate::gamepad::Button::South))
+        {
+            actions.push(Action::LevelContinue);
+        } else if pressed(KeyCode::Space) && self.sonic.is_some() && !shift {
             // Sonic's jump button (Shift+Space pauses).
             if let Some(run) = &mut self.sonic {
                 run.jump = true;
@@ -567,7 +639,12 @@ impl App {
         if pressed(KeyCode::H) {
             actions.push(if shift { Action::CycleWeather(1) } else { Action::ToggleWater });
         }
-        if pressed(KeyCode::X) {
+        if pressed(KeyCode::X) && !shift && self.sonic.is_some() {
+            // The action button while someone plays (Amy's hammer).
+            if let Some(run) = &mut self.sonic {
+                run.action = true;
+            }
+        } else if pressed(KeyCode::X) {
             actions.push(if shift { Action::TogglePlayerPhysics } else { Action::TogglePlayer });
         }
         if pressed(KeyCode::O) {
@@ -606,7 +683,7 @@ impl App {
             self.toasts.status("trails", format!("Trails {}", if self.s.trails { "on" } else { "off" }));
         }
         if pressed(KeyCode::N) {
-            actions.push(Action::ToggleSpawner);
+            actions.push(if shift { Action::CycleCharacter(1) } else { Action::ToggleSpawner });
         }
         if pressed(KeyCode::D) {
             self.debug = !self.debug;
@@ -661,7 +738,7 @@ impl App {
     fn update_ui(&mut self, dt: f32, input: &mut Input, actions: &mut Vec<Action>) {
         // Top-most first, so overlays swallow clicks meant for them.
         self.help.update(dt, input);
-        self.library.update(dt, self.custom.len(), input, actions);
+        self.library.update(dt, (self.custom.len(), self.levels.len()), input, actions);
         self.picker.update(dt, input, actions);
         self.menu.update(dt, input, actions);
         self.update_inspector(dt, input);
@@ -682,6 +759,11 @@ impl App {
         if self.editor_view().is_some() {
             if let Some(ed) = self.editor.as_mut() {
                 self.editor_bar.update(&mut ed.name, top, input, actions);
+            }
+        }
+        if let Some(v) = self.level_view() {
+            if let Some(ed) = self.level_editor.as_mut() {
+                self.level_bar.update(&v, &mut ed.name, top, input, actions);
             }
         }
         let np = self.audio.now_playing();
@@ -797,7 +879,9 @@ impl App {
             }
         }
 
-        if input.left_pressed && !input.consumed && self.challenge.is_none() && self.editor_press(m) {
+        if input.left_pressed && !input.consumed && self.challenge.is_none() && self.level_press(m) {
+            // Placing something in a Sonic level.
+        } else if input.left_pressed && !input.consumed && self.challenge.is_none() && self.editor_press(m) {
             // Placing the challenge ball or goal.
         } else if input.left_pressed && !input.consumed {
             if self.spawner.is_open() {
@@ -884,6 +968,7 @@ impl App {
         }
         if input.left_down {
             self.knife_drag(m);
+            self.level_drag(m);
         }
 
         if input.left_released || !input.left_down {
@@ -894,6 +979,7 @@ impl App {
             self.fire.lit = false;
             self.gadget_release(m);
             self.editor_release(m);
+            self.level_release(m);
             self.knife_release(m);
             if let Some(g) = self.grab.take() {
                 g.release(&mut self.world.bodies, to_phys(m.x, m.y));
@@ -995,7 +1081,14 @@ impl App {
                 }
             }
             Action::CycleBorder(_) if self.infinite() => {
-                self.toasts.status("border", "An infinite world has a floor and no walls");
+                // An infinite world has no walls: only its floor comes and goes.
+                use crate::physics::borders::BorderMode;
+                let open = self.s.border != BorderMode::Open;
+                self.s.border = if open { BorderMode::Open } else { BorderMode::Walls };
+                self.world.set_border(self.s.border);
+                let msg =
+                    if open { "Infinite world: no floor — what falls is gone" } else { "Infinite world: a floor" };
+                self.toasts.status("border", msg);
             }
             Action::CycleBorder(d) => {
                 self.s.border = self.s.border.cycle(d);
@@ -1138,6 +1231,13 @@ impl App {
                 self.toggle_sonic(at);
             }
             Action::LoadSonicSheet => self.pick_sonic_sheet(),
+            Action::LevelContinue => self.level_continue(),
+            Action::OpenAct(i) => self.open_act(i),
+            Action::OpenLevel(i) => self.open_level(i),
+            Action::EditLevel(i) => self.open_level_editor(i),
+            Action::Level(cmd) => self.level_cmd(cmd),
+            Action::CycleCharacter(d) => self.set_character(self.s.character.cycle(d)),
+            Action::SetCharacter(c) => self.set_character(c),
             Action::ToggleNight => {
                 self.s.night = !self.s.night;
                 self.toasts.status(
@@ -1218,6 +1318,7 @@ impl App {
                 let open = !self.library.fader.open;
                 if open {
                     self.refresh_custom();
+                    self.refresh_levels();
                     self.library.open(self.challenge.is_some());
                 } else {
                     self.library.fader.open = false;
@@ -1447,6 +1548,8 @@ impl App {
     }
 
     fn clear_objects(&mut self) {
+        self.stop_game();
+        self.drop_level_preview();
         self.grab = None;
         self.link_drag = None;
         self.menu.close();
@@ -1674,6 +1777,8 @@ impl App {
             })
             .collect();
         scene.weather = Some(self.s.weather);
+        scene.game =
+            self.game.as_ref().map(|g| g.spec.clone()).or_else(|| self.level.as_ref().and_then(|l| l.game.clone()));
         match scene::write(&path, &scene) {
             Ok(()) => self.toasts.success(format!(
                 "Saved {} objects to {}",
@@ -1767,6 +1872,7 @@ impl App {
                 }
             }
             if self.s.water {
+                let _t = crate::profile::span("simulate/water");
                 let rest = water::rest_level(&self.world, self.s.water_level);
                 let splashes = self.water.apply(&mut self.world, &self.objects, rest, self.s.water_density, step);
                 self.water.step(step, self.audio.analyzer.bass, self.audio.analyzer.beat_now);
@@ -1782,13 +1888,19 @@ impl App {
             if self.s.window_shake {
                 self.shaker.apply(&mut self.world.bodies, self.s.shake_force);
             }
-            if self.step_once {
-                self.world.step_fixed();
-                self.step_once = false;
-            } else {
-                self.world.step_frame(dt, time_scale);
+            {
+                let _t = crate::profile::span("simulate/physics");
+                if self.step_once {
+                    self.world.step_fixed();
+                    self.step_once = false;
+                } else {
+                    self.world.step_frame(dt, time_scale);
+                }
             }
-            self.rewind_record(step);
+            {
+                let _t = crate::profile::span("simulate/rewind");
+                self.rewind_record(step);
+            }
 
             let dead = self.world.border.apply_positions(&mut self.world, &rigid);
             let mut dead_grains = HashSet::new();
@@ -1802,10 +1914,20 @@ impl App {
             if !dead_grains.is_empty() {
                 self.grains.remove(&mut self.world, &dead_grains);
             }
-            self.process_impacts();
-            self.update_fire(step, mouse);
-            self.update_sonic(step);
-            self.update_endless();
+            {
+                let _t = crate::profile::span("simulate/impacts");
+                self.process_impacts();
+            }
+            {
+                let _t = crate::profile::span("simulate/fire");
+                self.update_fire(step, mouse);
+            }
+            {
+                let _t = crate::profile::span("simulate/sonic");
+                self.update_sonic(step);
+                self.update_game(step);
+                self.update_endless(step);
+            }
             self.soft_after_step(step, mouse);
             links::prune(&mut self.links, &self.world);
 
@@ -1825,7 +1947,10 @@ impl App {
         for o in &mut self.objects {
             o.update_anim(dt_ms);
         }
-        self.update_weather(dt, running, step, mouse);
+        {
+            let _t = crate::profile::span("simulate/weather");
+            self.update_weather(dt, running, step, mouse);
+        }
         self.blasts.retain(Blast::alive);
         let floor = if self.world.walls().floor { self.arena().1 - WALL_T * PPM } else { f32::MAX };
         let gravity = -self.world.gravity.y * PPM;
@@ -1854,17 +1979,25 @@ impl App {
         if self.player_body.is_some() {
             self.render_player_body(input.world);
         }
+        self.render_endless_ghost();
         let (sw, sh) = (screen_width(), screen_height());
         let screen = vec2(sw, sh);
         let (aw, ah) = self.arena();
         let m = input.world;
-        self.bg.draw(sw, sh);
+        let span = crate::profile::span("draw/background");
+        if self.game.is_some() || self.level_editor.is_some() {
+            crate::background::level_sky(sw, sh, self.camera.center.x, &self.level_sky());
+        } else {
+            self.bg.draw(sw, sh);
+        }
         let view = self.view();
         let floor =
             if self.world.walls().floor { (sh - view.to_screen(vec2(0.0, ah - WALL_T * PPM)).y).max(0.0) } else { 0.0 };
         visualizer::draw_background(self.s.vis_background, &self.audio.analyzer, sw, sh, floor);
+        drop(span);
 
         // The scene, in world pixels.
+        let span = crate::profile::span("draw/objects");
         self.camera.begin_world(screen);
         self.world.border.draw(aw, ah);
         zones::draw(&self.zones);
@@ -1878,26 +2011,44 @@ impl App {
             s.draw(&self.world);
         }
         self.draw_planet_halos();
-        for o in &self.objects {
+        // Only what is in view (big and infinite worlds go far beyond it).
+        let seen = view.visible();
+        let in_view = |o: &&Object| {
+            let (p, _) = o.screen_pos(&self.world);
+            let r = o.size.length() * 0.5 + 8.0;
+            p.x + r >= seen.x && p.x - r <= seen.right() && p.y + r >= seen.y && p.y - r <= seen.bottom()
+        };
+        for o in self.objects.iter().filter(in_view) {
             if o.is_visualizer() {
                 let (p, angle) = o.screen_pos(&self.world);
                 visualizer::draw_object(self.s.vis_object, &self.audio.analyzer, p, angle, o.size, 1.0);
-            } else {
+            } else if !self.draw_spring_sprite(o) {
                 let tint = self.fire.tint(o.body);
                 // Mirrors get a cool sheen.
                 let tint = if o.material.mirror { Color::new(tint.r * 0.8, tint.g * 0.95, tint.b, 1.0) } else { tint };
                 o.draw_tinted(&self.world, tint);
             }
         }
+        drop(span);
+        let span = crate::profile::span("draw/sonic and gadgets");
         self.draw_player_body();
+        self.draw_game();
+        self.draw_level_editor(m);
+        self.draw_endless_ghost();
         self.draw_sonic();
+        self.draw_game_over_sonic();
         self.draw_gadgets();
-        self.grains.draw(&self.world);
+        drop(span);
+        let span = crate::profile::span("draw/grains and links");
+        self.grains.draw(&self.world, seen);
         for l in &self.links {
             l.draw(&self.world);
         }
+        drop(span);
+        let span = crate::profile::span("draw/badges");
         let t = get_time() as f32;
-        for o in &self.objects {
+        // A level shows its scenery without the sandbox's badges.
+        for o in self.objects.iter().filter(|_| self.game.is_none() && self.level_editor.is_none()).filter(in_view) {
             let (p, _) = o.screen_pos(&self.world);
             let mut badges = vec![];
             if o.pinned && o.material.layer == 0 {
@@ -1924,12 +2075,20 @@ impl App {
                 }
             }
         }
+        drop(span);
+        let span = crate::profile::span("draw/water");
         if self.s.water {
             let rest = water::rest_level(&self.world, self.s.water_level);
             self.water.draw(&self.world, rest, aw, ah);
         }
+        drop(span);
+        let span = crate::profile::span("draw/effects");
         self.effects.draw();
+        drop(span);
+        let span = crate::profile::span("draw/weather");
         self.sky.draw();
+        drop(span);
+        let span = crate::profile::span("draw/outlines, world to GPU");
         for target in [self.menu.target, self.inspector.target].into_iter().flatten() {
             if let Some(o) = self.objects.iter().find(|o| o.body == target) {
                 let c = o.corners(&self.world);
@@ -1941,13 +2100,19 @@ impl App {
         }
 
         camera::end_world();
+        drop(span);
+        let span = crate::profile::span("draw/night");
         self.draw_night(m);
+        drop(span);
 
+        let span = crate::profile::span("draw/capture");
         if self.screenshot {
             self.screenshot = false;
             self.take_screenshot();
         }
         self.capture_frame();
+        drop(span);
+        let span = crate::profile::span("draw/tool feedback, lights to GPU");
 
         // Tool feedback, still in world pixels.
         self.camera.begin_world(screen);
@@ -2007,10 +2172,14 @@ impl App {
         self.draw_selection(input.world);
         self.draw_knife();
         camera::end_world();
+        drop(span);
+        let span = crate::profile::span("draw/vignette and flash");
         self.draw_slow_vignette();
         self.sky.draw_flash();
+        drop(span);
 
         // Interface, in screen pixels.
+        let _span = crate::profile::span("draw/interface");
         let (m, world_mouse) = (input.mouse, m);
         let top = self.hud.bottom();
         if self.debug {
@@ -2038,10 +2207,17 @@ impl App {
         if let Some(v) = self.challenge_view() {
             self.challenge_bar.draw(&v, top, m);
         }
-        self.draw_sonic_hud(top);
+        if self.game.is_some() {
+            self.draw_game_hud(top);
+        } else {
+            self.draw_sonic_hud(top);
+        }
         self.draw_endless_hud(top);
         if let (Some(v), Some(ed)) = (self.editor_view(), self.editor.as_ref()) {
             self.editor_bar.draw(&v, &ed.name, top, m);
+        }
+        if let (Some(v), Some(ed)) = (self.level_view(), self.level_editor.as_ref()) {
+            self.level_bar.draw(&v, &ed.name, top, m);
         }
         if self.library.fader.visible() {
             let mine: Vec<(String, String, f32)> = self
@@ -2052,7 +2228,15 @@ impl App {
                     (c.name.clone(), format!("custom:{stem}"), c.ink)
                 })
                 .collect();
-            let data = LibraryData { done: &self.s.challenges_done, stars: &self.s.challenge_stars, mine: &mine };
+            let levels: Vec<String> = self.levels.iter().map(|(_, n)| n.clone()).collect();
+            let data = LibraryData {
+                done: &self.s.challenges_done,
+                stars: &self.s.challenge_stars,
+                mine: &mine,
+                act_scores: &self.s.act_scores,
+                character: self.s.character,
+                levels: &levels,
+            };
             self.library.draw(&data, m);
         }
         self.help.draw();

@@ -26,7 +26,7 @@ pub const ALL: &[Example] = &[
     },
     Example {
         name: "Endless run",
-        about: "Sonic in an infinite world made as he runs  ·  how far can you go?",
+        about: "Five zones, more badniks the further you go  ·  race your best run's ghost",
         build: endless_run,
     },
 ];

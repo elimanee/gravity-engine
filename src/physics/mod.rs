@@ -137,10 +137,10 @@ impl PhysWorld {
         self.query.update(&self.colliders);
     }
 
-    /// The walls actually there (an infinite world only has a floor).
+    /// The walls actually there (an infinite world only has a floor, unless it is open).
     pub fn walls(&self) -> borders::WallSpec {
         if self.infinite {
-            borders::WallSpec { floor: true, ceiling: false, sides: false }
+            borders::WallSpec { floor: self.border != BorderMode::Open, ceiling: false, sides: false }
         } else {
             self.border.walls()
         }
@@ -164,7 +164,9 @@ impl PhysWorld {
         let mut walls = vec![];
         if self.infinite {
             // Far wider than anything will ever travel between two shifts.
-            walls.push((vector![hw, t], vector![1.0e5, t]));
+            if spec.floor {
+                walls.push((vector![hw, t], vector![1.0e5, t]));
+            }
         } else if spec.floor {
             walls.push((vector![hw, t], vector![hw + WALL_T, t]));
         }

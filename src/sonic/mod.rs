@@ -4,6 +4,10 @@
 //! round loops), rolling, the spin dash, variable jumps and the slower
 //! physics underwater.
 //!
+//! Tails, Knuckles and Amy move the same way, with their own moves on
+//! top (see [`moves`]): Tails flies, Knuckles glides and climbs, Amy swings
+//! her hammer.
+//!
 //! He is not a rapier body: his sensors are ray casts into the physics
 //! world, and what he does to the objects he pushes, lands on or stands
 //! on comes back as [`Event`]s for the app to apply. Lengths and speeds
@@ -11,7 +15,10 @@
 //! larger in the world.
 
 pub mod art;
+mod moves;
 pub mod sheet;
+
+pub use moves::Character;
 
 use crate::config::PPM;
 use crate::physics::{to_phys, to_screen, PhysWorld};
@@ -50,6 +57,9 @@ const SLOPE_ROLL_DOWN: f32 = 0.3125;
 const ROLL_DEC: f32 = 0.125;
 const MAX_SPEED: f32 = 16.0;
 const MAX_FALL: f32 = 16.0;
+/// Fastest a platform carries him (guide px per frame): bits of a smashed
+/// crate flying off do not take him with them through the floor.
+const MAX_CARRY: f32 = 6.0;
 /// Below this ground speed he slips off walls and ceilings.
 const SLIP_SPEED: f32 = 2.5;
 /// Frames of no steering after slipping.
@@ -59,7 +69,7 @@ const ROLL_START: f32 = 1.03125;
 const ROLL_END: f32 = 0.5;
 /// Push sensors reach this far from his centre.
 const PUSH: f32 = 10.0;
-/// Size: half widths and half heights standing and curled up.
+/// Size: half widths and half heights standing (Sonic) and curled up.
 const STAND: (f32, f32) = (9.0, 19.0);
 const BALL: (f32, f32) = (7.0, 14.0);
 /// Launch speed of a spring (a surface with bounce 1).
@@ -102,6 +112,8 @@ pub struct Input {
     /// Jump held, and pressed since the last frame.
     pub jump: bool,
     pub jump_pressed: bool,
+    /// The action button (Amy's hammer) pressed since the last frame.
+    pub action_pressed: bool,
 }
 
 /// Things that happened during a frame.
@@ -133,6 +145,12 @@ pub enum Event {
         collider: ColliderHandle,
         at: Vec2,
     },
+    /// Tails flaps (flying), Knuckles starts gliding or grabs a wall, Amy
+    /// swings her hammer.
+    Flap,
+    Glide,
+    Grab,
+    Hammer,
 }
 
 /// A sensor's find.
@@ -186,6 +204,29 @@ pub struct Sonic {
     /// frames spent standing idle.
     pub anim: f32,
     pub idle: u32,
+    /// Knocked back by a hit: no control until he lands.
+    pub hurt: bool,
+    /// Lost a life: he flies up and falls through everything.
+    pub dead: bool,
+    /// Speed shoes (a monitor): twice as fast.
+    pub shoes: bool,
+    /// Who this is, and their own moves (see [`moves`]).
+    pub character: Character,
+    /// Tails: frames flown since taking off (tired after 8 s).
+    pub flying: Option<u32>,
+    flap: bool,
+    /// Knuckles: gliding at this speed, falling after letting go, sliding
+    /// along the ground after landing from a glide.
+    pub gliding: Option<f32>,
+    pub dropping: bool,
+    pub sliding: bool,
+    /// Knuckles: holding on to a wall on this side (1 right, -1 left), and
+    /// pulling himself up over its top (frames, from, to).
+    pub climbing: Option<f32>,
+    pub climb_up: Option<(u32, Vec2, Vec2)>,
+    /// Amy: frames into a hammer swing, and whether it is the spin in the air.
+    pub hammer: Option<u32>,
+    pub hammer_air: bool,
 }
 
 /// Unit vector "down" for his feet in each ground mode.
@@ -242,12 +283,79 @@ impl Sonic {
             spin: 0.0,
             anim: 0.0,
             idle: 0,
+            hurt: false,
+            dead: false,
+            shoes: false,
+            character: Character::Sonic,
+            flying: None,
+            flap: false,
+            gliding: None,
+            dropping: false,
+            sliding: false,
+            climbing: None,
+            climb_up: None,
+            hammer: None,
+            hammer_air: false,
         }
+    }
+
+    /// `character` standing at `at`.
+    pub fn as_character(at: Vec2, character: Character) -> Self {
+        Sonic { character, ..Sonic::new(at) }
+    }
+
+    /// Back at `at` after losing a life: the same character, fresh.
+    pub fn reborn(&mut self, at: Vec2) {
+        *self = Sonic::as_character(at, self.character);
+    }
+
+    /// Hit: knocked up and away from `from_x` (world px).
+    pub fn knock(&mut self, from_x: f32) {
+        let away = if self.pos.x < from_x { -1.0 } else { 1.0 };
+        self.leave_ground();
+        self.hurt = true;
+        self.rolling = false;
+        self.jumping = false;
+        self.spindash = None;
+        self.end_moves();
+        self.xsp = 2.0 * away;
+        self.ysp = -4.0;
+    }
+
+    /// Out of rings and hit (or fallen): up he goes, and down through everything.
+    pub fn die(&mut self) {
+        self.leave_ground();
+        self.dead = true;
+        self.hurt = false;
+        self.rolling = false;
+        self.jumping = false;
+        self.spindash = None;
+        self.end_moves();
+        self.xsp = 0.0;
+        self.ysp = -7.0;
+    }
+
+    /// Bounced off something he destroyed in the air.
+    pub fn rebound(&mut self) {
+        if self.grounded {
+            return;
+        }
+        if self.ysp > 0.0 {
+            self.ysp = -self.ysp;
+        } else {
+            self.ysp += 1.0;
+        }
+    }
+
+    /// Attacking: curled up (rolling, jumping, spin dash), gliding, or
+    /// swinging the hammer.
+    pub fn attacking(&self) -> bool {
+        self.is_ball() || self.gliding.is_some() || self.hammer_hits()
     }
 
     /// Back to where he started, standing still.
     pub fn respawn(&mut self) {
-        *self = Sonic { facing: self.facing, ..Sonic::new(self.spawn) };
+        *self = Sonic { facing: self.facing, ..Sonic::as_character(self.spawn, self.character) };
     }
 
     /// Curled up (smaller sensors).
@@ -260,7 +368,7 @@ impl Sonic {
         if self.is_ball() {
             BALL
         } else {
-            STAND
+            self.character.stand()
         }
     }
 
@@ -280,12 +388,13 @@ impl Sonic {
         self.rolling = false;
         self.spindash = None;
         self.on = None;
+        self.end_moves();
     }
 
     /// Curl up (or stand up) on the ground, keeping his feet where they are.
     fn curl(&mut self, ball: bool) {
         let before = self.radii().1;
-        let after = if ball { BALL.1 } else { STAND.1 };
+        let after = if ball { BALL.1 } else { self.character.stand().1 };
         if self.grounded {
             self.pos += mode_down(self.angle) * (before - after) * SCALE;
         }
@@ -301,9 +410,32 @@ impl Sonic {
 
     /// Cast a sensor from `from` (world px) along `dir` for `len` guide px.
     fn cast(&self, world: &PhysWorld, env: Env, from: Vec2, dir: Vec2, len: f32) -> Option<Hit> {
+        self.cast_skipping(world, env, from, dir, len, None)
+    }
+
+    /// Like [`Sonic::cast`], but a sensor that starts inside something
+    /// that moves (a crate fallen on him) looks past it for the ground.
+    fn cast_past(&self, world: &PhysWorld, env: Env, from: Vec2, dir: Vec2, len: f32) -> Option<Hit> {
+        let hit = self.cast(world, env, from, dir, len)?;
+        if hit.dist > 0.0 || hit.ground.mass <= 0.0 {
+            return Some(hit);
+        }
+        self.cast_skipping(world, env, from, dir, len, Some(hit.collider))
+    }
+
+    fn cast_skipping(
+        &self,
+        world: &PhysWorld,
+        env: Env,
+        from: Vec2,
+        dir: Vec2,
+        len: f32,
+        skip: Option<ColliderHandle>,
+    ) -> Option<Hit> {
         let solid = |c: ColliderHandle| env(c).filter(|g| self.solid(g));
         let pred = |h: ColliderHandle, _: &Collider| solid(h).is_some();
-        let filter = QueryFilter::default().exclude_sensors().predicate(&pred);
+        let mut filter = QueryFilter::default().exclude_sensors().predicate(&pred);
+        filter.exclude_collider = skip;
         let (x, y) = to_phys(from.x, from.y);
         let (c, toi, n) = world.cast_ray(Point::new(x, y), vector![dir.x, -dir.y], len * SCALE / PPM, filter)?;
         let p = Point::new(x, y) + vector![dir.x, -dir.y] * toi;
@@ -326,7 +458,7 @@ impl Sonic {
         let back = self.pos - down * LIFT * SCALE;
         [-1.0, 1.0]
             .into_iter()
-            .filter_map(|k| self.cast(world, env, back + side * k * wr * SCALE, down, hr + LIFT + extra))
+            .filter_map(|k| self.cast_past(world, env, back + side * k * wr * SCALE, down, hr + LIFT + extra))
             .filter(|h| h.dist > 0.0)
             .map(|h| Hit { dist: h.dist - hr - LIFT, ..h })
             .filter(|h| h.dist >= -deepest)
@@ -337,6 +469,11 @@ impl Sonic {
     /// the world's gravity relative to Earth's.
     pub fn frame(&mut self, world: &PhysWorld, env: Env, input: Input, water: Option<f32>, gravity: f32) -> Vec<Event> {
         let mut events = vec![];
+        if self.dead {
+            self.ysp = (self.ysp + DRY.grv).min(MAX_FALL);
+            self.pos += vec2(self.xsp, self.ysp) * SCALE;
+            return events;
+        }
         let under = water.is_some_and(|w| self.pos.y > w);
         if under != self.underwater {
             self.underwater = under;
@@ -349,17 +486,28 @@ impl Sonic {
             }
             events.push(Event::Splash);
         }
-        let c = if self.underwater { WET } else { DRY };
-        let grv = c.grv * gravity.max(0.0);
-        if self.grounded {
+        let c = if self.underwater {
+            WET
+        } else if self.shoes {
+            Consts { acc: 0.09375, frc: 0.09375, top: 12.0, air: 0.1875, ..DRY }
+        } else {
+            DRY
+        };
+        let grv = if self.hurt { 0.1875 } else { c.grv } * gravity.max(0.0);
+        let input = if self.hurt { Input::default() } else { input };
+        if self.climbing.is_some() || self.climb_up.is_some() {
+            self.climb_frame(world, env, input, &mut events);
+        } else if self.grounded {
             self.ground_frame(world, env, input, c, &mut events);
         } else {
-            self.air_frame(world, env, input, c, grv, &mut events);
+            self.air_frame(world, env, input, c, (grv, gravity.max(0.0)), &mut events);
         }
         self.stride += self.gsp.abs().max(0.6) * 0.07;
         // The games hold each frame for (8 − speed) frames, (4 − speed) curled up.
         let speed = if self.grounded { self.gsp.abs() } else { self.xsp.abs() };
-        let hold = if self.spindash.is_some() {
+        let hold = if let Some(hold) = self.move_hold() {
+            hold
+        } else if self.spindash.is_some() {
             0.0
         } else if self.is_ball() {
             (4.0 - speed).max(0.0)
@@ -379,6 +527,7 @@ impl Sonic {
         let ground = self.on.and_then(env).unwrap_or_default();
         let grip = (ground.friction / 0.5).clamp(0.12, 1.0);
         let (sin, cos) = self.angle.sin_cos();
+        let input = self.ground_moves(world, env, input, events);
 
         // Spin dash: rev with jump while crouching, let go of ↓ to dash.
         if let Some(rev) = self.spindash {
@@ -408,8 +557,9 @@ impl Sonic {
                 return;
             }
             // Jump straight out from the surface.
-            self.xsp -= c.jmp * sin;
-            self.ysp -= c.jmp * cos;
+            let jmp = self.jump_speed(c);
+            self.xsp -= jmp * sin;
+            self.ysp -= jmp * cos;
             self.grounded = false;
             self.jumping = true;
             self.rolling = false;
@@ -581,7 +731,7 @@ impl Sonic {
             if !b.is_fixed() {
                 let (x, y) = to_phys(hit.point.x, hit.point.y);
                 let v = b.velocity_at_point(&Point::new(x, y));
-                self.carry = vec2(v.x, -v.y) * PPM / (SCALE * FPS);
+                self.carry = (vec2(v.x, -v.y) * PPM / (SCALE * FPS)).clamp_length_max(MAX_CARRY);
             }
         }
     }
@@ -648,33 +798,52 @@ impl Sonic {
         if hit.normal.dot(dir) > -0.6 {
             return;
         }
+        // Side springs send him back the other way along the ground.
+        if hit.ground.bounce >= 0.6 {
+            let out = SPRING * hit.ground.bounce.min(1.6);
+            self.gsp = -self.gsp.signum() * out;
+            self.facing = self.gsp.signum();
+            self.control_lock = 16;
+            events.push(Event::Spring);
+            return;
+        }
         self.pos -= dir * (PUSH - hit.dist) * SCALE;
         let speed = self.shove(world, &hit, dir, self.gsp.abs(), events);
         self.gsp = speed * self.gsp.signum();
         self.pushing = (input.right && dir.x > 0.0) || (input.left && dir.x < 0.0);
     }
 
-    fn air_frame(&mut self, world: &PhysWorld, env: Env, input: Input, c: Consts, grv: f32, events: &mut Vec<Event>) {
+    /// `(grv, k)`: this frame's gravity, and the world's relative to Earth's.
+    fn air_frame(
+        &mut self,
+        world: &PhysWorld,
+        env: Env,
+        input: Input,
+        c: Consts,
+        (grv, k): (f32, f32),
+        events: &mut Vec<Event>,
+    ) {
         self.crouching = false;
         self.looking_up = false;
         self.skidding = false;
         self.pushing = false;
+        let steer = self.air_moves(input, events);
         if self.jumping && !input.jump && self.ysp < -c.release {
             self.ysp = -c.release;
         }
-        if input.right {
+        if steer && input.right {
             if self.xsp < c.top {
                 self.xsp = (self.xsp + c.air).min(c.top);
             }
             self.facing = 1.0;
-        } else if input.left {
+        } else if steer && input.left {
             if self.xsp > -c.top {
                 self.xsp = (self.xsp - c.air).max(-c.top);
             }
             self.facing = -1.0;
         }
         // Air drag near the top of a jump.
-        if self.ysp < 0.0 && self.ysp > -4.0 {
+        if steer && self.ysp < 0.0 && self.ysp > -4.0 {
             self.xsp -= (self.xsp / 0.125).trunc() / 256.0;
         }
         let step = vec2(self.xsp, self.ysp);
@@ -685,7 +854,7 @@ impl Sonic {
                 return;
             }
         }
-        self.ysp = (self.ysp + grv).min(MAX_FALL);
+        self.ysp = self.fall(grv, k);
         // Turn back upright.
         let a = (self.angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
         self.angle = (a * 0.85).rem_euclid(std::f32::consts::TAU);
@@ -697,6 +866,13 @@ impl Sonic {
             let dir = vec2(d, 0.0);
             if let Some(hit) = self.cast(world, env, self.pos, dir, PUSH) {
                 self.pos.x -= d * (PUSH - hit.dist) * SCALE;
+                if self.grab(&hit, d, events) {
+                    return true;
+                }
+                if hit.ground.bounce >= 0.6 && self.xsp * d > 0.0 {
+                    self.spring(hit, events);
+                    continue;
+                }
                 if self.xsp * d > 0.0 {
                     let speed = self.shove(world, &hit, dir, self.xsp.abs(), events);
                     self.xsp = speed * d;
@@ -753,6 +929,12 @@ impl Sonic {
         if hit.ground.mass > 0.0 {
             events.push(Event::Push { collider: hit.collider, at: hit.point, impulse: down * MASS * self.ysp });
         }
+        if self.hurt {
+            // Landing after a hit: he stops dead.
+            self.hurt = false;
+            self.gsp = 0.0;
+        }
+        self.land_moves();
         self.grounded = true;
         self.jumping = false;
         self.rolling = false;
@@ -941,6 +1123,33 @@ mod tests {
         let events = run(&mut s, &w, &env, right, 120);
         assert!(!events.iter().any(|e| matches!(e, Event::Break { .. })));
         assert!(events.iter().any(|e| matches!(e, Event::Push { .. })));
+    }
+
+    #[test]
+    fn debris_on_him_or_under_him_does_not_sink_him() {
+        let mut w = world();
+        // A bit of a smashed crate right where his floor sensors start.
+        let (x, y) = to_phys(300.0, floor_y() - 19.0 * SCALE);
+        let b = w.bodies.insert(RigidBodyBuilder::dynamic().translation(vector![x, y]).linvel(vector![30.0, -40.0]));
+        let bit = w.colliders.insert_with_parent(ColliderBuilder::cuboid(0.4, 0.4), b, &mut w.bodies);
+        w.refresh_queries();
+        let env = |c: ColliderHandle| Some(Ground { mass: if c == bit { 0.2 } else { 0.0 }, ..Ground::default() });
+        let mut s = standing(300.0);
+        run(&mut s, &w, &env, Input::default(), 5);
+        assert!(s.grounded, "still finds the floor under it");
+        assert!(s.pos.y < floor_y(), "not pushed into the floor: {}", s.pos.y);
+        // Standing on a bit flying off fast, he is not flung with it.
+        let mut s = Sonic::new(vec2(300.0, floor_y() - 60.0));
+        s.ysp = 1.0;
+        let hit = Hit {
+            collider: bit,
+            dist: 0.0,
+            point: vec2(300.0, floor_y() - 40.0),
+            normal: vec2(0.0, -1.0),
+            ground: Ground { mass: 0.2, ..Ground::default() },
+        };
+        s.land_on(&w, hit, &mut vec![]);
+        assert!(s.carry.length() <= MAX_CARRY + 1e-3, "carried at {:?}", s.carry);
     }
 
     #[test]

@@ -1,11 +1,12 @@
-//! Library panel (E): example scenes, challenges and the player's own
-//! challenges.
+//! Library panel (E): example scenes, challenges, the player's own
+//! challenges and Sonic's acts.
 
 use super::theme::*;
 use super::widgets::*;
 use super::{icons, Action, Fader, Input};
-use crate::library::{challenges, examples};
+use crate::library::{acts, challenges, examples};
 use crate::physics::zones::ZoneKind;
+use crate::sonic::Character;
 use macroquad::prelude::*;
 use std::collections::BTreeMap;
 
@@ -23,6 +24,12 @@ pub struct LibraryData<'a> {
     pub stars: &'a BTreeMap<String, u8>,
     /// (name, id, ink) of each of "My challenges".
     pub mine: &'a [(String, String, f32)],
+    /// Best score per act cleared.
+    pub act_scores: &'a BTreeMap<String, u32>,
+    /// Who plays the acts.
+    pub character: Character,
+    /// Names of "My levels".
+    pub levels: &'a [String],
 }
 
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -31,6 +38,7 @@ enum Tab {
     Examples,
     Challenges,
     Mine,
+    Sonic,
 }
 
 #[derive(Default)]
@@ -43,21 +51,24 @@ pub struct Library {
 
 impl Library {
     /// Cells in the current tab.
-    fn total(&self, mine: usize) -> usize {
+    /// `(mine, levels)`: how many of "My challenges" and "My levels" there are.
+    fn total(&self, (mine, levels): (usize, usize)) -> usize {
         match self.tab {
             Tab::Examples => examples::ALL.len(),
             Tab::Challenges => challenges::ALL.len(),
             Tab::Mine => mine + 1,
+            // "New level", the built-in acts, then the player's levels.
+            Tab::Sonic => 1 + acts::ALL.len() + levels,
         }
     }
 
     /// Cells shown (the rest is scrolled away).
-    fn count(&self, mine: usize) -> usize {
+    fn count(&self, mine: (usize, usize)) -> usize {
         self.total(mine).saturating_sub(self.scroll * COLS).min(ROWS * COLS)
     }
 
     /// Rows that can be scrolled.
-    fn max_scroll(&self, mine: usize) -> usize {
+    fn max_scroll(&self, mine: (usize, usize)) -> usize {
         self.total(mine).div_ceil(COLS).saturating_sub(ROWS)
     }
 
@@ -68,9 +79,16 @@ impl Library {
         Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h)
     }
 
-    fn tabs(p: Rect) -> [Rect; 3] {
+    fn tabs(p: Rect) -> [Rect; 4] {
         let y = p.y + 44.0;
-        [0.0, 1.0, 2.0].map(|k| Rect::new(p.x + PAD + k * 136.0, y, 130.0, 26.0))
+        [0.0, 1.0, 2.0, 3.0].map(|k| Rect::new(p.x + PAD + k * 136.0, y, 130.0, 26.0))
+    }
+
+    /// The character buttons (Sonic tab), right of the tabs.
+    fn characters(p: Rect) -> [Rect; 4] {
+        let w = 58.0;
+        let x0 = p.x + p.w - PAD - 4.0 * (w + 4.0) + 4.0;
+        [0.0, 1.0, 2.0, 3.0].map(|k| Rect::new(x0 + k * (w + 4.0), p.y + 44.0, w, 26.0))
     }
 
     /// The "Edit" button of a "My challenges" cell.
@@ -93,7 +111,8 @@ impl Library {
         self.scroll = 0;
     }
 
-    pub fn update(&mut self, dt: f32, mine: usize, input: &mut Input, actions: &mut Vec<Action>) {
+    /// `mine`: how many of "My challenges" and "My levels" there are.
+    pub fn update(&mut self, dt: f32, mine: (usize, usize), input: &mut Input, actions: &mut Vec<Action>) {
         self.fader.update(dt, 7.0);
         if !self.fader.open {
             return;
@@ -112,6 +131,12 @@ impl Library {
                 self.tab = Tab::Challenges;
             } else if tabs[2].contains(input.mouse) {
                 self.tab = Tab::Mine;
+            } else if tabs[3].contains(input.mouse) {
+                self.tab = Tab::Sonic;
+            } else if let Some(k) =
+                (0..4).find(|&k| self.tab == Tab::Sonic && Self::characters(p)[k].contains(input.mouse))
+            {
+                actions.push(Action::SetCharacter(Character::ALL[k]));
             } else if let Some(slot) = (0..self.count(mine)).find(|&i| Self::cell(p, i).contains(input.mouse)) {
                 let i = self.scroll * COLS + slot;
                 let edit = Self::edit_button(Self::cell(p, slot)).contains(input.mouse);
@@ -121,6 +146,10 @@ impl Library {
                     Tab::Mine if i == 0 => Action::OpenEditor(None),
                     Tab::Mine if edit => Action::OpenEditor(Some(i - 1)),
                     Tab::Mine => Action::StartCustom(i - 1),
+                    Tab::Sonic if i == 0 => Action::EditLevel(None),
+                    Tab::Sonic if i <= acts::ALL.len() => Action::OpenAct(i - 1),
+                    Tab::Sonic if edit => Action::EditLevel(Some(i - 1 - acts::ALL.len())),
+                    Tab::Sonic => Action::OpenLevel(i - 1 - acts::ALL.len()),
                 });
                 self.fader.open = false;
             } else if !p.contains(input.mouse) {
@@ -155,13 +184,26 @@ impl Library {
         text(&hint, p.x + p.w - PAD - measure(&hint, 12.0), p.y + PAD + 12.0, 12.0, fade(TEXT_MUTED, f));
 
         let tabs = Self::tabs(p);
-        let tab_list = [("Examples", Tab::Examples), ("Challenges", Tab::Challenges), ("My challenges", Tab::Mine)];
+        let tab_list = [
+            ("Examples", Tab::Examples),
+            ("Challenges", Tab::Challenges),
+            ("My challenges", Tab::Mine),
+            ("Sonic", Tab::Sonic),
+        ];
         for (i, (label, tab)) in tab_list.into_iter().enumerate() {
             draw_button(tabs[i], label, tabs[i].contains(mouse), self.tab == tab, f);
         }
+        if self.tab == Tab::Sonic {
+            let r = Self::characters(p);
+            let label = "Play as";
+            text(label, r[0].x - 8.0 - measure(label, 12.0), r[0].y + 17.0, 12.0, fade(TEXT_MUTED, f));
+            for (k, c) in Character::ALL.into_iter().enumerate() {
+                draw_button(r[k], c.label(), r[k].contains(mouse), data.character == c, f);
+            }
+        }
 
         let t = get_time() as f32;
-        let mine = data.mine.len();
+        let mine = (data.mine.len(), data.levels.len());
         let more = self.max_scroll(mine);
         if more > 0 {
             let above = if self.scroll > 0 { "↑ " } else { "" };
@@ -204,6 +246,41 @@ impl Library {
                     for (k, line) in wrap(about, r.w - 24.0, 11.0).iter().take(2).enumerate() {
                         text(line, r.x + 12.0, r.y + 46.0 + k as f32 * 14.0, 11.0, fade(TEXT_MUTED, f));
                     }
+                }
+                Tab::Sonic if i == 0 => {
+                    icons::zone_kind(ZoneKind::Goal, vec2(r.x + 22.0, r.y + 22.0), 18.0, fade(ACCENT_HI, f), t);
+                    text_bold("New level", r.x + 38.0, r.y + 27.0, 14.0, fade(TEXT, f));
+                    let about = "Build a Sonic level: ground, loops, badniks, monitors, a goal or a boss";
+                    for (k, line) in wrap(about, r.w - 24.0, 11.0).iter().take(2).enumerate() {
+                        text(line, r.x + 12.0, r.y + 46.0 + k as f32 * 14.0, 11.0, fade(TEXT_MUTED, f));
+                    }
+                }
+                Tab::Sonic if i > acts::ALL.len() => {
+                    let name = &data.levels[i - 1 - acts::ALL.len()];
+                    text_bold(&fit(name, r.w - 24.0 - 58.0, 14.0), r.x + 12.0, r.y + 26.0, 14.0, fade(TEXT, f));
+                    text("My level", r.x + 12.0, r.y + 46.0, 11.0, fade(TEXT_MUTED, f));
+                    if let Some(score) = data.act_scores.get(name) {
+                        let label = format!("Best {score}");
+                        text(&label, r.x + 12.0, r.y + 62.0, 11.0, fade(SUCCESS, f));
+                    }
+                    let e = Self::edit_button(r);
+                    draw_button(e, "Edit", e.contains(mouse), false, f);
+                    text("Play", r.x + r.w - 44.0, r.y + 26.0, 11.0, fade(if hov { ACCENT_HI } else { TEXT_DIM }, f));
+                }
+                Tab::Sonic => {
+                    let i = i - 1;
+                    let a = &acts::ALL[i];
+                    keycap(r.x + 12.0, r.y + 18.0, &(i + 1).to_string(), 10.0, f);
+                    text_bold(&fit(a.name, r.w - 36.0 - 58.0, 14.0), r.x + 36.0, r.y + 23.0, 14.0, fade(TEXT, f));
+                    for (k, line) in wrap(a.about, r.w - 24.0, 11.0).iter().take(2).enumerate() {
+                        text(line, r.x + 12.0, r.y + 46.0 + k as f32 * 14.0, 11.0, fade(TEXT_MUTED, f));
+                    }
+                    let (label, col) = match data.act_scores.get(a.name) {
+                        Some(score) => (format!("Best {score}"), SUCCESS),
+                        None => ("Play".to_string(), TEXT_DIM),
+                    };
+                    let w = measure(&label, 11.0);
+                    text(&label, r.x + r.w - 12.0 - w, r.y + 26.0, 11.0, fade(if hov { ACCENT_HI } else { col }, f));
                 }
                 Tab::Mine => {
                     let (name, id, ink) = &data.mine[i - 1];
