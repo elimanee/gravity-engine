@@ -4,13 +4,60 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
-![Version](https://img.shields.io/badge/version-3.0-8b78ff)
+![Version](https://img.shields.io/badge/version-3.1-8b78ff)
+
+**[Play it in your browser](https://elimanee.github.io/gravity-engine/)**, or [download it](#download) for Linux and Windows.
 
 ![Title screen](docs/screenshots/title.png)
 
 | Sandbox | Settings drawer (Space) | Tool picker (Tab) |
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
+
+## What's new in 3.1
+
+![Harbour Act 1: Sonic under water between two piers, a fish leaping out of the sea beside him and a gull overhead](docs/screenshots/harbour.png)
+
+### Play in the browser
+
+Gravity Engine now runs in a web page: **[elimanee.github.io/gravity-engine](https://elimanee.github.io/gravity-engine/)** (built and published by the *Web version* workflow whenever `master` changes). It is the same program compiled to WebAssembly: the sandbox, the tools, the challenges, Sonic's acts, the endless run and the level editor all work, and your settings, levels, challenges and best runs are kept in the browser's storage. What needs files or the network on your computer — opening images, music, scenes or skins, the button and logo fetchers, screenshots and GIF recording, your own sprite sheets — says *That needs the desktop version*.
+
+### Harbour zone
+
+![The flooded tunnel of Harbour Act 2: Sonic under water between two puffers, a vent letting out a bubble](docs/screenshots/harbour-tunnel.png)
+
+Three new acts after Meadow, over the sea, in Library → Sonic:
+
+- **Harbour Act 1** — along the docks: fall into the sea between the piers and jump out again; **fish** leap out of the water and **gulls** hover, cry out and swoop down at you.
+- **Harbour Act 2** — a flooded tunnel under the docks. Under water, **air runs out**: chimes after 5, 10 and 15 seconds, then a countdown over your head (5… 0) with its music, and you drown at the end. **Vents** on the floor let out big bubbles: touch one to breathe. **Puffers** float about and bristle with spikes now and then — they hurt even when you are curled up, so wait for the spikes to go in. (Tails and Knuckles can take the deck above instead.)
+- **Harbour Act 3** — the **anchor crane**: a flying crane with an anchor swinging under it, which now and then slams the anchor down and sends shock waves along the pier to jump over. Hit the cab, not the anchor.
+
+After losing a life you are safe for a moment, so nothing waiting at the star post takes the next one straight away.
+
+### Special stages and the chaos emeralds
+
+![A special stage: Sonic runs on a purple and pink checkered globe towards rows of blue spheres and a ring](docs/screenshots/special-stage.png)
+
+Reach the goal with **50 rings or more** and a **giant ring** opens above the signpost: after the tally it takes you to a **special stage**, after the Blue Spheres of Sonic 3. Sonic runs on a checkered globe, faster and faster; `←` `→` turn at the next crossing, `Space` jumps.
+
+- **Blue spheres** turn red once you have run over them; catch every one to win the stage's **chaos emerald**.
+- Touching a **red sphere** ends the stage (jump over them). **Rings** count up (all of them: *Perfect*), **bumpers** send you running backwards (`↑` to run forward again) and **springs** throw you far ahead.
+
+There are seven stages, one per emerald, laid out the same every time; each act's goal leads to the next emerald you have not found. The emeralds you have are shown at the top of Library → Sonic and kept in your settings.
+
+### Super Sonic
+
+![Super Sonic, golden and sparkling, at the start of Meadow Act 1 with 60 rings](docs/screenshots/super-sonic.png)
+
+With all seven emeralds and **50 rings**, **jump again in the air** to turn super — any character: golden (sprite sheets too), faster, jumping higher and unhurt by badniks, spikes and the bosses, with Super Sonic's own song. It uses up a ring every second and ends when they run out (or at the goal). Pits and drowning still count.
+
+### Music
+
+Sonic's mode has music, **made by the program** (no sound from the games): a chiptune song for each zone (Meadow, Harbour, and the endless run's Twilight, Snowfield, Lagoon and Storm), the boss's, invincibility's, Super Sonic's and the special stages', and jingles for an act cleared, a 1-up, Game Over, an emerald and the drowning countdown. *Sonic's music* and *Music volume* in the settings' audio section turn it off or down, and it keeps quiet while your own music plays.
+
+### Level editor
+
+The editor's *Badnik* button places every badnik (click it again for the next one: crawler, flyer, crab, fish, gull, puffer), *Boss* again switches between the bomber and the anchor crane, and *Vent* puts an air vent on the sea floor (turn the water on to make an underwater level).
 
 ## What's new in 3.0
 
@@ -284,13 +331,16 @@ Without them, everything is drawn with shapes.
 - **Gadgets** (`L`) — lasers that reflect off mirrors and cross glass, thrusters, fans, cannons, lamps and grappling hooks; motors driven with the arrow keys
 - **Planets** — objects with their own gravity that others orbit
 - **Playable Sonic** (`Shift+O`) — arrows and `Space`, with the physics of the Mega Drive games: loops, rolling, spin dash, rings; **Tails, Knuckles and Amy** (`Shift+N`) fly, glide and climb, and swing a hammer
-- **Sonic's game mode** (Library → Sonic) — three acts with badniks, monitors, spikes, pits, star posts, a boss and the goal signpost; score, time, lives and the end-of-act tally
+- **Sonic's game mode** (Library → Sonic) — six acts in two zones (Meadow and Harbour) with badniks, monitors, spikes, pits, water to drown in, star posts, two bosses and the goal signpost; score, time, lives and the end-of-act tally
+- **Special stages** — 50 rings at a goal open a giant ring to a Blue Spheres stage; win the seven **chaos emeralds** and turn **super** (any character)
+- **Music** — chiptune songs and jingles for Sonic's mode, made by the program
 - **Level editor** (Library → Sonic → *New level*) — make Sonic levels, try them and keep them in *My levels*
 - **Endless run** — five zones, more and more badniks, and the best run's ghost to race
 - **Game controllers** — play with a pad (Linux and Windows; it rumbles on Windows)
 - **Weather and night** (`Shift+H` / `Shift+T`) — rain, snow and storms with lightning; a night lit by lamps with shadows, fire and lasers
 - **Screenshots** (`F12`) and **GIF recording** (`F11`, up to 30 s) of the scene, without the interface
 - **Debug overlay** (`D`) — FPS, collider outlines, velocities and details of the object under the cursor
+- **In the browser** — the [web version](https://elimanee.github.io/gravity-engine/) runs the same program (without the features that need files or the network)
 
 ## Controls
 
@@ -306,6 +356,8 @@ Press **F1** in the app for the full list.
 | `O` | Drop a ragdoll (over an image: it becomes the head) |
 | `Shift+O` | Sonic joins (or leaves): `←` `→` run, `↓` roll, `Space` jump, `↓` + `Space` spin dash, `Shift+Space` pause |
 | `Shift+N` / `X` | Next character (Sonic, Tails, Knuckles, Amy) / action button while someone plays (Amy's hammer) |
+| `Space` twice | In the air with all seven emeralds and 50 rings: turn super |
+| Special stage | `←` `→` turn at the next crossing · `Space` jump · `↑` run forward again after a bumper · `Esc` leave |
 | Controller | Stick or d-pad: run · A / B / Y: jump · X: action · Select: next character · Start: pause |
 | `U` / `Shift+U` | Jelly / cloth (over an object: it turns to jelly / is hung as a flag) |
 | `E` / `Shift+E` | Library (examples, challenges, Sonic's acts and levels) / challenge editor |
@@ -342,6 +394,8 @@ Press **F1** in the app for the full list.
 
 Linux and Windows builds are attached to each [release](https://github.com/elimanee/gravity-engine/releases). On Windows, unzip `gravity_engine-windows-x86_64.zip` and run `gravity_engine.exe` (keep the DLLs next to it).
 
+Or play the [web version](https://elimanee.github.io/gravity-engine/) in your browser, with nothing to install.
+
 ## Build & Run
 
 Requires Rust (stable) plus a few system libraries. On Debian / Ubuntu:
@@ -352,13 +406,15 @@ sudo apt install pkg-config libopenmpt-dev libasound2-dev libx11-dev libxi-dev \
 cargo run --release
 ```
 
-Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins.
+Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins. `--act=N` and `--special-stage=N` go straight into Sonic act N (1–6) or special stage N (1–7).
 
 `gravity_engine --benchmark` runs five stress scenes for a few seconds each at a fixed 60 Hz and prints the frame times (average, 95th percentile, worst), the bodies still moving, the time spent waiting for the screen and where each frame's time goes, then quits without saving anything.
 
 `gravity_engine --verify-challenges` plays every built-in challenge with its reference solution (and once without drawing) and reports whether each one is solvable within its ink — handy when designing levels.
 
 On Windows, install libopenmpt with [vcpkg](https://vcpkg.io) (`vcpkg install libopenmpt:x64-windows`), copy its `libopenmpt.lib` to a folder as `openmpt.lib`, set `OPENMPT_LIB_DIR` to that folder and run `cargo build --release`; the DLLs from vcpkg's `installed\x64-windows\bin` must sit next to the executable (or be on `PATH`). `.github/scripts/openmpt-windows.ps1` does all of this in CI.
+
+The web version needs the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`); `web/build.sh` builds it into `web/dist/` with its page and loader, ready to serve from any web server (`python3 -m http.server -d web/dist`). The *Web version* workflow publishes it on GitHub Pages from `master` (the repository's Pages source must be *GitHub Actions*).
 
 For the fastest (but non-portable) binary, build for your own CPU:
 
@@ -372,7 +428,7 @@ Everything lives in `~/.config/gravity_engine/` (or `$XDG_CONFIG_HOME/gravity_en
 
 | File | Purpose |
 |------|---------|
-| `settings.json` | Your preferences, saved on exit. Set `"show_title": false` to skip the title screen. |
+| `settings.json` | Your preferences, saved on exit (also the acts' best scores and the chaos emeralds found). Set `"show_title": false` to skip the title screen. |
 | `scenes/` | Default folder for saved scenes |
 | `challenges/` | Challenges made in the editor (`.gchallenge`), listed in Library → *My challenges* |
 | `levels/` | Sonic levels made in the level editor (`.gscene`), listed in Library → *Sonic* |
@@ -383,11 +439,15 @@ Everything lives in `~/.config/gravity_engine/` (or `$XDG_CONFIG_HOME/gravity_en
 
 Screenshots and GIFs go to `~/Pictures/gravity_engine/` (or `~/.config/gravity_engine/screenshots/` if you have no Pictures folder).
 
+In the web version, the same files are kept in the browser's local storage for the page.
+
 ## Project layout
 
 ```
 src/
 ├── main.rs            entry point, window config, CLI
+├── storage.rs         the player's files: on disk, or in the browser's storage (web version)
+├── dialog.rs          file dialogs (none in the web version)
 ├── app/               app state and frame loop (input → UI → actions → simulation → render),
 │                      building tools, selection, impacts and shattering, fire, jelly and
 │                      cloth, gadgets, grappling hooks, weather, night lights, the physical
@@ -404,18 +464,21 @@ src/
 ├── weather.rs         rain, snow and lightning     lighting.rs   the night's light map and shadows
 ├── sonic/             Sonic, Tails, Knuckles and Amy: movement after the Sonic Physics Guide, their
 │                      moves, their drawing with shapes and from sprite sheets
-├── game/              Sonic's game mode: badniks, monitors, spikes, star posts, the boss, lives and
-│                      score, and its objects drawn with shapes or from sprite sheets
+├── game/              Sonic's game mode: badniks, monitors, spikes, star posts, the bosses, air and
+│                      bubbles, lives and score, and its objects drawn with shapes or from sprite sheets
+├── special/           special stages: the globe of spheres, its seven layouts and its drawing
 ├── gamepad.rs         game controllers (Linux joystick devices, XInput)
 ├── profile.rs         the benchmark's frame profiler
 ├── window_tracker.rs  window shake
-├── audio/             tracker modules, streams, playlists, the visualizer's analyzer, sound effects
+├── audio/             tracker modules, streams, playlists, the visualizer's analyzer, sound effects,
+│                      Sonic's music, and the sound output (rodio, or WebAudio in the browser)
 ├── physics/           world, objects, tools, links, zones, water, grains, soft bodies, gadgets, magnets,
 │                      planets, fracture, border modes
 └── ui/                theme, widgets, HUD, drawer, tool card, menus, properties panel, overlays, title screen
+web/                   the web version's page, its WebAudio / storage plugin and build script
 ```
 
-`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, snow, jelly, cloth, laser beams, gadgets, planets, rope reeling, weather, night light, Sonic's running, jumping, spin dash, underwater speed and loops, Tails' flight, Knuckles' glide and climb, Amy's hammer, badniks, monitors, rings, lives and the boss, sprite sheets, the endless run's zones, controllers, the profiler, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
+`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, snow, jelly, cloth, laser beams, gadgets, planets, rope reeling, weather, night light, Sonic's running, jumping, spin dash, underwater speed and loops, Tails' flight, Knuckles' glide and climb, Amy's hammer, badniks, monitors, rings, lives and the bosses, air and bubbles, Super Sonic, the special stages, the acts, the music, sprite sheets, the endless run's zones, controllers, the profiler, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
 
 `gravity_engine --verify-challenges` (needs a display) checks that every built-in challenge can be solved.
 

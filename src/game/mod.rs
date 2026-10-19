@@ -46,6 +46,9 @@ const VENT_EVERY: f32 = 4.5;
 pub const SPECIAL_RINGS: u32 = 50;
 /// The anchor's radius (world px).
 pub const ANCHOR_R: f32 = 22.0;
+/// A gull rests this long between swoops and hovers this long before one (s).
+const GULL_REST: f32 = 3.0;
+const GULL_WARN: f32 = 0.5;
 /// Sizes (world px): monitor and spikes boxes, ring and boss radii.
 pub const MONITOR: Vec2 = Vec2::new(45.0, 48.0);
 pub const SPIKES: Vec2 = Vec2::new(48.0, 24.0);
@@ -334,6 +337,8 @@ pub enum Effect {
     BossBeaten(Vec2),
     Explosion(Vec2),
     Respawned(Vec2),
+    /// A gull about to swoop.
+    Swoop(Vec2),
     /// Air running out: a chime, then the countdown's music.
     AirWarning(Vec2),
     Drowning,
@@ -768,7 +773,8 @@ impl Game {
                             self.rings = 0;
                             self.ring_lives = 0;
                             self.time = time;
-                            self.invulnerable = 0.0;
+                            // A moment's grace, so nothing waiting there takes the new life at once.
+                            self.invulnerable = HURT_TIME;
                             self.air = AIR;
                             self.lost.clear();
                             self.shots.clear();
@@ -1027,15 +1033,20 @@ impl Game {
                             e.dir = (e.home.x - e.pos.x).signum();
                         }
                         e.pos.y = e.home.y + (e.timer * 2.5).sin() * 8.0;
-                        // Sonic below: it swoops.
+                        // Sonic below: it stops, cries out, then swoops where he was.
                         let d = me - e.pos;
-                        if live && e.timer > 1.5 && d.x.abs() < 200.0 && d.y > 60.0 && d.y < 480.0 {
+                        if live && e.timer > GULL_REST && d.x.abs() < 200.0 && d.y > 60.0 && d.y < 480.0 {
                             e.firing = true;
+                            e.timer = 0.0;
                             e.vel = d.normalize() * 460.0;
                             if d.x != 0.0 {
                                 e.dir = d.x.signum();
                             }
+                            out.push(Effect::Swoop(e.pos));
                         }
+                    } else if e.vel.y > 0.0 && e.timer < GULL_WARN {
+                        // Hovering a moment first: time to get away.
+                        e.pos.y = e.home.y + (e.timer * 40.0).sin() * 3.0;
                     } else if e.vel.y > 0.0 {
                         let step = e.vel * dt;
                         let floor = ray(world, solid, e.pos, vec2(0.0, 1.0), half.y + step.y + 2.0).is_some();
@@ -1390,6 +1401,7 @@ mod tests {
         }
         assert_eq!(g.lives, LIVES - 1);
         assert!(!s.dead && g.phase == Phase::Playing);
+        assert!(g.invulnerable > 0.0, "safe for a moment after coming back");
         assert_eq!(s.pos, vec2(100.0, 100.0));
     }
 
@@ -1515,7 +1527,7 @@ mod tests {
         s.pos = g.enemies[1].pos + vec2(40.0, 300.0);
         let mut highest = home;
         let mut swooped = false;
-        for _ in 0..240 {
+        for _ in 0..360 {
             g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
             highest = highest.min(g.enemies[0].pos.y);
             swooped |= g.enemies[1].firing && g.enemies[1].vel.y > 0.0;

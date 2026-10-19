@@ -207,7 +207,7 @@ fn harbour_1(b: &mut Builder) {
     arc(b, 1120.0, G - 70.0, 7, 320.0, 120.0);
     b.ground(1450.0, 2700.0, G, PLANK, PLANK_EDGE);
     rings(b, 1550.0, G - 40.0, 5);
-    b.enemy(EnemyKind::Gull, 1900.0, G - 300.0);
+    b.enemy(EnemyKind::Gull, 1700.0, G - 300.0);
     b.monitor(MonitorKind::Shield, 2050.0, G);
     b.post(2200.0, G);
     rings(b, 2280.0, G - 40.0, 5);
@@ -248,8 +248,8 @@ fn harbour_2(b: &mut Builder) {
     b.ground(-400.0, 950.0, G, QUAY, QUAY_EDGE);
     rings(b, 280.0, G - 40.0, 6);
     b.monitor(MonitorKind::Rings, 600.0, G);
-    b.enemy(EnemyKind::Gull, 650.0, G - 300.0);
     b.post(850.0, G);
+    b.enemy(EnemyKind::Gull, 2600.0, G - 320.0);
     // Down into the sea and through the flooded tunnel under the docks.
     b.ground(950.0, 4350.0, SEABED, QUAY, QUAY_EDGE);
     b.block(1150.0, 4150.0, G, 625.0, PLANK, PLANK_EDGE);

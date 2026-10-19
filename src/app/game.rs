@@ -183,6 +183,7 @@ impl App {
                 Effect::Respawned(at) => {
                     self.camera.center = at;
                 }
+                Effect::Swoop(at) => self.sound(Sound::Skid, at, 0.3),
                 Effect::AirWarning(at) => self.sound(Sound::Chime, at, 0.6),
                 Effect::Drowning => self.play_jingle(Jingle::Drowning),
                 Effect::Breathe(at) => {

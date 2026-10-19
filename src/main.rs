@@ -4,7 +4,7 @@
 //! buttons; every one of them becomes a rigid body. Press F1 in the app for
 //! the full list of controls.
 //!
-//! Usage: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files may
+//! Usage: `gravity_engine [--no-title] [--benchmark] [--act=N] [--special-stage=N] [FILES…]` — files may
 //! be images, audio (tracker modules, mp3/flac/ogg/…, .pls playlists) or
 //! `.gscene` scenes.
 
@@ -84,8 +84,10 @@ async fn main() {
             }
             "-h" | "--help" => {
                 println!(
-                    "usage: gravity_engine [--no-title] [--benchmark] [FILES…]\n\n  \
-                     --benchmark  run stress scenes, print frame times and quit\n\n\
+                    "usage: gravity_engine [--no-title] [--benchmark] [--act=N] [--special-stage=N] [FILES…]\n\n  \
+                     --benchmark        run stress scenes, print frame times and quit\n  \
+                     --act=N            play Sonic act N (1-6)\n  \
+                     --special-stage=N  play special stage N (1-7)\n\n\
                      Press F1 in the app for controls."
                 );
                 return;

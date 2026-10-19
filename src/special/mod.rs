@@ -364,6 +364,10 @@ fn layout(index: usize) -> (Vec<Cell>, (i32, i32)) {
         }
         placed += 1;
     }
+    // A few right ahead, to show the way.
+    for dy in 4..8 {
+        grid[at(start.0, start.1 + dy)] = Cell::Blue;
+    }
     // Lines of blue spheres across the globe, and rows of rings.
     for k in 0..(2 + index as i32 / 2) {
         let (x0, y0) = (rng.below(SIZE), rng.below(SIZE));
