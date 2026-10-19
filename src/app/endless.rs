@@ -147,15 +147,12 @@ fn ghost_path() -> Option<std::path::PathBuf> {
 
 impl Ghost {
     fn load() -> Option<Ghost> {
-        serde_json::from_str(&std::fs::read_to_string(ghost_path()?).ok()?).ok()
+        serde_json::from_str(&crate::storage::read_to_string(&ghost_path()?).ok()?).ok()
     }
 
     fn save(&self) -> Result<(), String> {
         let path = ghost_path().ok_or("no config folder")?;
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        }
-        std::fs::write(path, serde_json::to_string(self).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+        crate::storage::write(&path, serde_json::to_string(self).map_err(|e| e.to_string())?)
     }
 }
 
@@ -346,6 +343,19 @@ impl App {
             g.forget_before(&mut self.world, sx - BEHIND);
         }
         self.rings.retain(|r| r.x > sx - BEHIND);
+    }
+
+    /// The song of the endless run's zone.
+    pub(super) fn endless_song(&self) -> Option<crate::audio::music::Song> {
+        use crate::audio::music::Song;
+        let e = self.endless.as_ref()?;
+        Some(match e.zone {
+            1 => Song::Twilight,
+            2 => Song::Snowfield,
+            3 => Song::Lagoon,
+            4 => Song::Storm,
+            _ => Song::Meadow,
+        })
     }
 
     /// The sky behind the level: the zone's in an endless run (turning

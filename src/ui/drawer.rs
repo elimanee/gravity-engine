@@ -23,6 +23,7 @@ enum SliderId {
     WaterDensity,
     SfxVolume,
     Darkness,
+    MusicVolume,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -33,6 +34,7 @@ enum ToggleId {
     Water,
     Effects,
     Sfx,
+    SonicMusic,
     SlowMo,
     Player,
     PlayerPhysics,
@@ -93,7 +95,7 @@ pub struct Drawer {
     /// Name of the classic player's skin (set by the app).
     pub skin_name: String,
     scroll: f32,
-    sliders: [SliderState; 11],
+    sliders: [SliderState; 12],
 }
 
 fn slider_index(id: SliderId) -> usize {
@@ -131,6 +133,10 @@ fn slider_spec(id: SliderId, s: &Settings) -> (SliderSpec<'static>, f32) {
             let text = format!("{:.0}%", s.sfx_volume * 100.0);
             ("Effects volume", (0.0, 1.0), s.sfx_volume, text, Color::new(0.4, 0.8, 1.0, 1.0))
         }
+        SliderId::MusicVolume => {
+            let text = format!("{:.0}%", s.music_volume * 100.0);
+            ("Music volume", (0.0, 1.0), s.music_volume, text, Color::new(0.4, 0.8, 1.0, 1.0))
+        }
     };
     (SliderSpec { label, value_text: text, min: range.0, max: range.1, accent }, value)
 }
@@ -148,6 +154,7 @@ fn slider_value(id: SliderId, s: &mut Settings) -> &mut f32 {
         SliderId::WaterDensity => &mut s.water_density,
         SliderId::SfxVolume => &mut s.sfx_volume,
         SliderId::Darkness => &mut s.darkness,
+        SliderId::MusicVolume => &mut s.music_volume,
     }
 }
 
@@ -199,6 +206,10 @@ impl Drawer {
         rows.extend([Row::Toggle(ToggleId::Sfx)]);
         if s.sfx {
             rows.push(Row::Slider(SliderId::SfxVolume));
+        }
+        rows.push(Row::Toggle(ToggleId::SonicMusic));
+        if s.sonic_music {
+            rows.push(Row::Slider(SliderId::MusicVolume));
         }
         rows.extend([
             Row::Header("VISUALIZER"),
@@ -296,6 +307,7 @@ impl Drawer {
                             ToggleId::Water => actions.push(Action::ToggleWater),
                             ToggleId::Effects => actions.push(Action::ToggleEffects),
                             ToggleId::Sfx => s.sfx = !s.sfx,
+                            ToggleId::SonicMusic => s.sonic_music = !s.sonic_music,
                             ToggleId::Player => actions.push(Action::TogglePlayer),
                             ToggleId::PlayerPhysics => actions.push(Action::TogglePlayerPhysics),
                             ToggleId::SlowMo => s.slow_motion = !s.slow_motion,
@@ -374,6 +386,7 @@ impl Drawer {
                         ToggleId::Water => ("Water  (H)", s.water),
                         ToggleId::Effects => ("Sparks, dust and splashes", s.effects),
                         ToggleId::Sfx => ("Sound effects", s.sfx),
+                        ToggleId::SonicMusic => ("Sonic's music", s.sonic_music),
                         ToggleId::Player => ("Classic player  (X)", s.player),
                         ToggleId::PlayerPhysics => ("Physical player  (Shift+X)", s.player_physics),
                         ToggleId::SlowMo => ("Slow motion on big hits", s.slow_motion),

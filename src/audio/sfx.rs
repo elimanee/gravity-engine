@@ -2,8 +2,7 @@
 //! damped partials and filtered noise), so there are no sample files, and
 //! each hit sounds a little different.
 
-use rodio::buffer::SamplesBuffer;
-use rodio::{OutputStream, OutputStreamHandle};
+use super::out::Output;
 
 const RATE: u32 = 44_100;
 /// Sounds started in the last `WINDOW` seconds are counted against `MAX_VOICES`.
@@ -60,16 +59,14 @@ pub enum Sound {
 }
 
 pub struct Sfx {
-    _stream: OutputStream,
-    handle: OutputStreamHandle,
+    out: Output,
     started: Vec<f64>,
     seed: u32,
 }
 
 impl Sfx {
     pub fn new() -> Option<Self> {
-        let (stream, handle) = OutputStream::try_default().ok()?;
-        Some(Sfx { _stream: stream, handle, started: vec![], seed: 0x9e37_79b9 })
+        Some(Sfx { out: Output::new()?, started: vec![], seed: 0x9e37_79b9 })
     }
 
     /// Play `sound` at `volume` (0‥1), panned by `pan` (-1 left ‥ 1 right),
@@ -83,8 +80,7 @@ impl Sfx {
         self.started.push(now);
         self.seed = self.seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         let mono = synth(sound, pitch, self.seed);
-        let buf = SamplesBuffer::new(2, RATE, stereo(&mono, volume, pan));
-        let _ = self.handle.play_raw(buf);
+        self.out.play(stereo(&mono, volume, pan), 2, RATE);
     }
 }
 

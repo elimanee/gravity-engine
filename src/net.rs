@@ -1,13 +1,20 @@
 //! Background web fetchers: classic 88×31 buttons and SteamGridDB game logos.
 //! Everything runs on worker threads; the UI polls a `FetchJob` each frame.
+// The web version cannot fetch (no threads, no raw HTTP): only the job type
+// is used there, to report it.
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
-use crate::util::Lcg;
-use std::collections::VecDeque;
-use std::io::Read;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{Receiver, Sender, TryRecvError};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::mpsc::{Receiver, TryRecvError};
+#[cfg(not(target_arch = "wasm32"))]
+use {
+    crate::util::Lcg,
+    std::collections::VecDeque,
+    std::io::Read,
+    std::sync::atomic::{AtomicUsize, Ordering},
+    std::sync::mpsc::Sender,
+    std::sync::{Arc, Mutex},
+    std::time::Duration,
+};
 
 pub enum FetchEvent {
     Item { name: String, data: Vec<u8> },
@@ -41,16 +48,30 @@ pub struct FetchJob {
 
 impl FetchJob {
     pub fn buttons(count: usize) -> Self {
-        Self::spawn(FetchKind::Buttons, count, fetch_buttons)
+        #[cfg(not(target_arch = "wasm32"))]
+        return Self::spawn(FetchKind::Buttons, count, fetch_buttons);
+        #[cfg(target_arch = "wasm32")]
+        return Self::unavailable(FetchKind::Buttons, count);
     }
 
     pub fn logos(count: usize) -> Self {
-        Self::spawn(FetchKind::Logos, count, fetch_logos)
+        #[cfg(not(target_arch = "wasm32"))]
+        return Self::spawn(FetchKind::Logos, count, fetch_logos);
+        #[cfg(target_arch = "wasm32")]
+        return Self::unavailable(FetchKind::Logos, count);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn spawn(kind: FetchKind, count: usize, f: fn(Sender<FetchEvent>, usize)) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || f(tx, count));
+        FetchJob { kind, wanted: count, received: 0, done: false, failed: false, rx }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn unavailable(kind: FetchKind, count: usize) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = tx.send(FetchEvent::Failed("fetching from the web needs the desktop version".into()));
         FetchJob { kind, wanted: count, received: 0, done: false, failed: false, rx }
     }
 
@@ -77,6 +98,7 @@ impl FetchJob {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(6))
@@ -85,6 +107,7 @@ fn agent() -> ureq::Agent {
         .build()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn download(agent: &ureq::Agent, url: &str, limit: u64) -> Option<Vec<u8>> {
     let resp = agent.get(url).call().ok()?;
     let mut bytes = Vec::new();
@@ -92,6 +115,7 @@ fn download(agent: &ureq::Agent, url: &str, limit: u64) -> Option<Vec<u8>> {
     (bytes.len() > 32).then_some(bytes)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run `job` over `inputs` on a few worker threads until `count` items have
 /// been delivered, the inputs run out, or the receiver hangs up.
 fn parallel<T: Send + 'static>(
@@ -167,6 +191,7 @@ pub fn scrape_image_urls(html: &str, base: &str) -> Vec<String> {
     urls
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn fetch_buttons(tx: Sender<FetchEvent>, count: usize) {
     // Scrape every gallery in parallel.
     let scrapers: Vec<_> = BUTTON_SOURCES
@@ -241,6 +266,7 @@ pub fn sgdb_first_url(json: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn fetch_logos(tx: Sender<FetchEvent>, count: usize) {
     let Some(key) = sgdb_key() else {
         tx.send(FetchEvent::Failed(

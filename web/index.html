@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Gravity Engine</title>
+    <meta name="description" content="A 2D physics sandbox and a Sonic game, in the browser">
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0e0d16;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            outline: none;
+        }
+        #loading {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #b9b2ff;
+            font: 15px system-ui, sans-serif;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="glcanvas" tabindex="1"></canvas>
+    <div id="loading">Loading Gravity Engine…</div>
+    <!-- The bundle's network plugin sets this global without declaring it. -->
+    <script>var register_plugin;</script>
+    <script src="mq_js_bundle.js"></script>
+    <script src="gravity_web.js"></script>
+    <script>
+        load("gravity_engine.wasm");
+        document.getElementById("glcanvas").focus();
+    </script>
+</body>
+</html>

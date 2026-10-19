@@ -57,7 +57,7 @@ impl ChallengeFile {
     }
 
     pub fn read(path: &Path) -> Result<Self, String> {
-        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let bytes = crate::storage::read(path)?;
         let c: ChallengeFile = serde_json::from_slice(&bytes).map_err(|e| format!("invalid challenge: {e}"))?;
         if c.format != FORMAT {
             return Err("not a Gravity Engine challenge".into());
@@ -72,11 +72,8 @@ impl ChallengeFile {
     }
 
     pub fn write(&self, path: &Path) -> Result<(), String> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        }
         let json = serde_json::to_vec(self).map_err(|e| e.to_string())?;
-        std::fs::write(path, json).map_err(|e| e.to_string())
+        crate::storage::write(path, json)
     }
 }
 
@@ -95,7 +92,7 @@ pub fn free_path(dir: &Path, name: &str) -> PathBuf {
     let slug = if slug.is_empty() { "challenge".to_string() } else { slug.chars().take(40).collect() };
     let mut path = dir.join(format!("{slug}.{CHALLENGE_EXT}"));
     let mut n = 2;
-    while path.exists() {
+    while crate::storage::exists(&path) {
         path = dir.join(format!("{slug}-{n}.{CHALLENGE_EXT}"));
         n += 1;
     }
@@ -104,10 +101,8 @@ pub fn free_path(dir: &Path, name: &str) -> PathBuf {
 
 /// Every readable challenge in `dir`, sorted by name.
 pub fn list(dir: &Path) -> Vec<(PathBuf, ChallengeFile)> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return vec![] };
-    let mut out: Vec<(PathBuf, ChallengeFile)> = entries
-        .flatten()
-        .map(|e| e.path())
+    let mut out: Vec<(PathBuf, ChallengeFile)> = crate::storage::list(dir)
+        .into_iter()
         .filter(|p| crate::config::ext_of(&p.to_string_lossy()) == CHALLENGE_EXT)
         .filter_map(|p| ChallengeFile::read(&p).ok().map(|c| (p, c)))
         .collect();

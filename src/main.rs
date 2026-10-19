@@ -17,6 +17,7 @@ mod audio;
 mod background;
 mod camera;
 mod config;
+mod dialog;
 mod drawing;
 mod effects;
 mod game;
@@ -33,12 +34,20 @@ mod settings;
 mod shapes;
 mod skin;
 mod sonic;
+mod storage;
 mod ui;
 mod util;
 mod weather;
 mod window_tracker;
 
 use macroquad::prelude::*;
+
+/// Lets the web page's `gravity_web.js` check that it matches this build.
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn gravity_web_crate_version() -> u32 {
+    1
+}
 
 fn window_conf() -> Conf {
     Conf {
@@ -98,9 +107,11 @@ async fn main() {
             // Exit without saving the settings the benchmark changed.
             std::process::exit(0);
         }
-        if app.quit || is_quit_requested() {
+        // A web page cannot quit: the tab is closed instead.
+        if (app.quit || is_quit_requested()) && !cfg!(target_arch = "wasm32") {
             break;
         }
+        app.quit = false;
         next_frame().await;
     }
     // Settings are saved when `app` is dropped.

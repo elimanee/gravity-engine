@@ -24,6 +24,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
 
@@ -32,6 +33,9 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
+
+      - name: Clippy (web version)
+        run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
 
       - name: Tests
         run: cargo test

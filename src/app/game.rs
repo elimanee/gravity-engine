@@ -3,6 +3,7 @@
 //! / rings / lives display, the end-of-act tally and Game Over.
 
 use super::*;
+use crate::audio::music::Jingle;
 use crate::audio::sfx::Sound;
 use crate::game::{art as game_art, Effect, Game, LevelSpec, MonitorKind, Phase};
 use rapier2d::prelude::ColliderHandle;
@@ -137,12 +138,22 @@ impl App {
                     }
                 }
                 Effect::ExtraLife => {
-                    self.sound(Sound::Win, vec2(screen_width() / 2.0, 0.0), 0.4);
+                    if self.s.sonic_music {
+                        self.play_jingle(Jingle::OneUp);
+                    } else {
+                        self.sound(Sound::Win, vec2(screen_width() / 2.0, 0.0), 0.4);
+                    }
                     self.toasts.success("1-up!");
                 }
                 Effect::Post(at) => self.sound(Sound::Post, at, 0.6),
                 Effect::Goal(at) => self.sound(Sound::Spring, at, 0.4),
-                Effect::Cleared => self.sound(Sound::Win, vec2(screen_width() / 2.0, 0.0), 0.7),
+                Effect::Cleared => {
+                    if self.s.sonic_music {
+                        self.play_jingle(Jingle::ActClear);
+                    } else {
+                        self.sound(Sound::Win, vec2(screen_width() / 2.0, 0.0), 0.7);
+                    }
+                }
                 Effect::Shot(at) => self.sound(Sound::Shot, at, 0.25),
                 Effect::BombBlast(at) | Effect::Explosion(at) => {
                     self.boom(at, BoomKind::Fire);
@@ -170,6 +181,7 @@ impl App {
                     let endless = self.game.as_ref().is_some_and(|g| g.endless);
                     if !endless {
                         self.toasts.warn("Game Over");
+                        self.play_jingle(Jingle::GameOver);
                     }
                 }
                 Effect::Restart => self.restart_level(),
