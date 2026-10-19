@@ -4,6 +4,11 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [Unreleased]
+
+### Added
+- DeltaConduit's Amy sheet in the style of Sonic 1 (583 × 570) is recognised as Amy's (`amy.png`), alongside CartoonsAnimate22's
+
 ## [3.1.0]
 
 ### Added
