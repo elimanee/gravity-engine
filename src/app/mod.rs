@@ -72,6 +72,7 @@ mod rewind;
 mod select;
 mod soft;
 mod sonic;
+mod special;
 mod verify;
 mod weather;
 
@@ -172,6 +173,8 @@ pub struct App {
     bench: Option<bench::Bench>,
     /// Sonic's music.
     music: music::Music,
+    /// A special stage being played (it takes the whole screen).
+    special: Option<special::SpecialRun>,
     /// The web version saves the settings as they change (closing the tab
     /// does not run `Drop`): what was saved last, and when to look again.
     autosaved: String,
@@ -305,6 +308,7 @@ impl App {
             endless: None,
             bench: None,
             music: Default::default(),
+            special: None,
             autosaved: String::new(),
             autosave_in: 2.0,
             game: None,
@@ -411,6 +415,14 @@ impl App {
             {
                 self.title = Some(Title::Leaving(PixelOut::new(sw, sh)));
             }
+            return;
+        }
+
+        if self.special.is_some() {
+            self.poll_pad();
+            self.special_frame(dt);
+            self.audio.tick();
+            self.update_music();
             return;
         }
 
@@ -2268,6 +2280,7 @@ impl App {
                 stars: &self.s.challenge_stars,
                 mine: &mine,
                 act_scores: &self.s.act_scores,
+                emeralds: self.s.emeralds,
                 character: self.s.character,
                 levels: &levels,
             };

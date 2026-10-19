@@ -40,7 +40,10 @@ impl App {
     pub(super) fn start_game(&mut self, spec: &LevelSpec, start: Vec2) {
         self.stop_game();
         self.spawn_sonic(start);
-        let game = Game::new(spec, &mut self.world, start);
+        let mut game = Game::new(spec, &mut self.world, start);
+        let emeralds = crate::special::count(self.s.emeralds);
+        game.emeralds_missing = emeralds < crate::special::EMERALDS && !self.level_testing();
+        game.emeralds_all = emeralds == crate::special::EMERALDS;
         self.game = Some(game);
         self.popups.clear();
         self.paused = false;
@@ -74,6 +77,8 @@ impl App {
         let solid =
             |c: ColliderHandle| world.colliders.get(c).and_then(|c| c.parent()).is_none_or(|b| !grains.contains(&b));
         let fall_y = self.world.arena.1 * PPM + 150.0;
+        game.water =
+            self.s.water.then(|| crate::physics::to_screen(0.0, water::rest_level(world, self.s.water_level)).y);
         let fx = game.update(step, &self.world, &solid, &mut run.sonic, fall_y);
         self.game_effects(fx);
     }
@@ -115,6 +120,7 @@ impl App {
                 Effect::Died(at) => {
                     self.sound(Sound::Hurt, at, 0.8);
                     self.pad.rumble(1.0, 0.5);
+                    self.cancel_jingle(Jingle::Drowning);
                 }
                 Effect::Monitor(kind, at) => {
                     self.boom(at, BoomKind::Puff);
@@ -177,6 +183,20 @@ impl App {
                 Effect::Respawned(at) => {
                     self.camera.center = at;
                 }
+                Effect::AirWarning(at) => self.sound(Sound::Chime, at, 0.6),
+                Effect::Drowning => self.play_jingle(Jingle::Drowning),
+                Effect::Breathe(at) => {
+                    self.sound(Sound::Gulp, at, 0.6);
+                    self.cancel_jingle(Jingle::Drowning);
+                    if self.s.effects {
+                        self.effects.splash(at, 0.3);
+                    }
+                }
+                Effect::SuperEnd(at) => self.sound(Sound::Pop, at, 0.6),
+                Effect::GiantRing(at) => {
+                    self.sound(Sound::Warp, at, 0.7);
+                    self.toasts.success("A giant ring!  ·  a special stage after the tally");
+                }
                 Effect::GameOver => {
                     let endless = self.game.as_ref().is_some_and(|g| g.endless);
                     if !endless {
@@ -230,7 +250,11 @@ impl App {
             *best = (*best).max(g.score);
             let _ = self.s.save();
         }
-        if let Some(next) = self.next_act() {
+        // Through the giant ring first.
+        let next = self.next_act();
+        if self.game.as_ref().is_some_and(|g| g.giant_ring) && crate::special::next_missing(self.s.emeralds).is_some() {
+            self.start_special(next);
+        } else if let Some(next) = next {
             self.open_act(next);
         } else {
             self.stop_game();
@@ -263,6 +287,9 @@ impl App {
             if !run.sonic.dead {
                 game_art::draw_around(g, run.sonic.pos, t, sp);
             }
+        }
+        if let Some(run) = self.sonic.as_ref().filter(|r| r.sonic.super_form && !r.sonic.dead) {
+            game_art::super_sparkles(run.sonic.pos, t);
         }
         if let Some(sp) = sp {
             for b in &self.booms {
@@ -334,6 +361,11 @@ impl App {
                 row("TIME BONUS", tally.time_bonus, sh * 0.25 + 84.0);
                 row("RING BONUS", tally.ring_bonus, sh * 0.25 + 114.0);
                 row("SCORE", g.score, sh * 0.25 + 150.0);
+                if g.giant_ring {
+                    let c = vec2(sw / 2.0 + 250.0, sh * 0.25 + 110.0);
+                    game_art::giant_ring(c, 34.0, t);
+                    theme::text_bold_centered("SPECIAL STAGE", c.x, c.y + 56.0, 14.0, yellow);
+                }
                 if tally.done() && (t * 2.0) as i32 % 2 == 0 {
                     theme::text_centered("Space / A to continue", sw / 2.0, sh * 0.25 + 190.0, 15.0, WHITE);
                 }

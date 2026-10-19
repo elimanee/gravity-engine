@@ -134,6 +134,8 @@ pub struct Settings {
     pub character: crate::sonic::Character,
     /// Best score per Sonic act cleared (by act name).
     pub act_scores: std::collections::BTreeMap<String, u32>,
+    /// The chaos emeralds found in special stages (one bit each).
+    pub emeralds: u8,
 
     /// Rain, snow or storm over the world.
     pub weather: crate::weather::Weather,
@@ -213,6 +215,7 @@ impl Default for Settings {
             show_title: true,
             sonic_best: 0.0,
             act_scores: Default::default(),
+            emeralds: 0,
             character: Default::default(),
             weather: Default::default(),
             night: false,

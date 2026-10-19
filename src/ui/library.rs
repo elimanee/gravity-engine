@@ -30,6 +30,8 @@ pub struct LibraryData<'a> {
     pub character: Character,
     /// Names of "My levels".
     pub levels: &'a [String],
+    /// The chaos emeralds found (one bit each).
+    pub emeralds: u8,
 }
 
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -180,8 +182,18 @@ impl Library {
         let solved = challenges::ALL.iter().filter(|c| done.iter().any(|d| d == c.id)).count();
         let stars: u32 = challenges::ALL.iter().map(|c| *data.stars.get(c.id).unwrap_or(&0) as u32).sum();
         let n = challenges::ALL.len();
-        let hint = format!("{solved} / {n} solved  ·  {stars} / {} stars  ·  E or Esc to close", n * 3);
-        text(&hint, p.x + p.w - PAD - measure(&hint, 12.0), p.y + PAD + 12.0, 12.0, fade(TEXT_MUTED, f));
+        if self.tab == Tab::Sonic {
+            // The emeralds found in special stages (50 rings at a goal).
+            let row = vec2(p.x + p.w - PAD - 120.0, p.y + PAD + 6.0);
+            let label = "Chaos emeralds";
+            text(label, row.x - 74.0 - measure(label, 12.0), p.y + PAD + 12.0, 12.0, fade(TEXT_MUTED, f));
+            if f > 0.5 {
+                crate::special::art::emerald_row(row, 8.0, data.emeralds);
+            }
+        } else {
+            let hint = format!("{solved} / {n} solved  ·  {stars} / {} stars  ·  E or Esc to close", n * 3);
+            text(&hint, p.x + p.w - PAD - measure(&hint, 12.0), p.y + PAD + 12.0, 12.0, fade(TEXT_MUTED, f));
+        }
 
         let tabs = Self::tabs(p);
         let tab_list = [

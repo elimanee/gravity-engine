@@ -1,7 +1,8 @@
 //! Drawings of the game mode (world pass): badniks, shots, spikes,
-//! monitors, star posts, the goal signpost, the boss, scattered rings and
-//! the shield / invincibility around Sonic. Made of shapes, or taken from
-//! the user's sprite sheets when there are some ([`super::sprites`]).
+//! monitors, star posts, the goal signpost (and the giant ring), the
+//! bosses, scattered rings, bubbles, and the shield / invincibility / air
+//! countdown around Sonic. Made of shapes, or taken from the user's sprite
+//! sheets when there are some ([`super::sprites`]).
 
 use super::sprites::Sprites;
 use super::*;
@@ -28,6 +29,16 @@ pub fn draw(g: &Game, t: f32, sp: Option<&Sprites>) {
         if !sp.is_some_and(|sp| sp.signpost(goal + vec2(0.0, 40.0), spin)) {
             signpost(goal, g.goal_passed, t);
         }
+        if g.giant_ring {
+            let rise = g.goal_passed.map_or(1.0, |p| (p / 0.6).min(1.0));
+            giant_ring(goal - vec2(0.0, 110.0 + 50.0 * rise), 46.0 * rise, t);
+        }
+    }
+    for v in &g.vents {
+        vent(v.pos);
+    }
+    for b in &g.bubbles {
+        bubble(b);
     }
     for m in &g.monitors {
         if !sp.is_some_and(|sp| sp.monitor(m.kind, m.pos, m.broken, t)) {
@@ -41,6 +52,10 @@ pub fn draw(g: &Game, t: f32, sp: Option<&Sprites>) {
         boss(b, t);
     }
     for s in &g.shots {
+        if s.wave {
+            wave(s.pos, t);
+            continue;
+        }
         draw_circle(s.pos.x, s.pos.y, 7.0, Color::new(1.0, 0.45, 0.1, 0.35));
         draw_circle(s.pos.x, s.pos.y, 4.5, Color::new(1.0, 0.6, 0.15, 1.0));
         draw_circle(s.pos.x, s.pos.y, 2.0, Color::new(1.0, 0.95, 0.8, 1.0));
@@ -62,6 +77,17 @@ pub fn draw_around(g: &Game, at: Vec2, t: f32, sp: Option<&Sprites>) {
         draw_circle_lines(at.x, at.y, 40.0 * pulse, 2.0, Color::new(0.6, 0.85, 1.0, 0.7));
         draw_circle(at.x - 14.0, at.y - 18.0, 5.0, Color::new(1.0, 1.0, 1.0, 0.35));
     }
+    if let Some(n) = g.countdown() {
+        // The number bubbles up over his head, blinking.
+        if (t * 3.0) as i32 % 3 != 0 {
+            let c = at - vec2(0.0, 64.0);
+            draw_circle(c.x, c.y, 15.0, Color::new(0.75, 0.9, 1.0, 0.35));
+            draw_circle_lines(c.x, c.y, 15.0, 2.0, Color::new(0.85, 0.95, 1.0, 0.9));
+            let text = n.to_string();
+            let w = crate::ui::theme::measure_bold(&text, 22.0);
+            crate::ui::theme::text_bold(&text, c.x - w / 2.0, c.y + 8.0, 22.0, WHITE);
+        }
+    }
     if g.invincible > 0.0 && !sp.is_some_and(|sp| sp.stars(at, t)) {
         for k in 0..8 {
             let a = t * 7.0 + k as f32 * std::f32::consts::TAU / 8.0;
@@ -70,6 +96,17 @@ pub fn draw_around(g: &Game, at: Vec2, t: f32, sp: Option<&Sprites>) {
             let c = Color::new(1.0, 1.0, 0.6 + 0.4 * (k % 2) as f32, 0.9);
             star(p, 5.0, c, a);
         }
+    }
+}
+
+/// Golden sparkles round a super character.
+pub fn super_sparkles(at: Vec2, t: f32) {
+    for k in 0..5 {
+        let phase = (t * 1.7 + k as f32 * 0.37).fract();
+        let a = k as f32 * 2.4 + (t * 0.9).floor() * 1.3;
+        let p = at + vec2(a.cos(), a.sin()) * (24.0 + phase * 14.0);
+        let alpha = 1.0 - phase;
+        star(p, 3.0 + 4.0 * alpha, Color::new(1.0, 0.95, 0.6, alpha), t * 4.0 + k as f32);
     }
 }
 
@@ -206,6 +243,73 @@ fn enemy(e: &Enemy, t: f32) {
     let d = e.dir;
     let p = e.pos;
     match e.kind {
+        EnemyKind::Fish => {
+            // A red piranha, nose up on the way up and down on the way down.
+            let going_up = (e.timer % 2.8) < 0.75;
+            let nose = if going_up { -1.0 } else { 1.0 };
+            let fin = (t * 18.0).sin() * 3.0;
+            let body = Color::new(0.92, 0.25, 0.3, 1.0);
+            draw_triangle(
+                p + vec2(0.0, -nose * 12.0),
+                p + vec2(-10.0 + fin, -nose * 26.0),
+                p + vec2(10.0 + fin, -nose * 26.0),
+                Color::new(0.8, 0.15, 0.2, 1.0),
+            );
+            draw_ellipse(p.x, p.y, 13.0, 18.0, 0.0, body);
+            draw_ellipse(p.x + 3.0, p.y + nose * 2.0, 6.0, 10.0, 0.0, Color::new(1.0, 0.85, 0.75, 1.0));
+            for k in [-1.0f32, 1.0] {
+                draw_circle(p.x + k * 6.0, p.y + nose * 8.0, 3.5, WHITE);
+                draw_circle(p.x + k * 6.0, p.y + nose * 9.0, 1.6, INK);
+            }
+            // Teeth.
+            let jaw = p.y + nose * 16.0;
+            for k in -2..=2 {
+                let x = p.x + k as f32 * 3.0;
+                draw_triangle(vec2(x - 1.5, jaw), vec2(x + 1.5, jaw), vec2(x, jaw - nose * 3.0), WHITE);
+            }
+        }
+        EnemyKind::Gull => {
+            // A grey gull with a metal beak, wings beating (folded when it dives).
+            let diving = e.firing && e.vel.y > 0.0;
+            let flap = if diving { 0.8 } else { (t * 9.0).sin() };
+            for k in [-1.0f32, 1.0] {
+                let root = p + vec2(k * 6.0, -2.0);
+                let tip = p + vec2(k * 30.0, -6.0 - flap * 16.0);
+                let mid = p + vec2(k * 18.0, -10.0 - flap * 6.0);
+                draw_triangle(root, mid, tip, Color::new(0.92, 0.94, 0.98, 1.0));
+                draw_triangle(mid, tip, tip + vec2(-k * 6.0, 6.0), INK);
+            }
+            draw_ellipse(p.x, p.y, 18.0, 9.0, 0.0, Color::new(0.95, 0.96, 1.0, 1.0));
+            let head = p + vec2(d * 15.0, -4.0);
+            draw_circle(head.x, head.y, 7.0, Color::new(0.95, 0.96, 1.0, 1.0));
+            draw_circle(head.x + d * 2.0, head.y - 2.0, 2.2, Color::new(1.0, 0.25, 0.2, 1.0));
+            draw_triangle(head + vec2(d * 5.0, -2.0), head + vec2(d * 5.0, 3.0), head + vec2(d * 15.0, 2.0), STEEL);
+            draw_triangle(p + vec2(-d * 14.0, -3.0), p + vec2(-d * 14.0, 4.0), p + vec2(-d * 24.0, 0.0), STEEL_DARK);
+        }
+        EnemyKind::Puffer => {
+            // A round puffer: spikes out now and then.
+            let out = e.spiky();
+            let r = if out { 19.0 } else { 15.0 };
+            if out {
+                for k in 0..12 {
+                    let a = k as f32 * std::f32::consts::TAU / 12.0 + t * 0.5;
+                    let dir = vec2(a.cos(), a.sin());
+                    let side = vec2(-dir.y, dir.x) * 3.5;
+                    draw_triangle(p + dir * (r - 2.0) + side, p + dir * (r - 2.0) - side, p + dir * (r + 10.0), STEEL);
+                }
+            } else {
+                for k in 0..8 {
+                    let a = k as f32 * std::f32::consts::TAU / 8.0;
+                    let q = p + vec2(a.cos(), a.sin()) * r;
+                    draw_circle(q.x, q.y, 2.0, STEEL_DARK);
+                }
+            }
+            draw_circle(p.x, p.y, r, Color::new(0.35, 0.75, 0.6, 1.0));
+            draw_ellipse(p.x, p.y + r * 0.35, r * 0.7, r * 0.45, 0.0, Color::new(0.85, 0.95, 0.8, 1.0));
+            draw_circle(p.x + d * 6.0, p.y - 5.0, 4.5, WHITE);
+            draw_circle(p.x + d * 7.0, p.y - 5.0, 2.0, INK);
+            draw_circle(p.x + d * (r - 2.0), p.y + 3.0, 2.5, Color::new(0.9, 0.35, 0.4, 1.0));
+        }
         EnemyKind::Crawler => {
             // A red shelled bug on a wheel.
             let wheel = p + vec2(-d * 2.0, 10.0);
@@ -263,8 +367,129 @@ fn enemy(e: &Enemy, t: f32) {
     }
 }
 
-/// The boss: a hovering pod with a glass dome, arms and a propeller.
+/// The giant ring to a special stage, turning slowly.
+pub fn giant_ring(c: Vec2, r: f32, t: f32) {
+    if r < 1.0 {
+        return;
+    }
+    let w = r * (0.25 + 0.75 * (t * 1.5).cos().abs());
+    draw_circle(c.x, c.y, r * 1.25, Color::new(1.0, 0.9, 0.4, 0.12));
+    draw_ellipse_lines(c.x, c.y, w, r, 0.0, r * 0.3, Color::new(0.72, 0.45, 0.05, 1.0));
+    draw_ellipse_lines(c.x, c.y, w, r, 0.0, r * 0.18, Color::new(1.0, 0.85, 0.2, 1.0));
+    draw_ellipse_lines(c.x - w * 0.1, c.y - r * 0.1, w * 0.8, r * 0.85, 0.0, r * 0.05, Color::new(1.0, 1.0, 0.8, 0.8));
+    // Sparkles round it.
+    for k in 0..4 {
+        let a = t * 2.0 + k as f32 * std::f32::consts::FRAC_PI_2;
+        let p = c + vec2(a.cos() * r * 1.3, a.sin() * r * 1.1);
+        star(p, 4.0 + 2.0 * (t * 6.0 + k as f32).sin().abs(), Color::new(1.0, 1.0, 0.8, 0.9), a);
+    }
+}
+
+/// A vent on the sea floor.
+fn vent(at: Vec2) {
+    draw_rectangle(at.x - 14.0, at.y - 6.0, 28.0, 10.0, STEEL_DARK);
+    draw_rectangle(at.x - 9.0, at.y - 12.0, 18.0, 8.0, STEEL);
+    draw_ellipse(at.x, at.y - 12.0, 9.0, 3.0, 0.0, INK);
+}
+
+fn bubble(b: &Bubble) {
+    let r = b.radius();
+    let wobble = 1.0 + 0.08 * (b.age * 9.0 + b.seed).sin();
+    draw_ellipse(b.pos.x, b.pos.y, r * wobble, r / wobble, 0.0, Color::new(0.75, 0.9, 1.0, 0.18));
+    draw_ellipse_lines(b.pos.x, b.pos.y, r * wobble, r / wobble, 0.0, 1.5, Color::new(0.85, 0.95, 1.0, 0.8));
+    draw_circle(b.pos.x - r * 0.35, b.pos.y - r * 0.35, r * 0.25, Color::new(1.0, 1.0, 1.0, 0.7));
+}
+
+/// A shock wave running along the ground.
+fn wave(at: Vec2, t: f32) {
+    for k in 0..3 {
+        let h = 18.0 - k as f32 * 5.0 + (t * 30.0 + k as f32).sin() * 2.0;
+        let a = 0.75 - k as f32 * 0.2;
+        draw_ellipse(at.x, at.y + 8.0 - h / 2.0, 14.0 - k as f32 * 3.0, h, 0.0, Color::new(0.7, 0.9, 1.0, a));
+    }
+    draw_ellipse(at.x, at.y + 10.0, 20.0, 4.0, 0.0, Color::new(1.0, 1.0, 1.0, 0.6));
+}
+
+/// The bosses.
 fn boss(b: &Boss, t: f32) {
+    match b.kind {
+        BossKind::Bomber => bomber(b, t),
+        BossKind::Anchor => crane(b, t),
+    }
+}
+
+/// The anchor crane: a striped hovering cab, a chain and the anchor.
+fn crane(b: &Boss, t: f32) {
+    let p = b.pos;
+    let hit = b.flash > 0.0 && (t * 20.0) as i32 % 2 == 0;
+    let yellow = if hit { WHITE } else { Color::new(0.98, 0.78, 0.15, 1.0) };
+    let r = BOSS_R;
+    // The chain: links from the hook to the anchor.
+    let top = p + vec2(0.0, r * 0.6);
+    let n = ((b.anchor - top).length() / 12.0).max(1.0) as usize;
+    for k in 0..n {
+        let q = top + (b.anchor - top) * (k as f32 + 0.5) / n as f32;
+        let flat = k % 2 == 0;
+        draw_ellipse_lines(q.x, q.y, if flat { 5.0 } else { 2.0 }, 6.0, 0.0, 2.0, STEEL_DARK);
+    }
+    anchor(b.anchor, (b.anchor - top).normalize_or(vec2(0.0, 1.0)));
+    // Twin rotors.
+    for k in [-1.0f32, 1.0] {
+        let hub = p + vec2(k * r * 0.9, -r * 0.7);
+        let w = r * 0.55 * (t * 28.0 + k).sin().abs();
+        draw_line(hub.x, hub.y + 10.0, hub.x, hub.y, 3.0, STEEL_DARK);
+        draw_line(hub.x - w, hub.y, hub.x + w, hub.y, 3.0, STEEL);
+    }
+    // The cab: hazard stripes, a window with the robot eye.
+    draw_rectangle(p.x - r * 1.2, p.y - r * 0.6, r * 2.4, r * 1.2, yellow);
+    for k in 0..6 {
+        let x = p.x - r * 1.2 + k as f32 * r * 0.42;
+        draw_triangle(
+            vec2(x, p.y + r * 0.6),
+            vec2(x + r * 0.2, p.y + r * 0.6),
+            vec2(x + r * 0.42, p.y + r * 0.25),
+            INK,
+        );
+    }
+    draw_rectangle_lines(p.x - r * 1.2, p.y - r * 0.6, r * 2.4, r * 1.2, 2.0, STEEL_DARK);
+    draw_rectangle(p.x - r * 0.55, p.y - r * 0.45, r * 1.1, r * 0.55, Color::new(0.55, 0.8, 1.0, 0.8));
+    let look = vec2((t * 1.1).sin() * 8.0, 0.0);
+    draw_circle(p.x + look.x, p.y - r * 0.18, 7.0, Color::new(0.15, 0.15, 0.2, 1.0));
+    draw_circle(p.x + look.x, p.y - r * 0.18, 3.5, Color::new(1.0, 0.2, 0.2, 1.0));
+    draw_rectangle(p.x - 6.0, p.y + r * 0.6, 12.0, 8.0, STEEL_DARK);
+    for k in 0..(BOSS_HP - b.hp).min(6) {
+        let x = p.x - r + k as f32 * r * 0.35;
+        draw_line(x, p.y - r * 0.5, x + 6.0, p.y - r * 0.2, 2.0, Color::new(0.1, 0.1, 0.1, 0.6));
+    }
+}
+
+/// A ship's anchor hanging along `down`.
+fn anchor(c: Vec2, down: Vec2) {
+    let side = vec2(-down.y, down.x);
+    let r = ANCHOR_R;
+    let ring = c - down * r * 1.1;
+    let crown = c + down * r * 0.75;
+    draw_circle_lines(ring.x, ring.y, 5.0, 2.5, STEEL_DARK);
+    // Shank and stock.
+    draw_line(ring.x, ring.y, crown.x, crown.y, 6.0, STEEL_DARK);
+    let (s0, s1) = (c - down * r * 0.6 - side * r * 0.6, c - down * r * 0.6 + side * r * 0.6);
+    draw_line(s0.x, s0.y, s1.x, s1.y, 5.0, STEEL_DARK);
+    // Arms curving up to the flukes.
+    for k in [-1.0f32, 1.0] {
+        let mut last = crown;
+        for i in 1..=6 {
+            let a = i as f32 / 6.0 * 1.3;
+            let q = crown - down * r * 0.75 * (1.0 - a.cos()) + side * k * r * a.sin();
+            draw_line(last.x, last.y, q.x, q.y, 6.0, STEEL_DARK);
+            last = q;
+        }
+        draw_triangle(last, last - down * 12.0 + side * k * 2.0, last + side * k * 9.0 - down * 2.0, STEEL);
+    }
+    draw_circle(crown.x, crown.y, 6.0, STEEL);
+}
+
+/// The first boss: a hovering pod with a glass dome, arms and a propeller.
+fn bomber(b: &Boss, t: f32) {
     let p = b.pos;
     let hit = b.flash > 0.0 && (t * 20.0) as i32 % 2 == 0;
     let body = if hit { WHITE } else { Color::new(0.55, 0.55, 0.65, 1.0) };

@@ -359,11 +359,15 @@ impl App {
     }
 
     /// The sky behind the level: the zone's in an endless run (turning
-    /// from the last one's), a bright day otherwise.
+    /// from the last one's) or in an act, a bright day otherwise.
     pub(super) fn level_sky(&self) -> LevelSky {
+        use crate::library::acts::{Zone, ALL};
         match &self.endless {
             Some(e) => e.sky_from.mix(&ZONES.get(e.zone).map_or(LevelSky::DAY, |z| z.sky), e.sky_t),
-            None => LevelSky::DAY,
+            None => match self.act.and_then(|i| ALL.get(i)).map(|a| a.zone) {
+                Some(Zone::Harbour) => LevelSky::HARBOUR,
+                _ => LevelSky::DAY,
+            },
         }
     }
 

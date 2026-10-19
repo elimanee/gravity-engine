@@ -34,6 +34,7 @@ mod settings;
 mod shapes;
 mod skin;
 mod sonic;
+mod special;
 mod storage;
 mod ui;
 mod util;
@@ -66,6 +67,8 @@ async fn main() {
     let mut skip_title = false;
     let mut verify = None;
     let mut benchmark = false;
+    let mut act = None;
+    let mut special = None;
     let mut files = vec![];
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
@@ -74,6 +77,11 @@ async fn main() {
             // Development: play every challenge's reference solution.
             "--verify-challenges" => verify = Some(None),
             a if a.starts_with("--verify-challenge=") => verify = Some(a[19..].parse::<usize>().ok().map(|n| n - 1)),
+            // Development: straight into Sonic act N, or special stage N.
+            a if a.starts_with("--act=") => act = a[6..].parse::<usize>().ok().and_then(|n| n.checked_sub(1)),
+            a if a.starts_with("--special-stage=") => {
+                special = a[16..].parse::<usize>().ok().and_then(|n| n.checked_sub(1));
+            }
             "-h" | "--help" => {
                 println!(
                     "usage: gravity_engine [--no-title] [--benchmark] [FILES…]\n\n  \
@@ -100,6 +108,12 @@ async fn main() {
     }
     if benchmark {
         app.start_benchmark();
+    }
+    if let Some(i) = act {
+        app.play_act(i);
+    }
+    if let Some(i) = special {
+        app.play_special(i);
     }
     loop {
         app.frame();

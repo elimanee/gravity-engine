@@ -54,6 +54,15 @@ pub enum Sound {
     Scatter,
     Post,
     Clang,
+    /// Air running low underwater, and a breath from a bubble.
+    Chime,
+    Gulp,
+    /// Turning super, and a giant ring's warp to a special stage.
+    Transform,
+    Warp,
+    /// Special stage: a blue sphere caught, a bumper.
+    Sphere,
+    Bumper,
     /// Challenge solved.
     Win,
 }
@@ -423,6 +432,98 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
             add_noise(&mut out, &mut n, |_| 6000.0 * p, |t| 0.6 * (-t / 0.01).exp());
             out
         }
+        Sound::Chime => {
+            // Two low bells, the second higher.
+            let mut out = secs(0.9);
+            add_partials(
+                &mut out,
+                &[
+                    Partial(659.3 * p, 0.25, 0.12, 0.0),
+                    Partial(1318.5 * p, 0.06, 0.08, 0.0),
+                    Partial(880.0 * p, 0.25, 0.18, 0.14),
+                    Partial(1760.0 * p, 0.06, 0.1, 0.14),
+                ],
+            );
+            out
+        }
+        Sound::Gulp => {
+            // A bubble's rising blip, twice.
+            let mut out = secs(0.32);
+            let dt = 1.0 / RATE as f32;
+            let mut phase = 0.0;
+            for (k, s) in out.iter_mut().enumerate() {
+                let t = k as f32 * dt;
+                let local = t % 0.14;
+                phase += std::f32::consts::TAU * (260.0 + 2600.0 * local) * p * dt;
+                let env = if t < 0.28 { (local / 0.004).min(1.0) * (-local / 0.05).exp() } else { 0.0 };
+                *s = phase.sin() * 0.35 * env;
+            }
+            out
+        }
+        Sound::Transform => {
+            // A rising shimmer of bells over a swelling hiss.
+            let mut out = secs(1.4);
+            let mut partials = vec![];
+            for i in 0..12 {
+                let f = 392.0 * 2f32.powf(i as f32 * 2.0 / 12.0) * p;
+                let at = i as f32 * 0.05;
+                partials.push(Partial(f, 0.12, 0.25, at));
+                partials.push(Partial(f * 2.0, 0.04, 0.15, at));
+            }
+            add_partials(&mut out, &partials);
+            add_noise(
+                &mut out,
+                &mut n,
+                |t| (2000.0 + 6000.0 * t) * p,
+                |t| 0.25 * (t / 0.6).min(1.0) * (-t / 0.3).exp(),
+            );
+            out
+        }
+        Sound::Warp => {
+            // A deep whoosh sweeping up.
+            let mut out = secs(1.2);
+            let dt = 1.0 / RATE as f32;
+            let mut phase = 0.0;
+            for (k, s) in out.iter_mut().enumerate() {
+                let t = k as f32 * dt;
+                phase += std::f32::consts::TAU * (110.0 * 2f32.powf(t * 3.0)) * p * dt;
+                *s = (phase.sin() + 0.3 * (phase * 3.0).sin())
+                    * 0.25
+                    * (t / 0.05).min(1.0)
+                    * ((1.2 - t) / 0.4).clamp(0.0, 1.0);
+            }
+            add_noise(
+                &mut out,
+                &mut n,
+                |t| (500.0 + 5000.0 * t) * p,
+                |t| 0.4 * (t / 0.2).min(1.0) * ((1.2 - t) / 0.5).clamp(0.0, 1.0),
+            );
+            out
+        }
+        Sound::Sphere => {
+            // A short square blip.
+            let mut out = secs(0.12);
+            let dt = 1.0 / RATE as f32;
+            for (k, s) in out.iter_mut().enumerate() {
+                let t = k as f32 * dt;
+                let f = if t < 0.04 { 988.0 } else { 1319.0 } * p;
+                let sq = if (t * f).fract() < 0.5 { 1.0 } else { -1.0 };
+                *s = sq * 0.12 * (t / 0.002).min(1.0) * ((0.12 - t) / 0.03).clamp(0.0, 1.0);
+            }
+            out
+        }
+        Sound::Bumper => {
+            // A springy boing.
+            let mut out = secs(0.4);
+            let dt = 1.0 / RATE as f32;
+            let mut phase = 0.0;
+            for (k, s) in out.iter_mut().enumerate() {
+                let t = k as f32 * dt;
+                phase += std::f32::consts::TAU * (300.0 + 180.0 * (t * 40.0).sin() * (-t / 0.15).exp()) * p * dt;
+                *s = phase.sin() * 0.35 * (t / 0.003).min(1.0) * (-t / 0.1).exp();
+            }
+            out
+        }
         Sound::Win => {
             let mut out = secs(1.6);
             // C major arpeggio of soft bells.
@@ -443,7 +544,7 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
 mod tests {
     use super::*;
 
-    const ALL: [Sound; 25] = [
+    const ALL: [Sound; 31] = [
         Sound::Hit { size: 80.0, hard: 0.2 },
         Sound::Hit { size: 20.0, hard: 1.0 },
         Sound::Shatter,
@@ -468,6 +569,12 @@ mod tests {
         Sound::Scatter,
         Sound::Post,
         Sound::Clang,
+        Sound::Chime,
+        Sound::Gulp,
+        Sound::Transform,
+        Sound::Warp,
+        Sound::Sphere,
+        Sound::Bumper,
         Sound::Win,
     ];
 

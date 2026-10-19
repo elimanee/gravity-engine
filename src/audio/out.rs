@@ -1,8 +1,8 @@
 //! Where generated sound goes: rodio on the desktop, the browser's WebAudio
 //! in the web version (through `web/gravity_web.js`). Sounds are given as
-//! interleaved samples; a looping one (music) can be faded and stopped.
+//! interleaved samples; music (looping or not) can be faded and stopped.
 
-/// A sound that keeps playing until it is stopped (music).
+/// A sound that can be faded or stopped while it plays (music).
 pub struct Voice(platform::Voice);
 
 impl Voice {
@@ -30,7 +30,12 @@ impl Output {
 
     /// Play `samples` over and over at `volume` until the voice is stopped.
     pub fn play_loop(&self, samples: Vec<f32>, channels: u16, rate: u32, volume: f32) -> Option<Voice> {
-        self.0.play_loop(samples, channels, rate, volume).map(Voice)
+        self.0.play_voice(samples, channels, rate, volume, true).map(Voice)
+    }
+
+    /// Play `samples` once at `volume`, keeping a hold on it to stop it early.
+    pub fn play_voice(&self, samples: Vec<f32>, channels: u16, rate: u32, volume: f32) -> Option<Voice> {
+        self.0.play_voice(samples, channels, rate, volume, false).map(Voice)
     }
 }
 
@@ -54,10 +59,22 @@ mod platform {
             let _ = self.handle.play_raw(SamplesBuffer::new(channels, rate, samples));
         }
 
-        pub fn play_loop(&self, samples: Vec<f32>, channels: u16, rate: u32, volume: f32) -> Option<Voice> {
+        pub fn play_voice(
+            &self,
+            samples: Vec<f32>,
+            channels: u16,
+            rate: u32,
+            volume: f32,
+            looped: bool,
+        ) -> Option<Voice> {
             let sink = Sink::try_new(&self.handle).ok()?;
             sink.set_volume(volume);
-            sink.append(SamplesBuffer::new(channels, rate, samples).repeat_infinite());
+            let buffer = SamplesBuffer::new(channels, rate, samples);
+            if looped {
+                sink.append(buffer.repeat_infinite());
+            } else {
+                sink.append(buffer);
+            }
             Some(Voice(sink))
         }
     }
@@ -97,9 +114,17 @@ mod platform {
             unsafe { ge_audio_play(samples.as_ptr(), samples.len() as u32, channels as u32, rate, 1.0, 0) };
         }
 
-        pub fn play_loop(&self, samples: Vec<f32>, channels: u16, rate: u32, volume: f32) -> Option<Voice> {
+        pub fn play_voice(
+            &self,
+            samples: Vec<f32>,
+            channels: u16,
+            rate: u32,
+            volume: f32,
+            looped: bool,
+        ) -> Option<Voice> {
+            let (ptr, len, looped) = (samples.as_ptr(), samples.len() as u32, looped as u32);
             // SAFETY: as above.
-            let id = unsafe { ge_audio_play(samples.as_ptr(), samples.len() as u32, channels as u32, rate, volume, 1) };
+            let id = unsafe { ge_audio_play(ptr, len, channels as u32, rate, volume, looped) };
             Some(Voice(id))
         }
     }

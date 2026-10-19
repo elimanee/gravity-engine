@@ -1,11 +1,12 @@
 //! Bar shown in the Sonic level editor: the level's name, what to place
 //! (start, rings, badniks, monitors, hazards, posts, the goal, the boss,
-//! springs, ground, platforms, loops) or erase, Play / Stop and Save.
+//! springs, air vents, ground, platforms, loops) or erase, Play / Stop and
+//! Save.
 
 use super::theme::*;
 use super::widgets::*;
 use super::{Action, Input, LevelCmd};
-use crate::game::MonitorKind;
+use crate::game::{BossKind, EnemyKind, MonitorKind};
 use macroquad::prelude::*;
 
 const W: f32 = 820.0;
@@ -17,15 +18,14 @@ const MAX_NAME: usize = 40;
 pub enum Item {
     Start,
     Ring,
-    Crawler,
-    Flyer,
-    Crab,
+    Badnik,
     Monitor,
     Spikes,
     Post,
     Goal,
     Boss,
     Spring,
+    Vent,
     Ground,
     Platform,
     Loop,
@@ -33,18 +33,17 @@ pub enum Item {
 }
 
 impl Item {
-    pub const ALL: [Item; 15] = [
+    pub const ALL: [Item; 14] = [
         Item::Start,
         Item::Ring,
-        Item::Crawler,
-        Item::Flyer,
-        Item::Crab,
+        Item::Badnik,
         Item::Monitor,
         Item::Spikes,
         Item::Post,
         Item::Goal,
         Item::Boss,
         Item::Spring,
+        Item::Vent,
         Item::Ground,
         Item::Platform,
         Item::Loop,
@@ -55,15 +54,14 @@ impl Item {
         match self {
             Item::Start => "Start",
             Item::Ring => "Rings",
-            Item::Crawler => "Crawler",
-            Item::Flyer => "Flyer",
-            Item::Crab => "Crab",
+            Item::Badnik => "Badnik",
             Item::Monitor => "Monitor",
             Item::Spikes => "Spikes",
             Item::Post => "Post",
             Item::Goal => "Goal",
             Item::Boss => "Boss",
             Item::Spring => "Spring",
+            Item::Vent => "Vent",
             Item::Ground => "Ground",
             Item::Platform => "Ledge",
             Item::Loop => "Loop",
@@ -76,14 +74,16 @@ impl Item {
         match self {
             Item::Start => "Click where the character starts (dropped onto the ground)",
             Item::Ring => "Click for a ring  ·  drag for a row of them",
-            Item::Crawler | Item::Crab => "Click above the ground to put a badnik on it",
-            Item::Flyer => "Click where the flyer hovers",
+            Item::Badnik => {
+                "Click to place (crawlers and crabs land on the ground)  ·  click Badnik again for another kind"
+            }
             Item::Monitor => "Click above the ground  ·  click Monitor again to change its item",
             Item::Spikes => "Click above the ground for a block of spikes",
             Item::Post => "Click above the ground for a star post (checkpoint)",
             Item::Goal => "Click above the ground for the goal signpost",
-            Item::Boss => "Click where the boss flies (it guards an arena around it)",
+            Item::Boss => "Click where the boss flies (it guards an arena)  ·  click Boss again: bomber or crane",
             Item::Spring => "Click above the ground for a spring",
+            Item::Vent => "Click above the sea floor for an air vent (big bubbles to breathe under water)",
             Item::Ground => "Drag across: solid ground from there down",
             Item::Platform => "Drag across for a ledge",
             Item::Loop => "Click above the ground for a loop",
@@ -96,6 +96,8 @@ impl Item {
 pub struct LevelView {
     pub item: Option<Item>,
     pub monitor: MonitorKind,
+    pub badnik: EnemyKind,
+    pub boss: BossKind,
     pub testing: bool,
     pub has_start: bool,
     pub has_end: bool,
@@ -114,7 +116,7 @@ struct Layout {
     play: Rect,
     save: Rect,
     exit: Rect,
-    items: [Rect; 15],
+    items: [Rect; Item::ALL.len()],
 }
 
 fn layout(top: f32) -> Layout {
@@ -124,7 +126,8 @@ fn layout(top: f32) -> Layout {
     let save = Rect::new(exit.x - 78.0, y, 70.0, 26.0);
     let play = Rect::new(save.x - 78.0, y, 70.0, 26.0);
     let name = Rect::new(x + 150.0, y, play.x - 10.0 - (x + 150.0), 26.0);
-    let w = (W - 28.0 - 14.0 * 3.0) / 15.0;
+    let n = Item::ALL.len() as f32;
+    let w = (W - 28.0 - 3.0 * (n - 1.0)) / n;
     let items = std::array::from_fn(|k| Rect::new(x + k as f32 * (w + 3.0), y + 34.0, w, 26.0));
     Layout { panel, name, play, save, exit, items }
 }
@@ -216,7 +219,15 @@ impl LevelBar {
             };
             rrect(*r, 6.0, bg);
             rrect_lines(*r, 6.0, 1.0, if on { ACCENT_HI } else { BORDER });
-            let label = if item == Item::Monitor && on { short(v.monitor) } else { item.label() };
+            let label = match item {
+                Item::Monitor if on => short(v.monitor),
+                Item::Badnik if on => v.badnik.label(),
+                Item::Boss if on => match v.boss {
+                    BossKind::Bomber => "Bomber",
+                    BossKind::Anchor => "Crane",
+                },
+                _ => item.label(),
+            };
             let w = measure(label, 10.5);
             text(label, r.x + (r.w - w) / 2.0, r.y + 17.0, 10.5, if item == Item::Erase { DANGER } else { TEXT });
         }

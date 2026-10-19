@@ -211,6 +211,13 @@ impl Sonic {
     /// carry on. Returns whether he steers as usual.
     pub(super) fn air_moves(&mut self, input: Input, events: &mut Vec<Event>) -> bool {
         let again = input.jump_pressed && self.jumping && !self.hurt;
+        // With every emerald and enough rings, jumping again turns him super first.
+        if again && self.can_super && !self.super_form {
+            self.super_form = true;
+            self.can_super = false;
+            events.push(Event::Transform);
+            return true;
+        }
         match self.character {
             Character::Tails if again && self.flying.is_none() => {
                 self.jumping = false;
@@ -428,6 +435,30 @@ mod tests {
         s.frame(w, &walls, press, None, 1.0);
         run(s, w, Input { jump: true, ..hold }, wait);
         s.frame(w, &walls, press, None, 1.0);
+    }
+
+    #[test]
+    fn jumping_again_turns_him_super_when_he_can() {
+        let w = world();
+        // Not yet: a plain second press does nothing for Sonic.
+        let mut s = standing(Character::Sonic, 500.0);
+        jump_then(&mut s, &w, Input::default(), 10);
+        assert!(!s.super_form);
+        let mut s = standing(Character::Sonic, 500.0);
+        s.can_super = true;
+        jump_then(&mut s, &w, Input::default(), 10);
+        assert!(s.super_form && !s.can_super);
+        // Faster on the ground.
+        let mut s = standing(Character::Sonic, 500.0);
+        s.super_form = true;
+        let right = Input { right: true, ..Input::default() };
+        run(&mut s, &w, right, 120);
+        assert!(s.gsp > 9.0, "super top speed, got {}", s.gsp);
+        // Tails turns super before he flies.
+        let mut s = standing(Character::Tails, 500.0);
+        s.can_super = true;
+        jump_then(&mut s, &w, Input::default(), 10);
+        assert!(s.super_form && s.flying.is_none());
     }
 
     #[test]

@@ -9,8 +9,6 @@
 pub const RATE: u32 = 22_050;
 
 /// A looping song.
-// Super Sonic and the special stages come in the next commit.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Song {
     Meadow,
@@ -26,8 +24,6 @@ pub enum Song {
 }
 
 /// A tune played once.
-// The emeralds and drowning come in the next commit.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Jingle {
     ActClear,

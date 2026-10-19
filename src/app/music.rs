@@ -1,7 +1,9 @@
 //! Sonic's music in the game mode: the zone's song (the endless run's
-//! zone, or the act's), the boss's in his arena, invincibility, and the
-//! jingles (act clear, 1-up, Game Over…). It keeps quiet while the player's
-//! own music plays. Songs are made once (see `audio::music`) and kept.
+//! zone, or the act's), the boss's in his arena, invincibility, Super
+//! Sonic's, the special stage's, and the jingles (act clear, 1-up, Game
+//! Over, an emerald, the drowning countdown). It keeps quiet while the
+//! player's own music plays. Songs are made once (see `audio::music`) and
+//! kept.
 
 use super::*;
 use crate::audio::music::{self, Jingle, Song};
@@ -14,8 +16,8 @@ pub(super) struct Music {
     tried: bool,
     songs: HashMap<Song, Vec<f32>>,
     playing: Option<(Song, Voice)>,
-    /// A jingle playing: when it ends, and whether the song comes back after.
-    jingle: Option<(f64, bool)>,
+    /// A jingle playing: which, when it ends, and its voice.
+    jingle: Option<(Jingle, f64, Option<Voice>)>,
     volume: f32,
 }
 
@@ -46,18 +48,14 @@ impl Music {
 
     /// Play `song` (or nothing) at `volume`; jingles hold the song back.
     fn update(&mut self, song: Option<Song>, volume: f32, now: f64) {
-        if let Some((end, resume)) = self.jingle {
-            if now < end {
+        if let Some((j, end, _)) = &self.jingle {
+            if now < *end {
                 return;
             }
-            self.jingle = None;
-            if !resume {
+            if j.ends_song() {
                 self.stop();
             }
-            if let Some((_, voice)) = &self.playing {
-                voice.set_volume(volume);
-                self.volume = volume;
-            }
+            self.end_jingle(volume);
         }
         match (song, &self.playing) {
             (None, Some(_)) => self.stop(),
@@ -74,6 +72,17 @@ impl Music {
         }
     }
 
+    /// The jingle is over (or cut short): the song comes back.
+    fn end_jingle(&mut self, volume: f32) {
+        if let Some((_, _, Some(voice))) = self.jingle.take() {
+            voice.stop();
+        }
+        if let Some((_, voice)) = &self.playing {
+            voice.set_volume(volume);
+            self.volume = volume;
+        }
+    }
+
     fn jingle(&mut self, j: Jingle, volume: f32, now: f64) {
         let samples = music::jingle(j);
         let secs = samples.len() as f64 / music::RATE as f64;
@@ -82,11 +91,18 @@ impl Music {
         } else if let Some((_, voice)) = &self.playing {
             voice.set_volume(0.0);
         }
-        if let Some(out) = self.output() {
-            let gained: Vec<f32> = samples.iter().map(|s| s * volume).collect();
-            out.play(gained, 1, music::RATE);
+        if let Some((_, _, Some(voice))) = self.jingle.take() {
+            voice.stop();
         }
-        self.jingle = Some((now + secs, !j.ends_song()));
+        let voice = self.output().and_then(|out| out.play_voice(samples, 1, music::RATE, volume));
+        self.jingle = Some((j, now + secs, voice));
+    }
+
+    /// Stop jingle `j` if it is playing (a breath of air ends the countdown).
+    fn cancel(&mut self, j: Jingle, volume: f32) {
+        if self.jingle.as_ref().is_some_and(|(playing, _, _)| *playing == j) {
+            self.end_jingle(volume);
+        }
     }
 }
 
@@ -100,9 +116,15 @@ impl App {
         if self.audio.now_playing().is_some_and(|n| n.playing) {
             return None;
         }
+        if self.special.is_some() {
+            return Some(Song::Special);
+        }
         let g = self.game.as_ref()?;
         if matches!(g.phase, crate::game::Phase::Over(_)) {
             return None;
+        }
+        if self.sonic.as_ref().is_some_and(|r| r.sonic.super_form) {
+            return Some(Song::Super);
         }
         if g.invincible > 0.0 {
             return Some(Song::Invincible);
@@ -113,7 +135,11 @@ impl App {
         if let Some(song) = self.endless_song() {
             return Some(song);
         }
-        Some(if g.spec.name.starts_with("Harbour") { Song::Harbour } else { Song::Meadow })
+        use crate::library::acts::{Zone, ALL};
+        Some(match self.act.and_then(|i| ALL.get(i)).map(|a| a.zone) {
+            Some(Zone::Harbour) => Song::Harbour,
+            _ => Song::Meadow,
+        })
     }
 
     /// Once a frame: the right song, at the right volume.
@@ -128,5 +154,9 @@ impl App {
             return;
         }
         self.music.jingle(j, self.s.music_volume, get_time());
+    }
+
+    pub(super) fn cancel_jingle(&mut self, j: Jingle) {
+        self.music.cancel(j, self.s.music_volume);
     }
 }

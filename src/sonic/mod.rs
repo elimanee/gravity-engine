@@ -50,6 +50,9 @@ const DRY: Consts =
     Consts { acc: 0.046875, dec: 0.5, frc: 0.046875, top: 6.0, air: 0.09375, grv: 0.21875, jmp: 6.5, release: 4.0 };
 const WET: Consts =
     Consts { acc: 0.0234375, dec: 0.25, frc: 0.0234375, top: 3.0, air: 0.046875, grv: 0.0625, jmp: 3.5, release: 2.0 };
+/// Super Sonic's, on land and underwater (Sonic 2's values).
+const SUPER: Consts = Consts { acc: 0.1875, dec: 1.0, top: 10.0, air: 0.375, jmp: 8.0, ..DRY };
+const SUPER_WET: Consts = Consts { acc: 0.09375, dec: 0.5, top: 5.0, air: 0.1875, ..WET };
 
 const SLOPE: f32 = 0.125;
 const SLOPE_ROLL_UP: f32 = 0.078125;
@@ -151,6 +154,8 @@ pub enum Event {
     Glide,
     Grab,
     Hammer,
+    /// Turned super.
+    Transform,
 }
 
 /// A sensor's find.
@@ -210,6 +215,10 @@ pub struct Sonic {
     pub dead: bool,
     /// Speed shoes (a monitor): twice as fast.
     pub shoes: bool,
+    /// Super: faster, jumps higher, nothing hurts him (the game drains his
+    /// rings). He turns super jumping again in the air when he can.
+    pub super_form: bool,
+    pub can_super: bool,
     /// Who this is, and their own moves (see [`moves`]).
     pub character: Character,
     /// Tails: frames flown since taking off (tired after 8 s).
@@ -286,6 +295,8 @@ impl Sonic {
             hurt: false,
             dead: false,
             shoes: false,
+            super_form: false,
+            can_super: false,
             character: Character::Sonic,
             flying: None,
             flap: false,
@@ -486,8 +497,12 @@ impl Sonic {
             }
             events.push(Event::Splash);
         }
-        let c = if self.underwater {
+        let c = if self.underwater && self.super_form {
+            SUPER_WET
+        } else if self.underwater {
             WET
+        } else if self.super_form {
+            SUPER
         } else if self.shoes {
             Consts { acc: 0.09375, frc: 0.09375, top: 12.0, air: 0.1875, ..DRY }
         } else {

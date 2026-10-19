@@ -120,6 +120,12 @@ impl App {
         self.library.fader.open = false;
     }
 
+    /// Act `i` straight away (`--act`).
+    pub fn play_act(&mut self, i: usize) {
+        self.title = None;
+        self.open_act(i);
+    }
+
     /// The act after the one being played, if there is one.
     pub(super) fn next_act(&self) -> Option<usize> {
         self.act.map(|i| i + 1).filter(|&i| i < acts::ALL.len())

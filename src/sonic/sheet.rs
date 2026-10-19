@@ -730,18 +730,92 @@ impl Sheet {
         );
     }
 
-    /// Draw him from the sheet (world pass).
+    /// Draw him from the sheet (world pass); golden when super.
     pub fn draw(&self, s: &Sonic) {
         let Some((anim, k)) = self.pick(s) else { return };
         let upright = !s.grounded || (s.gsp == 0.0 && super::mode_down(s.angle).y > 0.5 && s.angle.sin().abs() < 0.4);
         let angle = if upright && s.grounded { 0.0 } else { s.angle };
+        let golden = if s.super_form { golden_material() } else { None };
+        if let Some(m) = &golden {
+            gl_use_material(m);
+            m.set_uniform("shine", (get_time() as f32 * 10.0).sin());
+            // Sonic's blue turns gold; the others brighten all over.
+            m.set_uniform("whole", if s.character == Character::Sonic { 0.0f32 } else { 1.0 });
+        }
         if !anim.behind.is_empty() {
             // Tails' tails swish on their own clock.
             let t = (get_time() * if s.flying.is_some() { 20.0 } else { 8.0 }) as usize;
             self.blit(anim.behind[t % anim.behind.len()], s, angle);
         }
         self.blit(anim.pics[k], s, angle);
+        if golden.is_some() {
+            gl_use_default_material();
+        }
     }
+}
+
+const GOLDEN_VERTEX: &str = r#"#version 100
+attribute vec3 position;
+attribute vec2 texcoord;
+attribute vec4 color0;
+varying lowp vec2 uv;
+varying lowp vec4 color;
+uniform mat4 Model;
+uniform mat4 Projection;
+void main() {
+    gl_Position = Projection * Model * vec4(position, 1);
+    color = color0 / 255.0;
+    uv = texcoord;
+}
+"#;
+
+const GOLDEN_FRAGMENT: &str = r#"#version 100
+precision mediump float;
+varying lowp vec4 color;
+varying lowp vec2 uv;
+uniform sampler2D Texture;
+uniform float shine;
+uniform float whole;
+void main() {
+    vec4 c = texture2D(Texture, uv) * color;
+    float blue = c.b - max(c.r, c.g);
+    if (whole > 0.5) {
+        c.rgb = mix(c.rgb, vec3(1.0, 0.95, 0.7), 0.35 + shine * 0.1);
+    } else if (blue > 0.1) {
+        float l = (c.r + c.g + c.b) / 3.0 + c.b * 0.35;
+        c.rgb = min(vec3(1.0, 0.85, 0.3) * (0.55 + l * 0.9) + shine * 0.08, vec3(1.0));
+    }
+    gl_FragColor = c;
+}
+"#;
+
+thread_local! {
+    static GOLDEN: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+}
+
+/// The shader that turns a sprite golden (made once; None if it cannot be).
+fn golden_material() -> Option<Material> {
+    GOLDEN.with(|cell| {
+        cell.get_or_init(|| {
+            use miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams};
+            let blend = BlendState::new(
+                Equation::Add,
+                BlendFactor::Value(BlendValue::SourceAlpha),
+                BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+            );
+            let params = MaterialParams {
+                uniforms: vec![
+                    UniformDesc::new("shine", UniformType::Float1),
+                    UniformDesc::new("whole", UniformType::Float1),
+                ],
+                pipeline_params: PipelineParams { color_blend: Some(blend), ..Default::default() },
+                ..Default::default()
+            };
+            let source = ShaderSource::Glsl { vertex: GOLDEN_VERTEX, fragment: GOLDEN_FRAGMENT };
+            load_material(source, params).ok()
+        })
+        .clone()
+    })
 }
 
 fn upload(img: &image::RgbaImage) -> Texture2D {
