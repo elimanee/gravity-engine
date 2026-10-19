@@ -4,9 +4,9 @@
 //! - Sonic: a PNG cut up by a `sheet.json` beside it, or by the built-in
 //!   layout of Triangly's Sonic 1 sheet (The Spriters Resource);
 //! - `tails.png`, `knuckles.png`, `amy.png` / `amy.webp`: the Sonic 3
-//!   Tails and Sonic 3 & Knuckles Knuckles sheets (The Spriters Resource)
-//!   and CartoonsAnimate22's Amy sheet (its Sonic Mania style), each
-//!   recognised by its size.
+//!   Tails and Sonic 3 & Knuckles Knuckles sheets (The Spriters Resource),
+//!   and CartoonsAnimate22's Amy sheet (its Sonic Mania style) or
+//!   DeltaConduit's (in the style of Sonic 1), each recognised by its size.
 //!
 //! A picture is drawn with the character's centre at the point the layout
 //! gives (for the built-in sheets, worked out from the pixels: the feet,
@@ -83,10 +83,18 @@ struct Spec {
     fit: Fit,
     pics: &'static [[u16; 4]],
     behind: &'static [[u16; 4]],
+    /// Where the centre is in each picture (x, y from its top-left), when
+    /// the pixels would mislead (a hammer swung beside her).
+    at: &'static [[u16; 2]],
 }
 
 const fn spec(name: &'static str, fit: Fit, pics: &'static [[u16; 4]]) -> Spec {
-    Spec { name, fit, pics, behind: &[] }
+    Spec { name, fit, pics, behind: &[], at: &[] }
+}
+
+/// Pictures with their centres given.
+const fn placed(name: &'static str, pics: &'static [[u16; 4]], at: &'static [[u16; 2]]) -> Spec {
+    Spec { name, fit: Fit::Middle, pics, behind: &[], at }
 }
 
 /// A built-in sheet: its size, background colours, whether its pictures
@@ -120,15 +128,16 @@ const TAILS: Builtin = Builtin {
     lossy: false,
     boxed: true,
     specs: &[
-        Spec { name: "idle", fit: Fit::Feet, pics: &[b48(24, 335)], behind: TAILS_WAG },
+        Spec { name: "idle", fit: Fit::Feet, pics: &[b48(24, 335)], behind: TAILS_WAG, at: &[] },
         Spec {
             name: "bored",
             fit: Fit::Feet,
             pics: &[b48(24, 408), b48(76, 408), b48(128, 408), b48(180, 408), b48(232, 408)],
             behind: TAILS_WAG,
+            at: &[],
         },
-        Spec { name: "look_up", fit: Fit::Feet, pics: &[b48(24, 481)], behind: TAILS_WAG },
-        Spec { name: "crouch", fit: Fit::Feet, pics: &[b48(76, 481)], behind: TAILS_WAG },
+        Spec { name: "look_up", fit: Fit::Feet, pics: &[b48(24, 481)], behind: TAILS_WAG, at: &[] },
+        Spec { name: "crouch", fit: Fit::Feet, pics: &[b48(76, 481)], behind: TAILS_WAG, at: &[] },
         spec(
             "walk",
             Fit::Feet,
@@ -149,25 +158,28 @@ const TAILS: Builtin = Builtin {
             fit: Fit::Middle,
             pics: &[b48(314, 401), b48(366, 401), b48(418, 401)],
             behind: TAILS_ROLL,
+            at: &[],
         },
         Spec {
             name: "spindash",
             fit: Fit::Feet,
             pics: &[b48(590, 337), b48(642, 337), b48(694, 337)],
             behind: TAILS_DASH,
+            at: &[],
         },
-        Spec { name: "skid", fit: Fit::Feet, pics: &[b48(590, 466), b48(642, 466)], behind: TAILS_DASH },
+        Spec { name: "skid", fit: Fit::Feet, pics: &[b48(590, 466), b48(642, 466)], behind: TAILS_DASH, at: &[] },
         Spec {
             name: "push",
             fit: Fit::Feet,
             pics: &[b48(590, 539), b48(642, 539), b48(694, 539), b48(746, 539)],
             behind: TAILS_DASH,
+            at: &[],
         },
         spec("spring", Fit::Middle, &[[808, 720, 48, 57], [860, 720, 48, 57]]),
         spec("hurt", Fit::Middle, &[b48(848, 647)]),
         spec("dead", Fit::Middle, &[b48(968, 647)]),
         spec("balance", Fit::Feet, &[b48(1036, 647), b48(1088, 647)]),
-        Spec { name: "fly", fit: Fit::Middle, pics: &[b48(1044, 337)], behind: TAILS_ROTOR },
+        Spec { name: "fly", fit: Fit::Middle, pics: &[b48(1044, 337)], behind: TAILS_ROTOR, at: &[] },
         spec("fly_tired", Fit::Middle, &[b48(1044, 410), b48(1096, 410)]),
     ],
 };
@@ -358,7 +370,72 @@ const AMY: Builtin = Builtin {
     ],
 };
 
-const BUILTINS: [&Builtin; 3] = [&TAILS, &KNUCKLES, &AMY];
+// DeltaConduit's Amy in the style of Sonic 1 (583 × 570): each picture in
+// its own box cut tight around her.
+const AMY_S1: Builtin = Builtin {
+    character: Character::Amy,
+    size: (583, 570),
+    // The page, the boxes and the lines between the spinning pictures.
+    background: &[[108, 180, 252], [36, 108, 180], [72, 144, 216]],
+    lossy: false,
+    boxed: false,
+    specs: &[
+        spec("idle", Fit::Feet, &[[35, 63, 23, 36]]),
+        spec("bored", Fit::Feet, &[[59, 63, 23, 36], [83, 63, 23, 36], [107, 63, 22, 36], [83, 63, 23, 36]]),
+        spec("look_up", Fit::Feet, &[[139, 63, 24, 36]]),
+        spec("crouch", Fit::Feet, &[[173, 75, 28, 24]]),
+        spec(
+            "walk",
+            Fit::Feet,
+            &[
+                [211, 64, 22, 35],
+                [234, 62, 30, 35],
+                [265, 63, 27, 35],
+                [293, 64, 21, 35],
+                [315, 62, 33, 34],
+                [349, 63, 28, 34],
+            ],
+        ),
+        spec("run", Fit::Feet, &[[2, 130, 31, 33], [34, 130, 27, 33], [62, 130, 30, 33], [93, 130, 27, 33]]),
+        spec("skid", Fit::Feet, &[[261, 129, 35, 34], [297, 129, 34, 34]]),
+        spec(
+            "spindash",
+            Fit::Middle,
+            &[[341, 136, 32, 27], [374, 136, 31, 27], [406, 136, 31, 27], [438, 136, 31, 27], [470, 136, 31, 27]],
+        ),
+        // The ball, between the turning pictures.
+        spec(
+            "roll",
+            Fit::Middle,
+            &[
+                [32, 202, 29, 29],
+                [2, 202, 29, 29],
+                [62, 202, 29, 29],
+                [2, 202, 29, 29],
+                [92, 202, 29, 29],
+                [2, 202, 29, 29],
+                [122, 202, 29, 29],
+                [2, 202, 29, 29],
+            ],
+        ),
+        spec("push", Fit::Feet, &[[2, 256, 24, 32], [27, 255, 18, 33], [46, 256, 22, 32], [69, 255, 18, 33]]),
+        spec("spring", Fit::Middle, &[[242, 247, 20, 41]]),
+        spec("hurt", Fit::Middle, &[[2, 321, 35, 30]]),
+        spec("dead", Fit::Middle, &[[86, 312, 32, 39]]),
+        placed(
+            "hammer",
+            &[[161, 198, 43, 33], [205, 190, 63, 41], [269, 198, 43, 33]],
+            &[[21, 17], [33, 23], [15, 17]],
+        ),
+        placed(
+            "hammer_air",
+            &[[322, 198, 42, 33], [365, 196, 22, 35], [388, 199, 42, 31], [365, 196, 22, 35]],
+            &[[13, 16], [11, 17], [17, 15], [11, 17]],
+        ),
+    ],
+};
+
+const BUILTINS: [&Builtin; 4] = [&TAILS, &KNUCKLES, &AMY, &AMY_S1];
 
 /// The file a character's sheet is kept in (Sonic: any other PNG).
 fn file_names(c: Character) -> &'static [&'static str] {
@@ -537,9 +614,11 @@ fn cut(img: &image::RgbaImage, b: &Builtin, s: &Spec) -> Anim {
     };
     let pics = measured
         .iter()
-        .map(|&(r, m)| {
-            let centre = match m {
-                Some(m) if !b.boxed => centre_of(m) - vec2(r[0] as f32, r[1] as f32),
+        .enumerate()
+        .map(|(k, &(r, m))| {
+            let centre = match (s.at.get(k), m) {
+                (Some(&[x, y]), _) => vec2(x as f32, y as f32),
+                (None, Some(m)) if !b.boxed => centre_of(m) - vec2(r[0] as f32, r[1] as f32),
                 _ => vec2(dx, dy),
             };
             Pic { src: rect(r), centre }
@@ -559,10 +638,10 @@ impl Sheet {
         }
         let Some(path) = file_names(c).iter().map(|n| dir.join(n)).find(|p| p.is_file()) else { return Ok(None) };
         let mut img = image::open(&path).map_err(|e| e.to_string())?.to_rgba8();
-        let Some(b) = BUILTINS.iter().find(|b| b.character == c) else { return Ok(None) };
-        if img.dimensions() != b.size {
-            return Err(format!("not the expected sheet ({}×{})", img.width(), img.height()));
-        }
+        // A character may have more than one known sheet: its size says which.
+        let Some(b) = BUILTINS.iter().find(|b| b.character == c && b.size == img.dimensions()) else {
+            return Err(format!("not a known sheet ({}×{})", img.width(), img.height()));
+        };
         if b.lossy {
             clear_background_near(&mut img, b.background);
         } else {
@@ -730,18 +809,92 @@ impl Sheet {
         );
     }
 
-    /// Draw him from the sheet (world pass).
+    /// Draw him from the sheet (world pass); golden when super.
     pub fn draw(&self, s: &Sonic) {
         let Some((anim, k)) = self.pick(s) else { return };
         let upright = !s.grounded || (s.gsp == 0.0 && super::mode_down(s.angle).y > 0.5 && s.angle.sin().abs() < 0.4);
         let angle = if upright && s.grounded { 0.0 } else { s.angle };
+        let golden = if s.super_form { golden_material() } else { None };
+        if let Some(m) = &golden {
+            gl_use_material(m);
+            m.set_uniform("shine", (get_time() as f32 * 10.0).sin());
+            // Sonic's blue turns gold; the others brighten all over.
+            m.set_uniform("whole", if s.character == Character::Sonic { 0.0f32 } else { 1.0 });
+        }
         if !anim.behind.is_empty() {
             // Tails' tails swish on their own clock.
             let t = (get_time() * if s.flying.is_some() { 20.0 } else { 8.0 }) as usize;
             self.blit(anim.behind[t % anim.behind.len()], s, angle);
         }
         self.blit(anim.pics[k], s, angle);
+        if golden.is_some() {
+            gl_use_default_material();
+        }
     }
+}
+
+const GOLDEN_VERTEX: &str = r#"#version 100
+attribute vec3 position;
+attribute vec2 texcoord;
+attribute vec4 color0;
+varying lowp vec2 uv;
+varying lowp vec4 color;
+uniform mat4 Model;
+uniform mat4 Projection;
+void main() {
+    gl_Position = Projection * Model * vec4(position, 1);
+    color = color0 / 255.0;
+    uv = texcoord;
+}
+"#;
+
+const GOLDEN_FRAGMENT: &str = r#"#version 100
+precision mediump float;
+varying lowp vec4 color;
+varying lowp vec2 uv;
+uniform sampler2D Texture;
+uniform float shine;
+uniform float whole;
+void main() {
+    vec4 c = texture2D(Texture, uv) * color;
+    float blue = c.b - max(c.r, c.g);
+    if (whole > 0.5) {
+        c.rgb = mix(c.rgb, vec3(1.0, 0.95, 0.7), 0.35 + shine * 0.1);
+    } else if (blue > 0.1) {
+        float l = (c.r + c.g + c.b) / 3.0 + c.b * 0.35;
+        c.rgb = min(vec3(1.0, 0.85, 0.3) * (0.55 + l * 0.9) + shine * 0.08, vec3(1.0));
+    }
+    gl_FragColor = c;
+}
+"#;
+
+thread_local! {
+    static GOLDEN: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+}
+
+/// The shader that turns a sprite golden (made once; None if it cannot be).
+fn golden_material() -> Option<Material> {
+    GOLDEN.with(|cell| {
+        cell.get_or_init(|| {
+            use miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams};
+            let blend = BlendState::new(
+                Equation::Add,
+                BlendFactor::Value(BlendValue::SourceAlpha),
+                BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+            );
+            let params = MaterialParams {
+                uniforms: vec![
+                    UniformDesc::new("shine", UniformType::Float1),
+                    UniformDesc::new("whole", UniformType::Float1),
+                ],
+                pipeline_params: PipelineParams { color_blend: Some(blend), ..Default::default() },
+                ..Default::default()
+            };
+            let source = ShaderSource::Glsl { vertex: GOLDEN_VERTEX, fragment: GOLDEN_FRAGMENT };
+            load_material(source, params).ok()
+        })
+        .clone()
+    })
 }
 
 fn upload(img: &image::RgbaImage) -> Texture2D {
@@ -782,6 +935,11 @@ mod tests {
                 for r in s.pics.iter().chain(s.behind) {
                     let (w, h) = b.size;
                     assert!((r[0] + r[2]) as u32 <= w && (r[1] + r[3]) as u32 <= h, "{} {r:?}", s.name);
+                }
+                // Centres given for every picture (or none), inside them.
+                assert!(s.at.is_empty() || s.at.len() == s.pics.len(), "{} centres", s.name);
+                for (r, c) in s.pics.iter().zip(s.at) {
+                    assert!(c[0] < r[2] && c[1] < r[3], "{} centre {c:?} in {r:?}", s.name);
                 }
             }
             assert_eq!(character_of(b.size), Some(b.character));

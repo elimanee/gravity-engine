@@ -6,7 +6,6 @@ use std::collections::VecDeque;
 use std::f32::consts::PI;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// FFT window length (samples).
 pub const FFT_SIZE: usize = 2048;
@@ -18,7 +17,7 @@ pub const WAVE_POINTS: usize = 256;
 const STALE_MS: u64 = 150;
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+    crate::util::now_ms()
 }
 
 /// Ring of the most recent mono samples, written by the audio threads.
@@ -42,6 +41,7 @@ impl Tap {
     /// Append interleaved samples (mixed down to mono). Never blocks: if the
     /// buffer is busy the chunk is simply dropped, which is fine for a visualizer
     /// and keeps real-time audio callbacks safe.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub fn push_interleaved(&self, data: &[f32], channels: usize, sample_rate: u32) {
         let channels = channels.max(1);
         let Ok(mut buf) = self.samples.try_lock() else { return };

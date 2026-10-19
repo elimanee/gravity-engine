@@ -3,8 +3,18 @@
 
 pub mod analyzer;
 pub mod eq;
+pub mod music;
+pub mod out;
 pub mod sfx;
+#[cfg(not(target_arch = "wasm32"))]
 mod stream;
+#[cfg(target_arch = "wasm32")]
+#[path = "stream_web.rs"]
+mod stream;
+#[cfg(not(target_arch = "wasm32"))]
+mod tracker;
+#[cfg(target_arch = "wasm32")]
+#[path = "tracker_web.rs"]
 mod tracker;
 
 use crate::config::{ext_of, file_name_of, PLAYLIST_EXT, TRACKER_EXT};

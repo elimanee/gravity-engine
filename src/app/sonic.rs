@@ -294,6 +294,14 @@ impl App {
                     self.sound(Sound::Dash, s.pos, 0.45);
                     self.pad.rumble(0.3, 0.1);
                 }
+                Event::Transform => {
+                    self.sound(Sound::Transform, s.pos, 0.7);
+                    self.pad.rumble(0.6, 0.3);
+                    if self.s.effects {
+                        self.effects.sparks(s.pos, vec2(0.0, -1.0), 24.0);
+                    }
+                    self.toasts.success(format!("Super {}!", s.character.label()));
+                }
                 Event::Land => {
                     if self.s.effects && s.gsp.abs() > 4.0 {
                         self.effects.dust(feet, s.gsp.abs());

@@ -62,6 +62,12 @@ fn look(c: Character) -> Look {
     }
 }
 
+/// Super: golden fur, shimmering.
+fn golden(l: Look, t: f32) -> Look {
+    let shine = 0.1 * (t * 10.0).sin();
+    Look { main: Color::new(1.0, 0.84 + shine, 0.22 + shine, 1.0), dark: Color::new(0.9, 0.62, 0.08, 1.0), ..l }
+}
+
 /// Local guide pixels (x forward, y down) → world pixels.
 struct Frame {
     at: Vec2,
@@ -116,7 +122,7 @@ pub fn draw(s: &Sonic) {
     }
     let (sin, cos) = angle.sin_cos();
     let f = Frame { at, sin, cos, facing: s.facing, scale: super::SCALE };
-    let l = look(s.character);
+    let l = if s.super_form { golden(look(s.character), get_time() as f32) } else { look(s.character) };
     if s.is_ball() && !(s.hammer_air && s.hammer.is_some()) {
         ball(&f, s, &l);
         if s.character == Character::Tails {

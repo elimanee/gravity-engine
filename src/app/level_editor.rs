@@ -1,10 +1,12 @@
 //! The Sonic level editor: lay out a level in the infinite world (ground,
 //! ledges, loops, springs, and anything the sandbox tools make), place
-//! the start, rings, badniks, monitors, spikes, star posts, the goal and
-//! a boss, play it, and save it to "My levels" (Library → Sonic).
+//! the start, rings, badniks, monitors, spikes, star posts, air vents, the
+//! goal and a boss, play it, and save it to "My levels" (Library → Sonic).
 
 use super::*;
-use crate::game::{art as game_art, EnemyKind, Game, LevelSpec, MonitorKind, Placed, ARENA_HALF, MONITOR, SPIKES};
+use crate::game::{
+    art as game_art, BossKind, EnemyKind, Game, LevelSpec, MonitorKind, Placed, ARENA_HALF, MONITOR, SPIKES,
+};
 use crate::library::{levels, Builder, LEAF, STONE, WOOD};
 use crate::sonic::SCALE;
 use crate::ui::level_bar::{Item, LevelView};
@@ -24,6 +26,7 @@ pub(super) struct LevelEditor {
     pub path: Option<PathBuf>,
     pub item: Option<Item>,
     pub monitor: MonitorKind,
+    pub badnik: EnemyKind,
     /// Where a drag started (ground, ledge, row of rings), and the last ring laid.
     drag: Option<Vec2>,
     last_ring: Option<Vec2>,
@@ -50,6 +53,7 @@ impl App {
             path: None,
             item: None,
             monitor: MonitorKind::Rings,
+            badnik: EnemyKind::Crawler,
             drag: None,
             last_ring: None,
             spec: LevelSpec::default(),
@@ -149,6 +153,8 @@ impl App {
         Some(LevelView {
             item: ed.item,
             monitor: ed.monitor,
+            badnik: ed.badnik,
+            boss: ed.spec.boss_kind,
             testing: ed.testing.is_some(),
             has_start: ed.start.is_some(),
             has_end: ed.spec.goal.is_some() || ed.spec.boss.is_some(),
@@ -165,10 +171,21 @@ impl App {
         let Some(ed) = self.level_editor.as_mut() else { return };
         match cmd {
             LevelCmd::Pick(item) => {
-                if ed.item == Some(Item::Monitor) && item == Item::Monitor {
-                    // Again on Monitor: the next item in it.
+                // Again on Monitor, Badnik or Boss: the next kind.
+                let again = ed.item == Some(item);
+                if again && item == Item::Monitor {
                     let i = MonitorKind::ALL.iter().position(|&k| k == ed.monitor).unwrap_or(0);
                     ed.monitor = MonitorKind::ALL[(i + 1) % MonitorKind::ALL.len()];
+                } else if again && item == Item::Badnik {
+                    let i = EnemyKind::ALL.iter().position(|&k| k == ed.badnik).unwrap_or(0);
+                    ed.badnik = EnemyKind::ALL[(i + 1) % EnemyKind::ALL.len()];
+                } else if again && item == Item::Boss {
+                    let i = BossKind::ALL.iter().position(|&k| k == ed.spec.boss_kind).unwrap_or(0);
+                    ed.spec.boss_kind = BossKind::ALL[(i + 1) % BossKind::ALL.len()];
+                    ed.saved = false;
+                    ed.drag = None;
+                    self.level_preview();
+                    return;
                 } else {
                     ed.item = if ed.item == Some(item) { None } else { Some(item) };
                 }
@@ -284,11 +301,12 @@ impl App {
                 ed.drag = Some(m);
                 ed.last_ring = Some(m);
             }
-            Item::Crawler | Item::Crab => {
-                let kind = if item == Item::Crab { EnemyKind::Crab } else { EnemyKind::Crawler };
-                ed.spec.enemies.push(Placed { kind, at: at(vec2(m.x, g - 17.0)) });
+            Item::Badnik => {
+                let kind = ed.badnik;
+                let p = if walks(kind) { vec2(m.x, g - 17.0) } else { m };
+                ed.spec.enemies.push(Placed { kind, at: at(p) });
             }
-            Item::Flyer => ed.spec.enemies.push(Placed { kind: EnemyKind::Flyer, at: at(m) }),
+            Item::Vent => ed.spec.vents.push(at(vec2(m.x, g))),
             Item::Monitor => ed.spec.monitors.push(Placed { kind: ed.monitor, at: at(vec2(m.x, g - MONITOR.y / 2.0)) }),
             Item::Spikes => ed.spec.spikes.push(at(vec2(m.x, g - SPIKES.y / 2.0))),
             Item::Post => ed.spec.posts.push(at(vec2(m.x, g - 40.0))),
@@ -371,7 +389,7 @@ impl App {
         let near = |p: [f32; 2]| (crate::physics::to_screen(p[0], p[1]) - m).length() < ERASE_REACH;
         let Some(ed) = self.level_editor.as_mut() else { return };
         let s = &mut ed.spec;
-        let before = (s.enemies.len(), s.monitors.len(), s.spikes.len(), s.posts.len(), s.goal, s.boss);
+        let before = (s.enemies.len(), s.monitors.len(), s.spikes.len(), s.posts.len() + s.vents.len(), s.goal, s.boss);
         if let Some(i) = s.enemies.iter().position(|e| near(e.at)) {
             s.enemies.remove(i);
         } else if let Some(i) = s.monitors.iter().position(|e| near(e.at)) {
@@ -380,12 +398,15 @@ impl App {
             s.spikes.remove(i);
         } else if let Some(i) = s.posts.iter().position(|&p| near(p)) {
             s.posts.remove(i);
+        } else if let Some(i) = s.vents.iter().position(|&p| near(p)) {
+            s.vents.remove(i);
         } else if s.goal.is_some_and(near) {
             s.goal = None;
         } else if s.boss.is_some_and(near) {
             s.boss = None;
         }
-        let changed = before != (s.enemies.len(), s.monitors.len(), s.spikes.len(), s.posts.len(), s.goal, s.boss);
+        let changed = before
+            != (s.enemies.len(), s.monitors.len(), s.spikes.len(), s.posts.len() + s.vents.len(), s.goal, s.boss);
         if changed {
             ed.saved = false;
             self.level_preview();
@@ -451,7 +472,11 @@ impl App {
             }
         }
         // Where a click would put it.
-        let dropped = ed.item.is_some_and(|i| !matches!(i, Item::Ring | Item::Flyer | Item::Boss | Item::Erase));
+        let dropped = ed.item.is_some_and(|i| match i {
+            Item::Ring | Item::Boss | Item::Erase => false,
+            Item::Badnik => walks(ed.badnik),
+            _ => true,
+        });
         if dropped && ed.drag.is_none() {
             let g = self.ground_under(m);
             draw_line(m.x, m.y, m.x, g, 1.0, Color::new(1.0, 1.0, 1.0, 0.35));
@@ -484,4 +509,9 @@ impl App {
             Err(e) => self.toasts.error(format!("Could not open the level: {e}")),
         }
     }
+}
+
+/// Badniks that walk on the ground (the others float where placed).
+fn walks(kind: EnemyKind) -> bool {
+    matches!(kind, EnemyKind::Crawler | EnemyKind::Crab)
 }

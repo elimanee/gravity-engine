@@ -300,6 +300,17 @@ impl LevelSky {
         sun: 0.0,
     };
 
+    /// Harbour: a warm afternoon over the sea, grey-blue headlands.
+    pub const HARBOUR: LevelSky = LevelSky {
+        top: rgb(52, 108, 196),
+        mid: rgb(126, 176, 226),
+        low: rgb(250, 214, 168),
+        far: rgb(118, 146, 176),
+        near: rgb(74, 112, 140),
+        cloud: Color::new(1.0, 0.96, 0.9, 0.85),
+        sun: 0.9,
+    };
+
     /// From `self` to `other` as `t` goes from 0 to 1.
     pub fn mix(&self, other: &LevelSky, t: f32) -> LevelSky {
         let t = t.clamp(0.0, 1.0);

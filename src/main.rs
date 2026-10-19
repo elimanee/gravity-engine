@@ -4,7 +4,7 @@
 //! buttons; every one of them becomes a rigid body. Press F1 in the app for
 //! the full list of controls.
 //!
-//! Usage: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files may
+//! Usage: `gravity_engine [--no-title] [--benchmark] [--act=N] [--special-stage=N] [FILES…]` — files may
 //! be images, audio (tracker modules, mp3/flac/ogg/…, .pls playlists) or
 //! `.gscene` scenes.
 
@@ -17,6 +17,7 @@ mod audio;
 mod background;
 mod camera;
 mod config;
+mod dialog;
 mod drawing;
 mod effects;
 mod game;
@@ -33,12 +34,21 @@ mod settings;
 mod shapes;
 mod skin;
 mod sonic;
+mod special;
+mod storage;
 mod ui;
 mod util;
 mod weather;
 mod window_tracker;
 
 use macroquad::prelude::*;
+
+/// Lets the web page's `gravity_web.js` check that it matches this build.
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn gravity_web_crate_version() -> u32 {
+    1
+}
 
 fn window_conf() -> Conf {
     Conf {
@@ -57,6 +67,8 @@ async fn main() {
     let mut skip_title = false;
     let mut verify = None;
     let mut benchmark = false;
+    let mut act = None;
+    let mut special = None;
     let mut files = vec![];
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
@@ -65,10 +77,17 @@ async fn main() {
             // Development: play every challenge's reference solution.
             "--verify-challenges" => verify = Some(None),
             a if a.starts_with("--verify-challenge=") => verify = Some(a[19..].parse::<usize>().ok().map(|n| n - 1)),
+            // Development: straight into Sonic act N, or special stage N.
+            a if a.starts_with("--act=") => act = a[6..].parse::<usize>().ok().and_then(|n| n.checked_sub(1)),
+            a if a.starts_with("--special-stage=") => {
+                special = a[16..].parse::<usize>().ok().and_then(|n| n.checked_sub(1));
+            }
             "-h" | "--help" => {
                 println!(
-                    "usage: gravity_engine [--no-title] [--benchmark] [FILES…]\n\n  \
-                     --benchmark  run stress scenes, print frame times and quit\n\n\
+                    "usage: gravity_engine [--no-title] [--benchmark] [--act=N] [--special-stage=N] [FILES…]\n\n  \
+                     --benchmark        run stress scenes, print frame times and quit\n  \
+                     --act=N            play Sonic act N (1-6)\n  \
+                     --special-stage=N  play special stage N (1-7)\n\n\
                      Press F1 in the app for controls."
                 );
                 return;
@@ -92,15 +111,23 @@ async fn main() {
     if benchmark {
         app.start_benchmark();
     }
+    if let Some(i) = act {
+        app.play_act(i);
+    }
+    if let Some(i) = special {
+        app.play_special(i);
+    }
     loop {
         app.frame();
         if app.benchmark_done() {
             // Exit without saving the settings the benchmark changed.
             std::process::exit(0);
         }
-        if app.quit || is_quit_requested() {
+        // A web page cannot quit: the tab is closed instead.
+        if (app.quit || is_quit_requested()) && !cfg!(target_arch = "wasm32") {
             break;
         }
+        app.quit = false;
         next_frame().await;
     }
     // Settings are saved when `app` is dropped.

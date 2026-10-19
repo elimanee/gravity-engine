@@ -13,7 +13,7 @@ pub mod levels;
 
 use crate::config::PPM;
 use crate::drawing;
-use crate::game::{self, EnemyKind, LevelSpec, MonitorKind, Placed};
+use crate::game::{self, BossKind, EnemyKind, LevelSpec, MonitorKind, Placed};
 use crate::physics::borders::BorderMode;
 use crate::physics::gadgets::{GadgetKind, GadgetSpec, Trigger};
 use crate::physics::links::LinkKind;
@@ -272,6 +272,16 @@ impl Builder {
         self.level().boss = Some(at);
     }
 
+    pub fn boss_kind(&mut self, kind: BossKind) {
+        self.level().boss_kind = kind;
+    }
+
+    /// An air bubble vent on the ground at `ground` (under water).
+    pub fn vent(&mut self, x: f32, ground: f32) {
+        let at = self.phys(x, ground);
+        self.level().vents.push(at);
+    }
+
     /// Solid ground from x0 to x1, its top at `top`, down to the bottom of
     /// the world, with a strip of grass (or `edge`) along the top.
     pub fn ground(&mut self, x0: f32, x1: f32, top: f32, rgb: [u8; 3], edge: [u8; 3]) {
@@ -305,6 +315,18 @@ impl Builder {
         }
     }
 
+    /// A solid block from x0 to x1, between `top` and `bottom` (in pieces
+    /// at most 600 px wide), with a strip of `edge` along its top.
+    pub fn block(&mut self, x0: f32, x1: f32, top: f32, bottom: f32, rgb: [u8; 3], edge: [u8; 3]) {
+        let m = Material { flammable: false, friction: 0.6, bounce: 0.05, ..Material::DEFAULT };
+        let n = ((x1 - x0) / 600.0).ceil().max(1.0) as usize;
+        for k in 0..n {
+            let (a, b) = (x0 + (x1 - x0) * k as f32 / n as f32, x0 + (x1 - x0) * (k + 1) as f32 / n as f32);
+            self.stroke(&[(a, top), (b, top), (b, bottom), (a, bottom), (a, top)], 4.0, rgb, true, m);
+            self.stroke(&dense(&[(a, top), (b, top)]), 10.0, edge, true, m);
+        }
+    }
+
     /// A floating platform plank from x0 to x1 at height y.
     pub fn platform(&mut self, x0: f32, x1: f32, y: f32, rgb: [u8; 3]) {
         let m = Material { flammable: false, friction: 0.6, bounce: 0.05, ..Material::DEFAULT };
@@ -325,6 +347,12 @@ impl Builder {
 
     pub fn water(&mut self, level: f32, density: f32) {
         self.scene.water = Some(SceneWater { level, density });
+    }
+
+    /// Water up to design height `y`.
+    pub fn water_to(&mut self, y: f32, density: f32) {
+        let level = (self.sh - (y + self.dy)) / self.sh;
+        self.water(level, density);
     }
 }
 

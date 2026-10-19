@@ -121,6 +121,9 @@ pub struct Settings {
     /// Procedural sound effects (hits, breaking glass, explosions…).
     pub sfx: bool,
     pub sfx_volume: f32,
+    /// Sonic's music and jingles in the game mode.
+    pub sonic_music: bool,
+    pub music_volume: f32,
     /// Time slows down for a moment on big impacts and explosions.
     pub slow_motion: bool,
 
@@ -131,6 +134,8 @@ pub struct Settings {
     pub character: crate::sonic::Character,
     /// Best score per Sonic act cleared (by act name).
     pub act_scores: std::collections::BTreeMap<String, u32>,
+    /// The chaos emeralds found in special stages (one bit each).
+    pub emeralds: u8,
 
     /// Rain, snow or storm over the world.
     pub weather: crate::weather::Weather,
@@ -204,10 +209,13 @@ impl Default for Settings {
             playlist: vec![],
             sfx: true,
             sfx_volume: 0.6,
+            sonic_music: true,
+            music_volume: 0.5,
             slow_motion: true,
             show_title: true,
             sonic_best: 0.0,
             act_scores: Default::default(),
+            emeralds: 0,
             character: Default::default(),
             weather: Default::default(),
             night: false,
@@ -243,7 +251,7 @@ impl Settings {
 
     pub fn load() -> Self {
         Self::path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|p| crate::storage::read_to_string(&p).ok())
             .and_then(|s| serde_json::from_str::<Settings>(&s).ok())
             .map(Settings::sanitized)
             .unwrap_or_default()
@@ -251,11 +259,8 @@ impl Settings {
 
     pub fn save(&self) -> Result<(), String> {
         let path = Self::path().ok_or("no config directory")?;
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        }
         let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(path, json).map_err(|e| e.to_string())
+        crate::storage::write(&path, json)
     }
 
     /// Clamp every value into its valid range (hand-edited files, old versions…).
@@ -271,6 +276,7 @@ impl Settings {
         self.shake_force = clamp(self.shake_force, SHAKE_RANGE, d.shake_force);
         self.volume = clamp(self.volume, (0.0, 1.0), d.volume);
         self.sfx_volume = clamp(self.sfx_volume, (0.0, 1.0), d.sfx_volume);
+        self.music_volume = clamp(self.music_volume, (0.0, 1.0), d.music_volume);
         let db = crate::audio::eq::MAX_DB;
         self.eq_preamp = clamp(self.eq_preamp, (-db, db), 0.0);
         for b in &mut self.eq_bands {

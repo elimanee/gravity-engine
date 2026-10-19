@@ -4,6 +4,35 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [Unreleased]
+
+### Added
+- DeltaConduit's Amy sheet in the style of Sonic 1 (583 × 570) is recognised as Amy's (`amy.png`), alongside CartoonsAnimate22's
+
+## [3.1.0]
+
+### Added
+- **Web version**: [play in the browser](https://elimanee.github.io/gravity-engine/). The same program compiled to WebAssembly, published on GitHub Pages by the new *Web version* workflow (`web/build.sh` builds it locally). Settings, levels, challenges and the endless run's ghost are kept in the browser's storage; what needs files or the network (opening images, music, scenes and skins, the fetchers, screenshots, GIFs, sprite sheets) says it needs the desktop version
+- **Harbour zone**: three acts after Meadow, over the sea. Act 1 along the docks, Act 2 through a flooded tunnel, Act 3 against the **anchor crane**, a flying crane whose anchor swings under it and slams down, sending shock waves along the ground
+- New badniks: **fish** leaping out of the water, **gulls** that hover, cry out and swoop down, and **puffers** whose spikes hurt even when you are curled up
+- **Air under water**: chimes as it runs low, a countdown over your head with its own music, drowning; **vents** let out big bubbles to breathe
+- **Special stages**: reach a goal with 50 rings and a giant ring takes you, after the tally, to a Blue Spheres stage on a checkered globe: turn at the crossings, catch every blue sphere, avoid the red ones (or jump over them), with rings, bumpers and springs. Seven stages, one **chaos emerald** each, shown in Library → Sonic
+- **Super Sonic**: with all seven emeralds and 50 rings, jump again in the air to turn super (any character): golden, faster, higher jumps, unhurt by badniks and bosses, a ring a second
+- **Music for Sonic's mode**, made by the program (no sound from the games): a chiptune song per zone, the boss's, invincibility's, Super Sonic's and the special stages', and jingles for an act cleared, a 1-up, Game Over, an emerald and the drowning countdown. *Sonic's music* and *Music volume* in the settings; it keeps quiet while your own music plays
+- New sound effects: air chimes, a breath, turning super, the giant ring's warp, blue spheres and bumpers
+- Level editor: one *Badnik* button for all six badniks, both bosses, and air vents
+- `--act=N` and `--special-stage=N` open an act or a special stage straight away
+- CI lints the web version
+
+### Changed
+- The Meadow acts have more rings (enough for the giant ring)
+- After losing a life you are safe for a moment, so nothing waiting at the star post takes the next one at once
+
+### Downloads
+- `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
+- `gravity_engine-windows-x86_64.zip` — Windows build: unzip and run `gravity_engine.exe` (keep the DLLs next to it)
+- Or play it in the browser: https://elimanee.github.io/gravity-engine/
+
 ## [3.0.0]
 
 ### Added

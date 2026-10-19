@@ -5,6 +5,7 @@
 
 /// A controller button, by its place on an Xbox-style pad.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub enum Button {
     /// A / Cross.
     South,
@@ -39,6 +40,7 @@ impl State {
         self.buttons & (1 << b as u16) != 0
     }
 
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     fn set(&mut self, b: Button, down: bool) {
         if down {
             self.buttons |= 1 << b as u16;

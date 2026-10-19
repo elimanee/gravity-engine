@@ -260,11 +260,11 @@ pub fn restore_gadgets(gadgets: &[SceneGadget], bodies: &[Option<RigidBodyHandle
 
 pub fn write(path: &std::path::Path, scene: &SceneFile) -> Result<(), String> {
     let json = serde_json::to_vec(scene).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())
+    crate::storage::write(path, json)
 }
 
 pub fn read(path: &std::path::Path) -> Result<SceneFile, String> {
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let bytes = crate::storage::read(path)?;
     let scene: SceneFile = serde_json::from_slice(&bytes).map_err(|e| format!("invalid scene: {e}"))?;
     if scene.version > VERSION {
         return Err(format!("scene version {} is newer than supported ({VERSION})", scene.version));

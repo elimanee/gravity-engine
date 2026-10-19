@@ -1,6 +1,8 @@
-//! Sonic's game mode: badniks (a crawler, a flying shooter, a crab),
-//! spikes, item monitors, star posts, the goal signpost and a boss; rings
-//! scattered when hurt, lives, score and time, and the end-of-act tally.
+//! Sonic's game mode: badniks (a crawler, a flying shooter, a crab, a
+//! leaping fish, a diving gull, a spiny puffer), spikes, item monitors,
+//! star posts, the goal signpost and two bosses; rings scattered when
+//! hurt, lives, score and time, air underwater (bubbles from vents), the
+//! giant ring to a special stage, Super Sonic, and the end-of-act tally.
 //!
 //! A level's contents are a [`LevelSpec`] saved in scene files. At play
 //! time they become a [`Game`], updated after Sonic each frame; what it
@@ -33,6 +35,20 @@ const GAME_OVER_TIME: f32 = 4.0;
 pub const LIVES: u32 = 3;
 /// Boss hits.
 const BOSS_HP: u32 = 8;
+/// Seconds of air underwater; the chimes before it runs out, and when the
+/// countdown (and its music) starts.
+pub const AIR: f32 = 30.0;
+const AIR_WARNINGS: [f32; 3] = [25.0, 20.0, 15.0];
+pub const DROWNING: f32 = 12.0;
+/// A vent lets out a bubble big enough to breathe this often (s).
+const VENT_EVERY: f32 = 4.5;
+/// Rings needed at the goal for the giant ring (and to turn super).
+pub const SPECIAL_RINGS: u32 = 50;
+/// The anchor's radius (world px).
+pub const ANCHOR_R: f32 = 22.0;
+/// A gull rests this long between swoops and hovers this long before one (s).
+const GULL_REST: f32 = 3.0;
+const GULL_WARN: f32 = 0.5;
 /// Sizes (world px): monitor and spikes boxes, ring and boss radii.
 pub const MONITOR: Vec2 = Vec2::new(45.0, 48.0);
 pub const SPIKES: Vec2 = Vec2::new(48.0, 24.0);
@@ -50,18 +66,27 @@ pub enum EnemyKind {
     Flyer,
     /// Walks slowly and lobs two shots.
     Crab,
+    /// Leaps out of the water (or a pit) and falls back, over and over.
+    Fish,
+    /// Glides high up and swoops down at Sonic when he passes under it.
+    Gull,
+    /// Floats in place and bristles with spikes now and then: only safe
+    /// to hit while they are in.
+    Puffer,
 }
 
-// Used by the level editor (next).
-#[allow(dead_code)]
 impl EnemyKind {
-    pub const ALL: &'static [EnemyKind] = &[EnemyKind::Crawler, EnemyKind::Flyer, EnemyKind::Crab];
+    pub const ALL: &'static [EnemyKind] =
+        &[EnemyKind::Crawler, EnemyKind::Flyer, EnemyKind::Crab, EnemyKind::Fish, EnemyKind::Gull, EnemyKind::Puffer];
 
     pub fn label(self) -> &'static str {
         match self {
             EnemyKind::Crawler => "Crawler",
             EnemyKind::Flyer => "Flyer",
             EnemyKind::Crab => "Crab",
+            EnemyKind::Fish => "Fish",
+            EnemyKind::Gull => "Gull",
+            EnemyKind::Puffer => "Puffer",
         }
     }
 
@@ -71,8 +96,25 @@ impl EnemyKind {
             EnemyKind::Crawler => vec2(20.0, 16.0),
             EnemyKind::Flyer => vec2(22.0, 13.0),
             EnemyKind::Crab => vec2(24.0, 16.0),
+            EnemyKind::Fish => vec2(14.0, 18.0),
+            EnemyKind::Gull => vec2(22.0, 12.0),
+            EnemyKind::Puffer => vec2(17.0, 17.0),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum BossKind {
+    /// Flies to and fro over its arena, dropping bombs.
+    #[default]
+    Bomber,
+    /// A flying crane with an anchor swinging under it; now and then it
+    /// slams the anchor down and shock waves run along the ground.
+    Anchor,
+}
+
+impl BossKind {
+    pub const ALL: &'static [BossKind] = &[BossKind::Bomber, BossKind::Anchor];
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -119,6 +161,9 @@ pub struct LevelSpec {
     pub posts: Vec<[f32; 2]>,
     pub goal: Option<[f32; 2]>,
     pub boss: Option<[f32; 2]>,
+    pub boss_kind: BossKind,
+    /// Air bubble vents on the floor of the water.
+    pub vents: Vec<[f32; 2]>,
 }
 
 impl LevelSpec {
@@ -130,6 +175,7 @@ impl LevelSpec {
             && self.posts.is_empty()
             && self.goal.is_none()
             && self.boss.is_none()
+            && self.vents.is_empty()
     }
 }
 
@@ -146,8 +192,23 @@ pub struct Enemy {
     /// Its own clock, and where it started (flyers patrol around it).
     pub timer: f32,
     home: Vec2,
-    /// Stopped to shoot.
+    /// Stopped to shoot (a gull: swooping; a puffer: spikes out).
     pub firing: bool,
+}
+
+impl Enemy {
+    /// Half size of its hit box now (world px).
+    pub fn half(&self) -> Vec2 {
+        match self.kind {
+            EnemyKind::Puffer if self.firing => vec2(25.0, 25.0),
+            k => k.half(),
+        }
+    }
+
+    /// Hurts whoever touches it, even curled up.
+    pub fn spiky(&self) -> bool {
+        self.kind == EnemyKind::Puffer && self.firing
+    }
 }
 
 pub struct Shot {
@@ -155,6 +216,32 @@ pub struct Shot {
     vel: Vec2,
     life: f32,
     falls: bool,
+    /// A shock wave running along the ground.
+    pub wave: bool,
+}
+
+/// Air bubbles: small ones rise all the time, big ones can be breathed.
+pub struct Vent {
+    pub pos: Vec2,
+    next: f32,
+}
+
+pub struct Bubble {
+    pub pos: Vec2,
+    pub age: f32,
+    pub big: bool,
+    seed: f32,
+}
+
+impl Bubble {
+    /// Radius (world px): big ones grow as they rise.
+    pub fn radius(&self) -> f32 {
+        if self.big {
+            (6.0 + self.age * 20.0).min(18.0)
+        } else {
+            3.0
+        }
+    }
 }
 
 pub struct Monitor {
@@ -184,6 +271,7 @@ pub struct LostRing {
 }
 
 pub struct Boss {
+    pub kind: BossKind,
     pub pos: Vec2,
     home: Vec2,
     pub hp: u32,
@@ -196,6 +284,12 @@ pub struct Boss {
     pub beaten: Option<f32>,
     /// Sonic has entered its arena: he cannot leave until it falls.
     pub locked: bool,
+    /// The crane's anchor (world px), the clock of its swing, the time
+    /// into a slam, and the arena's floor under it.
+    pub anchor: Vec2,
+    swing: f32,
+    pub slam: Option<f32>,
+    floor: Option<f32>,
 }
 
 /// The end-of-act tally: bonuses counted into the score.
@@ -243,6 +337,18 @@ pub enum Effect {
     BossBeaten(Vec2),
     Explosion(Vec2),
     Respawned(Vec2),
+    /// A gull about to swoop.
+    Swoop(Vec2),
+    /// Air running out: a chime, then the countdown's music.
+    AirWarning(Vec2),
+    Drowning,
+    /// A breath of air (a bubble, or the surface) after the countdown began
+    /// or from a bubble.
+    Breathe(Vec2),
+    /// Out of rings: no longer super.
+    SuperEnd(Vec2),
+    /// The giant ring opened at the goal.
+    GiantRing(Vec2),
     GameOver,
     /// Start the level again (after Game Over).
     Restart,
@@ -326,6 +432,20 @@ pub struct Game {
     chain: u32,
     /// An endless run: no lives, the run ends at the first death.
     pub endless: bool,
+    pub vents: Vec<Vent>,
+    pub bubbles: Vec<Bubble>,
+    /// The water's surface (world px), set by the app before each update.
+    pub water: Option<f32>,
+    /// Seconds of air left (full out of the water).
+    pub air: f32,
+    /// Chaos emeralds still to find: passing the goal with 50 rings opens
+    /// a giant ring to a special stage. All seven: 50 rings and jumping
+    /// again in the air turn him super.
+    pub emeralds_missing: bool,
+    pub emeralds_all: bool,
+    pub giant_ring: bool,
+    /// Seconds until a super form uses up its next ring.
+    super_drain: f32,
 }
 
 impl Game {
@@ -342,15 +462,20 @@ impl Game {
             goal: spec.goal.map(px),
             goal_passed: None,
             boss: spec.boss.map(px).map(|p| Boss {
+                kind: spec.boss_kind,
                 pos: p,
                 home: p,
                 hp: BOSS_HP,
                 flash: 0.0,
                 t: 0.0,
                 dir: 1.0,
-                bomb: 2.0,
+                bomb: if spec.boss_kind == BossKind::Anchor { 4.0 } else { 2.0 },
                 beaten: None,
                 locked: false,
+                anchor: p,
+                swing: 0.0,
+                slam: None,
+                floor: None,
             }),
             score: 0,
             lives: LIVES,
@@ -366,6 +491,14 @@ impl Game {
             phase: Phase::Playing,
             chain: 0,
             endless: false,
+            vents: spec.vents.iter().map(|&v| Vent { pos: px(v), next: 1.0 }).collect(),
+            bubbles: vec![],
+            water: None,
+            air: AIR,
+            emeralds_missing: false,
+            emeralds_all: false,
+            giant_ring: false,
+            super_drain: 1.0,
         };
         // With a boss, the goal only shows once it is beaten.
         if g.boss.is_some() {
@@ -385,7 +518,9 @@ impl Game {
 
     pub fn add_enemy(&mut self, kind: EnemyKind, at: Vec2) {
         let dir = -1.0;
-        self.enemies.push(Enemy { kind, pos: at, vel: Vec2::ZERO, dir, timer: 0.0, home: at, firing: false });
+        // Fish side by side leap one after the other.
+        let timer = if kind == EnemyKind::Fish { (at.x / 173.0).fract().abs() * 1.2 } else { 0.0 };
+        self.enemies.push(Enemy { kind, pos: at, vel: Vec2::ZERO, dir, timer, home: at, firing: false });
     }
 
     pub fn add_monitor(&mut self, world: &mut PhysWorld, kind: MonitorKind, at: Vec2) {
@@ -415,6 +550,8 @@ impl Game {
     pub fn forget_before(&mut self, world: &mut PhysWorld, x: f32) {
         self.enemies.retain(|e| e.pos.x > x);
         self.shots.retain(|s| s.pos.x > x);
+        self.vents.retain(|v| v.pos.x > x);
+        self.bubbles.retain(|b| b.pos.x > x);
         self.lost.retain(|r| r.pos.x > x);
         self.posts.retain(|p| p.pos.x > x);
         let (old, keep): (Vec<_>, Vec<_>) = std::mem::take(&mut self.monitors).into_iter().partition(|m| m.pos.x < x);
@@ -453,12 +590,19 @@ impl Game {
         for r in &mut self.lost {
             r.pos -= d;
         }
+        for v in &mut self.vents {
+            v.pos -= d;
+        }
+        for b in &mut self.bubbles {
+            b.pos -= d;
+        }
         if let Some(g) = &mut self.goal {
             *g -= d;
         }
         if let Some(b) = &mut self.boss {
             b.pos -= d;
             b.home -= d;
+            b.anchor -= d;
         }
         if let Some((p, _)) = &mut self.checkpoint {
             *p -= d;
@@ -494,7 +638,17 @@ impl Game {
     }
 
     fn attacking(&self, sonic: &Sonic) -> bool {
-        sonic.attacking() || self.invincible > 0.0
+        sonic.attacking() || self.sturdy(sonic)
+    }
+
+    /// Nothing hurts him (invincible or super).
+    fn sturdy(&self, sonic: &Sonic) -> bool {
+        self.invincible > 0.0 || sonic.super_form
+    }
+
+    /// Seconds of air left while the countdown shows (5 … 0 over his head).
+    pub fn countdown(&self) -> Option<u32> {
+        (self.air < DROWNING && self.phase == Phase::Playing).then(|| (self.air / 2.0).floor().max(0.0) as u32)
     }
 
     /// Rings caught (outside the game's own scattered ones).
@@ -542,7 +696,7 @@ impl Game {
 
     /// Sonic got hit by something at `from` (world px).
     pub fn hurt(&mut self, sonic: &mut Sonic, from: Vec2, out: &mut Vec<Effect>) {
-        if self.invulnerable > 0.0 || self.invincible > 0.0 || sonic.dead || self.phase != Phase::Playing {
+        if self.invulnerable > 0.0 || self.sturdy(sonic) || sonic.dead || self.phase != Phase::Playing {
             return;
         }
         if self.shield {
@@ -591,6 +745,7 @@ impl Game {
         self.invincible = 0.0;
         self.shoes = 0.0;
         sonic.shoes = false;
+        sonic.super_form = false;
         self.phase = Phase::Dying(0.0);
         out.push(Effect::Died(sonic.pos));
     }
@@ -618,7 +773,9 @@ impl Game {
                             self.rings = 0;
                             self.ring_lives = 0;
                             self.time = time;
-                            self.invulnerable = 0.0;
+                            // A moment's grace, so nothing waiting there takes the new life at once.
+                            self.invulnerable = HURT_TIME;
+                            self.air = AIR;
                             self.lost.clear();
                             self.shots.clear();
                             if let Some(b) = &mut self.boss {
@@ -668,6 +825,22 @@ impl Game {
         if sonic.pos.y > fall_y && !sonic.dead {
             self.die(sonic, &mut out);
         }
+        self.breathe(dt, sonic, &mut out);
+        // Super: a ring a second, back to normal without any.
+        sonic.can_super = self.emeralds_all && self.rings >= SPECIAL_RINGS && self.goal_passed.is_none();
+        if sonic.super_form {
+            self.super_drain -= dt;
+            if self.super_drain <= 0.0 {
+                self.super_drain += 1.0;
+                self.rings = self.rings.saturating_sub(1);
+            }
+            if self.rings == 0 {
+                sonic.super_form = false;
+                out.push(Effect::SuperEnd(sonic.pos));
+            }
+        } else {
+            self.super_drain = 1.0;
+        }
         // Spikes hurt when stood on.
         if let Some(s) = self.spikes.iter().find(|s| sonic.grounded && sonic.on == Some(s.collider)) {
             let from = vec2(s.pos.x - sonic.facing, s.pos.y);
@@ -704,11 +877,16 @@ impl Game {
             if sonic.pos.x > g.x - 12.0 && (g.y - sonic.pos.y).abs() < 160.0 {
                 self.goal_passed = Some(0.0);
                 out.push(Effect::Goal(g));
+                if self.emeralds_missing && self.rings >= SPECIAL_RINGS {
+                    self.giant_ring = true;
+                    out.push(Effect::GiantRing(g));
+                }
             }
         }
         if let Some(t) = &mut self.goal_passed {
             *t += dt;
             if *t > CLEAR_DELAY {
+                sonic.super_form = false;
                 self.phase =
                     Phase::Cleared(Tally { t: 0.0, time_bonus: time_bonus(self.time), ring_bonus: self.rings * 100 });
                 out.push(Effect::Cleared);
@@ -718,7 +896,32 @@ impl Game {
         out
     }
 
-    /// Badniks, shots, scattered rings and the boss.
+    /// Air underwater: chimes as it runs low, the countdown, drowning.
+    fn breathe(&mut self, dt: f32, sonic: &mut Sonic, out: &mut Vec<Effect>) {
+        if sonic.dead {
+            return;
+        }
+        if !sonic.underwater {
+            if self.air < DROWNING {
+                out.push(Effect::Breathe(sonic.pos));
+            }
+            self.air = AIR;
+            return;
+        }
+        let before = self.air;
+        self.air = (self.air - dt).max(0.0);
+        if AIR_WARNINGS.iter().any(|&w| before > w && self.air <= w) {
+            out.push(Effect::AirWarning(sonic.pos));
+        }
+        if before > DROWNING && self.air <= DROWNING {
+            out.push(Effect::Drowning);
+        }
+        if self.air <= 0.0 {
+            self.die(sonic, out);
+        }
+    }
+
+    /// Badniks, shots, scattered rings, bubbles and the boss.
     fn update_world(
         &mut self,
         dt: f32,
@@ -735,6 +938,7 @@ impl Game {
 
         // Badniks.
         let attacking = self.attacking(sonic);
+        let sturdy = self.sturdy(sonic);
         let reach = sonic.reach();
         let mut killed = vec![];
         let mut hurt_from = None;
@@ -754,6 +958,7 @@ impl Game {
                                 vel: vec2(d * 130.0, -380.0),
                                 life: 3.0,
                                 falls: true,
+                                wave: false,
                             });
                         }
                         out.push(Effect::Shot(e.pos));
@@ -801,6 +1006,7 @@ impl Game {
                                 vel: v,
                                 life: 3.0,
                                 falls: false,
+                                wave: false,
                             });
                             out.push(Effect::Shot(e.pos));
                         }
@@ -812,13 +1018,66 @@ impl Game {
                         e.pos.y = e.home.y + (e.timer * 3.0).sin() * 6.0;
                     }
                 }
+                EnemyKind::Fish => {
+                    // Up out of the water and back down, then a rest.
+                    let leap = 1.5;
+                    let s = ((e.timer % 2.8) / leap).min(1.0);
+                    e.firing = s < 1.0;
+                    e.pos.y = e.home.y - 300.0 * 4.0 * s * (1.0 - s);
+                }
+                EnemyKind::Gull => {
+                    let half = e.kind.half();
+                    if !e.firing {
+                        e.pos.x += e.dir * 120.0 * dt;
+                        if (e.pos.x - e.home.x).abs() > 260.0 {
+                            e.dir = (e.home.x - e.pos.x).signum();
+                        }
+                        e.pos.y = e.home.y + (e.timer * 2.5).sin() * 8.0;
+                        // Sonic below: it stops, cries out, then swoops where he was.
+                        let d = me - e.pos;
+                        if live && e.timer > GULL_REST && d.x.abs() < 200.0 && d.y > 60.0 && d.y < 480.0 {
+                            e.firing = true;
+                            e.timer = 0.0;
+                            e.vel = d.normalize() * 460.0;
+                            if d.x != 0.0 {
+                                e.dir = d.x.signum();
+                            }
+                            out.push(Effect::Swoop(e.pos));
+                        }
+                    } else if e.vel.y > 0.0 && e.timer < GULL_WARN {
+                        // Hovering a moment first: time to get away.
+                        e.pos.y = e.home.y + (e.timer * 40.0).sin() * 3.0;
+                    } else if e.vel.y > 0.0 {
+                        let step = e.vel * dt;
+                        let floor = ray(world, solid, e.pos, vec2(0.0, 1.0), half.y + step.y + 2.0).is_some();
+                        if floor || e.pos.y > e.home.y + 520.0 {
+                            e.vel = vec2(e.dir * 150.0, -200.0);
+                        } else {
+                            e.pos += step;
+                        }
+                    } else {
+                        // Back up to where it glides.
+                        e.pos += e.vel * dt;
+                        if e.pos.y <= e.home.y {
+                            e.pos.y = e.home.y;
+                            e.firing = false;
+                            e.timer = 0.0;
+                        }
+                    }
+                }
+                EnemyKind::Puffer => {
+                    e.firing = e.timer % 3.2 > 2.0;
+                    e.pos.y = e.home.y + (e.timer * 1.8).sin() * 10.0;
+                }
             }
             // Amy's hammer reaches further than she does.
-            let hammered = reach.is_some_and(|(c, h)| overlap(c, h, e.pos, e.kind.half()));
+            let half = e.half();
+            let hammered = reach.is_some_and(|(c, h)| overlap(c, h, e.pos, half));
             if live && hammered {
                 killed.push((i, true));
-            } else if live && overlap(me, my_half, e.pos, e.kind.half()) {
-                if attacking {
+            } else if live && overlap(me, my_half, e.pos, half) {
+                // A puffer's spikes hurt even curled up.
+                if attacking && (!e.spiky() || sturdy) {
                     killed.push((i, true));
                 } else {
                     hurt_from.get_or_insert(e.pos);
@@ -897,6 +1156,39 @@ impl Game {
             out.push(Effect::RingCaught(me));
         }
 
+        // Vents let out bubbles; a big one is a breath of air.
+        for v in &mut self.vents {
+            let before = v.next;
+            v.next -= dt;
+            if v.next <= 0.0 {
+                v.next += VENT_EVERY;
+                self.bubbles.push(Bubble { pos: v.pos, age: 0.0, big: true, seed: v.pos.x });
+            } else if (before * 2.5).floor() != (v.next * 2.5).floor() {
+                let seed = v.pos.x + before * 37.0;
+                let side = (seed * 0.731).sin() * 8.0;
+                self.bubbles.push(Bubble { pos: v.pos + vec2(side, 0.0), age: 0.0, big: false, seed });
+            }
+        }
+        let water = self.water;
+        let mut breathed = false;
+        self.bubbles.retain_mut(|b| {
+            b.age += dt;
+            b.pos.y -= if b.big { 55.0 } else { 80.0 } * dt;
+            b.pos.x += (b.age * 4.0 + b.seed).sin() * 12.0 * dt;
+            if live && b.big && b.age > 0.4 && sonic.underwater && (b.pos - me).length() < b.radius() + my_half.x {
+                breathed = true;
+                return false;
+            }
+            !water.is_some_and(|w| b.pos.y < w + b.radius()) && b.age < 10.0
+        });
+        if breathed {
+            self.air = AIR;
+            sonic.xsp = 0.0;
+            sonic.gsp = 0.0;
+            sonic.ysp = 0.0;
+            out.push(Effect::Breathe(me));
+        }
+
         // Monitors' icons float up after breaking.
         for m in &mut self.monitors {
             if let Some(t) = &mut m.broken {
@@ -909,7 +1201,8 @@ impl Game {
             }
         }
 
-        // The boss: to and fro above its arena, dropping bombs.
+        // The boss: to and fro above its arena, dropping bombs or swinging
+        // its anchor.
         let mut boss_hurts = None;
         if let Some(b) = &mut self.boss {
             b.t += dt;
@@ -918,6 +1211,7 @@ impl Game {
                 Some(t) => {
                     *t += dt;
                     b.pos.y += 60.0 * dt * (*t).min(2.0);
+                    b.anchor = b.pos + vec2(0.0, 100.0);
                     if (*t * 6.0) as i32 != ((*t - dt) * 6.0) as i32 {
                         let jitter =
                             vec2(macroquad::rand::gen_range(-30.0, 30.0), macroquad::rand::gen_range(-30.0, 30.0));
@@ -925,22 +1219,86 @@ impl Game {
                     }
                 }
                 None => {
-                    let speed = 110.0 + (BOSS_HP - b.hp) as f32 * 12.0;
-                    b.pos.x += b.dir * speed * dt;
-                    if (b.pos.x - b.home.x).abs() > 280.0 {
-                        b.dir = (b.home.x - b.pos.x).signum();
-                    }
-                    b.pos.y = b.home.y + (b.t * 2.0).sin() * 14.0;
-                    b.bomb -= dt;
-                    if b.bomb <= 0.0 {
-                        b.bomb = (2.4 - (BOSS_HP - b.hp) as f32 * 0.15).max(1.0);
-                        self.shots.push(Shot {
-                            pos: b.pos + vec2(0.0, BOSS_R),
-                            vel: vec2(b.dir * 40.0, 60.0),
-                            life: 6.0,
-                            falls: true,
-                        });
-                        out.push(Effect::Shot(b.pos));
+                    let anger = (BOSS_HP - b.hp) as f32;
+                    match b.kind {
+                        BossKind::Bomber => {
+                            b.pos.x += b.dir * (110.0 + anger * 12.0) * dt;
+                            if (b.pos.x - b.home.x).abs() > 280.0 {
+                                b.dir = (b.home.x - b.pos.x).signum();
+                            }
+                            b.pos.y = b.home.y + (b.t * 2.0).sin() * 14.0;
+                            b.bomb -= dt;
+                            if b.bomb <= 0.0 {
+                                b.bomb = (2.4 - anger * 0.15).max(1.0);
+                                self.shots.push(Shot {
+                                    pos: b.pos + vec2(0.0, BOSS_R),
+                                    vel: vec2(b.dir * 40.0, 60.0),
+                                    life: 6.0,
+                                    falls: true,
+                                    wave: false,
+                                });
+                                out.push(Effect::Shot(b.pos));
+                            }
+                        }
+                        BossKind::Anchor => {
+                            let floor = *b.floor.get_or_insert_with(|| {
+                                ray(world, solid, b.home, vec2(0.0, 1.0), 2000.0)
+                                    .map_or(b.home.y + 300.0, |d| b.home.y + d)
+                            });
+                            let rope = 115.0 + anger * 4.0;
+                            match b.slam {
+                                // Down to the ground, a rest, and back up.
+                                Some(s) => {
+                                    let s2 = s + dt;
+                                    let low = (floor - b.pos.y - ANCHOR_R).max(rope);
+                                    let len = if s2 < 0.4 {
+                                        rope + (low - rope) * (s2 / 0.4).powi(2)
+                                    } else if s2 < 1.1 {
+                                        low
+                                    } else {
+                                        low + (rope - low) * ((s2 - 1.1) / 0.8).min(1.0)
+                                    };
+                                    b.anchor = b.pos + vec2(0.0, len);
+                                    if s < 0.4 && s2 >= 0.4 {
+                                        let at = vec2(b.pos.x, floor - 14.0);
+                                        for d in [-1.0, 1.0] {
+                                            self.shots.push(Shot {
+                                                pos: at + vec2(d * ANCHOR_R, 0.0),
+                                                vel: vec2(d * (240.0 + anger * 15.0), 0.0),
+                                                life: 2.2,
+                                                falls: false,
+                                                wave: true,
+                                            });
+                                        }
+                                        out.push(Effect::BombBlast(vec2(b.pos.x, floor - 6.0)));
+                                    }
+                                    b.slam = (s2 < 1.9).then_some(s2);
+                                    if b.slam.is_none() {
+                                        b.swing = 0.0;
+                                    }
+                                }
+                                None => {
+                                    b.pos.x += b.dir * (80.0 + anger * 10.0) * dt;
+                                    if (b.pos.x - b.home.x).abs() > 300.0 {
+                                        b.dir = (b.home.x - b.pos.x).signum();
+                                    }
+                                    b.pos.y = b.home.y + (b.t * 1.6).sin() * 10.0;
+                                    b.swing += dt;
+                                    let a = 0.95 * (b.swing * (2.2 + anger * 0.08)).sin();
+                                    b.anchor = b.pos + vec2(a.sin(), a.cos()) * rope;
+                                    b.bomb -= dt;
+                                    // It slams when the anchor hangs straight down.
+                                    if b.bomb <= 0.0 && a.abs() < 0.12 {
+                                        b.bomb = (5.0 - anger * 0.3).max(2.6);
+                                        b.slam = Some(0.0);
+                                    }
+                                }
+                            }
+                            // The anchor cannot be broken: it only hurts.
+                            if live && (b.anchor - me).length() < ANCHOR_R + my_half.x {
+                                boss_hurts = Some(b.anchor);
+                            }
+                        }
                     }
                     let hammered = reach.is_some_and(|(c, h)| overlap(c, h, b.pos, Vec2::splat(BOSS_R)));
                     if live && (hammered || (b.pos - me).length() < BOSS_R + my_half.x.max(my_half.y)) {
@@ -1043,6 +1401,7 @@ mod tests {
         }
         assert_eq!(g.lives, LIVES - 1);
         assert!(!s.dead && g.phase == Phase::Playing);
+        assert!(g.invulnerable > 0.0, "safe for a moment after coming back");
         assert_eq!(s.pos, vec2(100.0, 100.0));
     }
 
@@ -1128,6 +1487,146 @@ mod tests {
         assert!(t.done());
         assert_eq!(g.score, 50_000 + 1_200, "fast time bonus and 100 per ring");
         assert_eq!(time_bonus(100.0), 3_000);
+    }
+
+    #[test]
+    fn a_puffer_with_its_spikes_out_hurts_even_curled_up() {
+        let mut w = world();
+        let spec =
+            LevelSpec { enemies: vec![Placed { kind: EnemyKind::Puffer, at: [8.0, 4.0] }], ..LevelSpec::default() };
+        let mut g = Game::new(&spec, &mut w, vec2(0.0, 0.0));
+        g.rings = 5;
+        g.enemies[0].timer = 2.5;
+        let mut s = Sonic::new(g.enemies[0].pos);
+        s.jumping = true;
+        let out = g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        assert!(g.enemies[0].spiky());
+        assert!(out.iter().any(|e| matches!(e, Effect::RingsLost(_))), "spikes hurt");
+        assert_eq!(g.enemies.len(), 1);
+        // Spikes in: it pops like any badnik.
+        let mut g = Game::new(&spec, &mut w, vec2(0.0, 0.0));
+        let mut s = Sonic::new(g.enemies[0].pos);
+        s.jumping = true;
+        let out = g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        assert!(out.iter().any(|e| matches!(e, Effect::EnemyDown { .. })));
+    }
+
+    #[test]
+    fn fish_leap_and_gulls_swoop() {
+        let mut w = world();
+        let spec = LevelSpec {
+            enemies: vec![
+                Placed { kind: EnemyKind::Fish, at: [3.0, 2.0] },
+                Placed { kind: EnemyKind::Gull, at: [30.0, 10.0] },
+            ],
+            ..LevelSpec::default()
+        };
+        let mut g = Game::new(&spec, &mut w, vec2(0.0, 0.0));
+        let home = g.enemies[0].pos.y;
+        let mut s = standing(0.0);
+        s.pos = g.enemies[1].pos + vec2(40.0, 300.0);
+        let mut highest = home;
+        let mut swooped = false;
+        for _ in 0..360 {
+            g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+            highest = highest.min(g.enemies[0].pos.y);
+            swooped |= g.enemies[1].firing && g.enemies[1].vel.y > 0.0;
+        }
+        assert!(home - highest > 250.0, "the fish leapt {}", home - highest);
+        assert!(swooped, "the gull dived at him");
+    }
+
+    #[test]
+    fn air_runs_out_underwater_and_bubbles_give_it_back() {
+        let mut w = world();
+        let spec = LevelSpec { vents: vec![[10.0, 1.0]], ..LevelSpec::default() };
+        let mut g = Game::new(&spec, &mut w, vec2(0.0, 0.0));
+        let mut s = standing(0.0);
+        s.underwater = true;
+        let mut fx = vec![];
+        for _ in 0..(19.0 * 60.0) as usize {
+            fx.extend(g.update(1.0 / 60.0, &w, &all, &mut s, 1e9));
+        }
+        assert_eq!(fx.iter().filter(|e| matches!(e, Effect::AirWarning(_))).count(), 3, "chimes at 25, 20, 15");
+        assert!(fx.contains(&Effect::Drowning));
+        assert_eq!(g.countdown(), Some(5));
+        // A big bubble from the vent: a breath.
+        let vent = g.vents[0].pos;
+        assert!(!g.bubbles.is_empty(), "the vent bubbles");
+        let big = g.bubbles.iter().position(|b| b.big).unwrap();
+        g.bubbles[big].age = 1.0;
+        s.pos = g.bubbles[big].pos;
+        let out = g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        assert!(out.iter().any(|e| matches!(e, Effect::Breathe(_))));
+        assert_eq!(g.air, AIR);
+        assert!(vent.x > 0.0);
+        // Out of air: drowned.
+        s.pos = vec2(0.0, 0.0);
+        let mut died = false;
+        for _ in 0..(31.0 * 60.0) as usize {
+            died |= g.update(1.0 / 60.0, &w, &all, &mut s, 1e9).iter().any(|e| matches!(e, Effect::Died(_)));
+        }
+        assert!(died && s.dead);
+    }
+
+    #[test]
+    fn super_uses_up_rings_and_the_goal_opens_a_giant_ring() {
+        let mut w = world();
+        let spec = LevelSpec { goal: Some([40.0, 1.0]), ..LevelSpec::default() };
+        let mut g = Game::new(&spec, &mut w, vec2(0.0, 0.0));
+        g.emeralds_all = true;
+        g.rings = 52;
+        let mut s = standing(0.0);
+        g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        assert!(s.can_super, "every emerald and 50 rings");
+        s.super_form = true;
+        // Nothing hurts him.
+        let mut out = vec![];
+        let from = vec2(10.0, s.pos.y);
+        g.hurt(&mut s, from, &mut out);
+        assert!(out.is_empty() && g.rings == 52);
+        for _ in 0..(2.5 * 60.0) as usize {
+            g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        }
+        assert_eq!(g.rings, 50, "a ring a second");
+        g.rings = 1;
+        let mut ended = false;
+        for _ in 0..90 {
+            ended |= g.update(1.0 / 60.0, &w, &all, &mut s, 1e9).iter().any(|e| matches!(e, Effect::SuperEnd(_)));
+        }
+        assert!(ended && !s.super_form);
+        // 50 rings at the goal with emeralds to find: the giant ring.
+        let mut g = Game::new(&spec, &mut w, vec2(0.0, 0.0));
+        g.emeralds_missing = true;
+        g.rings = 50;
+        let mut s = standing(0.0);
+        s.pos = g.goal.unwrap() + vec2(20.0, 0.0);
+        let out = g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        assert!(g.giant_ring && out.iter().any(|e| matches!(e, Effect::GiantRing(_))));
+    }
+
+    #[test]
+    fn the_anchor_crane_slams_and_sends_shock_waves() {
+        let mut w = world();
+        let spec = LevelSpec { boss: Some([20.0, 6.0]), boss_kind: BossKind::Anchor, ..LevelSpec::default() };
+        let mut g = Game::new(&spec, &mut w, vec2(0.0, 0.0));
+        let mut s = standing(0.0);
+        let mut waves = 0;
+        let mut lowest = 0.0f32;
+        for _ in 0..(8.0 * 60.0) as usize {
+            g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+            waves = waves.max(g.shots.iter().filter(|s| s.wave).count());
+            let b = g.boss.as_ref().unwrap();
+            lowest = lowest.max(b.anchor.y - b.pos.y);
+        }
+        assert_eq!(waves, 2, "one each way");
+        assert!(lowest > 200.0, "the anchor reached the ground ({lowest})");
+        // The anchor hurts; the cab can be hit.
+        let b = g.boss.as_ref().unwrap();
+        s.pos = b.anchor;
+        g.rings = 3;
+        let out = g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        assert!(out.iter().any(|e| matches!(e, Effect::RingsLost(_))));
     }
 
     #[test]

@@ -6,6 +6,7 @@ use crate::background::{Background, BgMode};
 use crate::camera::{self, Camera, View};
 use crate::config::{self, ext_of, file_name_of, IMAGE_EXT, SCENE_EXT};
 use crate::config::{DENSITY, PPM, WALL_T};
+use crate::dialog::FileDialog;
 use crate::drawing;
 use crate::effects::Effects;
 use crate::history::{History, Snapshot};
@@ -45,7 +46,6 @@ use crate::weather::{Sky, Weather};
 use crate::window_tracker::WindowTracker;
 use macroquad::prelude::*;
 use rapier2d::prelude::{Point, RigidBodyHandle};
-use rfd::FileDialog;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -63,6 +63,7 @@ mod juice;
 mod knife;
 mod level_editor;
 mod library;
+mod music;
 mod night;
 mod player;
 mod player_body;
@@ -71,6 +72,7 @@ mod rewind;
 mod select;
 mod soft;
 mod sonic;
+mod special;
 mod verify;
 mod weather;
 
@@ -169,6 +171,14 @@ pub struct App {
     endless: Option<endless::Endless>,
     /// `--benchmark` is running.
     bench: Option<bench::Bench>,
+    /// Sonic's music.
+    music: music::Music,
+    /// A special stage being played (it takes the whole screen).
+    special: Option<special::SpecialRun>,
+    /// The web version saves the settings as they change (closing the tab
+    /// does not run `Drop`): what was saved last, and when to look again.
+    autosaved: String,
+    autosave_in: f32,
     /// A Sonic level being played: badniks, hazards, items, score.
     game: Option<crate::game::Game>,
     popups: Vec<game::Popup>,
@@ -297,6 +307,10 @@ impl App {
             rings: Vec::new(),
             endless: None,
             bench: None,
+            music: Default::default(),
+            special: None,
+            autosaved: String::new(),
+            autosave_in: 2.0,
             game: None,
             popups: Vec::new(),
             booms: Vec::new(),
@@ -387,6 +401,7 @@ impl App {
     fn run_frame(&mut self) {
         // The benchmark steps at exactly 60 Hz, however long frames take.
         let dt = if self.bench.is_some() { 1.0 / 60.0 } else { get_frame_time().min(0.1) };
+        self.autosave(dt);
         let (sw, sh) = (screen_width(), screen_height());
 
         if let Some(Title::Showing) = self.title {
@@ -400,6 +415,14 @@ impl App {
             {
                 self.title = Some(Title::Leaving(PixelOut::new(sw, sh)));
             }
+            return;
+        }
+
+        if self.special.is_some() {
+            self.poll_pad();
+            self.special_frame(dt);
+            self.audio.tick();
+            self.update_music();
             return;
         }
 
@@ -446,6 +469,7 @@ impl App {
             self.simulate(dt, input.world);
         }
         self.update_challenge(dt);
+        self.update_music();
         if !self.selection.is_empty() {
             let objects = &self.objects;
             self.selection.retain(|h| objects.iter().any(|o| o.body == *h));
@@ -461,6 +485,24 @@ impl App {
             if po.update(dt) {
                 self.title = None;
             }
+        }
+    }
+
+    /// In the web version, save the settings every few seconds when they
+    /// changed.
+    fn autosave(&mut self, dt: f32) {
+        if !cfg!(target_arch = "wasm32") {
+            return;
+        }
+        self.autosave_in -= dt;
+        if self.autosave_in > 0.0 {
+            return;
+        }
+        self.autosave_in = 2.0;
+        let Ok(json) = serde_json::to_string(&self.s) else { return };
+        if json != self.autosaved {
+            self.save_settings();
+            self.autosaved = json;
         }
     }
 
@@ -1063,6 +1105,10 @@ impl App {
     // Actions
     // ═══════════════════════════════════════════════════════════
     fn apply(&mut self, action: Action, mouse: Vec2) {
+        if cfg!(target_arch = "wasm32") && action.needs_desktop() {
+            self.toasts.info("That needs the desktop version");
+            return;
+        }
         match action {
             Action::SetGravity(g) => self.s.gravity = g,
             Action::SetTool(t) if self.challenge.is_some() && t != Tool::Draw => {
@@ -2234,6 +2280,7 @@ impl App {
                 stars: &self.s.challenge_stars,
                 mine: &mine,
                 act_scores: &self.s.act_scores,
+                emeralds: self.s.emeralds,
                 character: self.s.character,
                 levels: &levels,
             };
@@ -2303,7 +2350,7 @@ fn sanitize_zones(mut zones: Vec<Zone>) -> Vec<Zone> {
 
 /// Milliseconds since the epoch, for unique file names.
 fn stamp() -> u128 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or_default()
+    crate::util::now_ms() as u128
 }
 
 /// Display a path with the home directory abbreviated to `~`.

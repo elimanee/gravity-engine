@@ -1,10 +1,14 @@
 //! Winamp-style 10-band equalizer: a pre-amplifier and one peaking filter
 //! (RBJ biquad) per band, applied to the music as it plays. The settings
 //! live in [`EqParams`], shared with the audio threads through atomics.
+// The web version has no music player to equalise.
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
+#[cfg(not(target_arch = "wasm32"))]
 use rodio::Source;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
 /// Band centre frequencies (Hz), as on Winamp's equalizer.
@@ -156,6 +160,7 @@ impl Equalizer {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// A rodio source played through an [`Equalizer`].
 pub struct EqSource<S> {
     inner: S,
@@ -166,12 +171,14 @@ pub struct EqSource<S> {
     countdown: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<S: Source<Item = f32>> EqSource<S> {
     pub fn new(inner: S, params: Arc<EqParams>) -> Self {
         EqSource { inner, eq: Equalizer::new(params), ch: 0, countdown: 0 }
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<S: Source<Item = f32>> Iterator for EqSource<S> {
     type Item = f32;
 
@@ -190,6 +197,7 @@ impl<S: Source<Item = f32>> Iterator for EqSource<S> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<S: Source<Item = f32>> Source for EqSource<S> {
     fn current_frame_len(&self) -> Option<usize> {
         self.inner.current_frame_len()

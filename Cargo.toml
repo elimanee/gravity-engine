@@ -1,6 +1,6 @@
 [package]
 name        = "gravity_engine"
-version     = "3.0.0"
+version     = "3.1.0"
 edition     = "2021"
 description = "A 2D physics sandbox: drop images, shapes and web buttons and watch them fly"
 readme      = "README.md"
@@ -15,11 +15,28 @@ path = "src/main.rs"
 macroquad   = "0.4"
 # Physics
 rapier2d    = { version = "0.22", features = ["default"] }
-# Image loading — default features already include png, jpeg, gif, webp, bmp,
-# tiff, ico, tga, qoi, hdr, exr, pnm (ppm/pgm/pbm), dds, farbfeld, …
-image       = { version = "0.25" }
+# Image loading: png, jpeg, gif, webp, bmp, tiff, ico, tga, qoi, hdr, exr,
+# pnm (ppm/pgm/pbm), dds and farbfeld (no AVIF encoder, which the web
+# version could not link)
+image       = { version = "0.25", default-features = false, features = [
+    "bmp", "dds", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp",
+] }
 # Animated GIF frame extraction
 gif         = "0.13"
+# SVG rasteriser (includes usvg + tiny_skia as re-exports)
+resvg       = "0.44"
+# Settings + scene files
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+base64      = "0.22"
+# Winamp / Audacious skins (.wsz archives)
+zip         = { version = "2", default-features = false, features = ["deflate"] }
+
+# Desktop only: the web version has no files to pick, no music player and no
+# web fetchers.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Faster image decoding on several threads
+image       = { version = "0.25", default-features = false, features = ["rayon"] }
 # Native file dialogs
 rfd         = "0.15"
 # Tracker module playback
@@ -32,14 +49,6 @@ rodio       = { version = "0.19", features = ["symphonia-all"] }
 symphonia   = { version = "0.5", default-features = false }
 # Synchronous HTTP for web fetchers and internet-radio streams
 ureq        = "2"
-# SVG rasteriser (includes usvg + tiny_skia as re-exports)
-resvg       = "0.44"
-# Settings + scene files
-serde       = { version = "1", features = ["derive"] }
-serde_json  = "1"
-base64      = "0.22"
-# Winamp / Audacious skins (.wsz archives)
-zip         = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11  = { version = "2.21", features = ["xlib"] }

@@ -178,6 +178,26 @@ pub enum Action {
     Object(ObjectCmd, RigidBodyHandle),
 }
 
+impl Action {
+    /// Needs files, the network or the music player: not in the web version.
+    pub fn needs_desktop(self) -> bool {
+        matches!(
+            self,
+            Action::PickBackground
+                | Action::AddImages
+                | Action::LoadAudio
+                | Action::FetchButtons
+                | Action::FetchLogos
+                | Action::SaveScene
+                | Action::LoadScene
+                | Action::Screenshot
+                | Action::LoadSonicSheet
+                | Action::ToggleRecording
+                | Action::LoadSkin
+        )
+    }
+}
+
 /// Classic player window commands.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PlayerCmd {

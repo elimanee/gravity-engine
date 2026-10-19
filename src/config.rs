@@ -52,6 +52,10 @@ fn home() -> Option<PathBuf> {
 /// `$XDG_CONFIG_HOME/gravity_engine` (falls back to `~/.config/gravity_engine`,
 /// or `%APPDATA%\gravity_engine` on Windows).
 pub fn config_dir() -> Option<PathBuf> {
+    // The web version keeps its files in the browser (see `storage`).
+    if cfg!(target_arch = "wasm32") {
+        return Some(PathBuf::from("/gravity_engine"));
+    }
     let env_dir = |var: &str| std::env::var_os(var).map(PathBuf::from).filter(|p| p.is_absolute());
     let platform = if cfg!(windows) { env_dir("APPDATA") } else { None };
     env_dir("XDG_CONFIG_HOME")
@@ -62,6 +66,9 @@ pub fn config_dir() -> Option<PathBuf> {
 
 /// Where screenshots are written: `~/Pictures/gravity_engine`, or the config dir.
 pub fn screenshot_dir() -> Option<PathBuf> {
+    if cfg!(target_arch = "wasm32") {
+        return None;
+    }
     let pics = home().map(|h| h.join("Pictures"));
     match pics {
         Some(p) if p.is_dir() => Some(p.join("gravity_engine")),

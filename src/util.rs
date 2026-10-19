@@ -19,14 +19,25 @@ pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
     ((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
 }
 
+/// Seconds since 1970. Unlike `SystemTime`, this also works in the browser.
+pub fn unix_secs() -> f64 {
+    macroquad::miniquad::date::now()
+}
+
+/// Milliseconds since 1970.
+pub fn now_ms() -> u64 {
+    (unix_secs() * 1000.0) as u64
+}
+
 /// Tiny thread-safe PRNG (PCG-style LCG) for worker threads, where the global
 /// macroquad RNG should not be touched.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub struct Lcg(u64);
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 impl Lcg {
     pub fn from_time() -> Self {
-        let nanos =
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
+        let nanos = (unix_secs() * 1e9) as u64;
         Lcg(nanos ^ 0x9E37_79B9_7F4A_7C15)
     }
 
