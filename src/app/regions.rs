@@ -72,7 +72,7 @@ const MIDDLE: &[&str] = &[
 const CURLED: &[&str] = &["roll", "spindash"];
 
 /// Zoom steps of the sheet view (screen px per sheet px).
-const ZOOMS: &[f32] = &[0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 32.0];
+const ZOOMS: &[f32] = &[0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 32.0];
 
 /// Pictures per second in the preview (the pieces behind: their own).
 const PREVIEW_FPS: f32 = 10.0;

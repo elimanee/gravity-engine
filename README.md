@@ -4,7 +4,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
-![Version](https://img.shields.io/badge/version-3.2-8b78ff)
+![Version](https://img.shields.io/badge/version-3.3-8b78ff)
 
 **[Play it in your browser](https://elimanee.github.io/gravity-engine/)**, or [download it](#download) for Linux and Windows.
 
@@ -13,6 +13,14 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 | Sandbox | Settings drawer (Space) | Tool picker (Tab) |
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
+
+## What's new in 3.3: the sprite region editor
+
+![The sprite region editor on a home-made sheet: the walk animation's six pictures numbered on the sheet, the second one fitted around its sprite with its centre and body shown, the animation playing beside it over the picture before](docs/screenshots/sprite-regions.png)
+
+Your sprite sheets can now be fixed up in the program: **Edit sprite regions…** in the settings opens a character's sheet, and for each animation (standing, walking, the spin dash, Tails' flight, Amy's hammer, Sonic.exe's teleport…) you choose its pictures on the sheet and where the character stands in them. Draw, move and resize the boxes, **double-click a sprite** to add it, drag the character's centre with its body and the ground shown around it, or let *Fit* tighten a box around its sprite; the animation plays beside it, over the picture before if you like, to line them up. What you save goes beside the sheet as `<character>.regions.json`, and the game draws from it at once. See [Editing the regions](#editing-the-regions).
+
+*(The sheet in the picture is a little figure drawn for it: no sprites from the games are included.)*
 
 ## What's new in 3.2: Halloween
 

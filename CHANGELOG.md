@@ -4,10 +4,15 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
-## [Unreleased]
+## [3.3.0]
 
 ### Added
 - **Sprite region editor** (*Edit sprite regions…* in the settings, or `--sprite-regions[=CHARACTER]`): on a character's sprite sheet, change which pictures each animation uses (idle, walk, spin dash…) and where the character stands in them. Draw, move and resize the pictures on the sheet, double-click a sprite to add it, drag the character's centre (its body and the ground are shown), fit a picture around its sprite, reorder, duplicate and delete them, with undo, an animated preview and onion skin. Saved beside the sheet as `<character>.regions.json` (only what changed, for that sheet only), and the game draws from it at once
+
+### Downloads
+- `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
+- `gravity_engine-windows-x86_64.zip` — Windows build: unzip and run `gravity_engine.exe` (keep the DLLs next to it)
+- Or play it in the browser: https://elimanee.github.io/gravity-engine/ (the sprite region editor needs the desktop version, like your own sprite sheets)
 
 ## [3.2.0]
 
