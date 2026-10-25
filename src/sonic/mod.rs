@@ -156,6 +156,10 @@ pub enum Event {
     Hammer,
     /// Turned super.
     Transform,
+    /// Sonic.exe vanished from `from` (world px) and reappeared where he is.
+    Teleport {
+        from: Vec2,
+    },
 }
 
 /// A sensor's find.
@@ -236,6 +240,10 @@ pub struct Sonic {
     /// Amy: frames into a hammer swing, and whether it is the spin in the air.
     pub hammer: Option<u32>,
     pub hammer_air: bool,
+    /// Sonic.exe: frames since he teleported (while it shows), and whether
+    /// this jump's teleport is used.
+    pub warp: Option<u32>,
+    pub warped: bool,
 }
 
 /// Unit vector "down" for his feet in each ground mode.
@@ -307,6 +315,8 @@ impl Sonic {
             climb_up: None,
             hammer: None,
             hammer_air: false,
+            warp: None,
+            warped: false,
         }
     }
 
@@ -842,7 +852,7 @@ impl Sonic {
         self.looking_up = false;
         self.skidding = false;
         self.pushing = false;
-        let steer = self.air_moves(input, events);
+        let steer = self.air_moves(world, env, input, events);
         if self.jumping && !input.jump && self.ysp < -c.release {
             self.ysp = -c.release;
         }

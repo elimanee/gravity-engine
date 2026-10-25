@@ -1,7 +1,7 @@
 //! Bar shown in the Sonic level editor: the level's name, what to place
 //! (start, rings, badniks, monitors, hazards, posts, the goal, the boss,
-//! springs, air vents, ground, platforms, loops) or erase, Play / Stop and
-//! Save.
+//! springs, air vents, pumpkins, ground, platforms, loops) or erase,
+//! whether Sonic.exe hunts the player, Play / Stop and Save.
 
 use super::theme::*;
 use super::widgets::*;
@@ -26,6 +26,9 @@ pub enum Item {
     Boss,
     Spring,
     Vent,
+    Pumpkin,
+    /// Not placed: switches Sonic.exe's hunt on or off.
+    Hunter,
     Ground,
     Platform,
     Loop,
@@ -33,7 +36,7 @@ pub enum Item {
 }
 
 impl Item {
-    pub const ALL: [Item; 14] = [
+    pub const ALL: [Item; 16] = [
         Item::Start,
         Item::Ring,
         Item::Badnik,
@@ -44,6 +47,8 @@ impl Item {
         Item::Boss,
         Item::Spring,
         Item::Vent,
+        Item::Pumpkin,
+        Item::Hunter,
         Item::Ground,
         Item::Platform,
         Item::Loop,
@@ -62,6 +67,8 @@ impl Item {
             Item::Boss => "Boss",
             Item::Spring => "Spring",
             Item::Vent => "Vent",
+            Item::Pumpkin => "Pumpkin",
+            Item::Hunter => "Exe",
             Item::Ground => "Ground",
             Item::Platform => "Ledge",
             Item::Loop => "Loop",
@@ -84,6 +91,8 @@ impl Item {
             Item::Boss => "Click where the boss flies (it guards an arena)  ·  click Boss again: bomber or crane",
             Item::Spring => "Click above the ground for a spring",
             Item::Vent => "Click above the sea floor for an air vent (big bubbles to breathe under water)",
+            Item::Pumpkin => "Click above the ground for a jack-o'-lantern (it lights the night)",
+            Item::Hunter => "Sonic.exe hunts the player through the level (click again to stop him)",
             Item::Ground => "Drag across: solid ground from there down",
             Item::Platform => "Drag across for a ledge",
             Item::Loop => "Click above the ground for a loop",
@@ -98,6 +107,7 @@ pub struct LevelView {
     pub monitor: MonitorKind,
     pub badnik: EnemyKind,
     pub boss: BossKind,
+    pub hunter: bool,
     pub testing: bool,
     pub has_start: bool,
     pub has_end: bool,
@@ -208,7 +218,7 @@ impl LevelBar {
 
         for (k, r) in l.items.iter().enumerate() {
             let item = Item::ALL[k];
-            let on = v.item == Some(item);
+            let on = v.item == Some(item) || (item == Item::Hunter && v.hunter);
             let hov = r.contains(mouse);
             let bg = if on {
                 mix(SURFACE_2, ACCENT, 0.35)

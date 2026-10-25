@@ -221,6 +221,7 @@ fn colour(who: Character, golden: bool) -> Color {
         Character::Tails => Color::new(0.98, 0.62, 0.15, 1.0),
         Character::Knuckles => Color::new(0.88, 0.16, 0.18, 1.0),
         Character::Amy => Color::new(0.98, 0.5, 0.7, 1.0),
+        Character::Exe => Color::new(0.08, 0.16, 0.5, 1.0),
     }
 }
 
@@ -271,7 +272,7 @@ fn runner(p: Vec2, r: f32, who: Character, golden: bool, s: &Stage, t: f32) {
     }
     let head = p - vec2(0.0, r * 0.38);
     match who {
-        Character::Sonic => {
+        Character::Sonic | Character::Exe => {
             // Quills sweeping back and down.
             for (dx, dy) in [(-0.42f32, 0.25f32), (0.42, 0.25), (-0.25, 0.45), (0.25, 0.45), (0.0, 0.55)] {
                 let tip = head + vec2(dx, dy) * r;

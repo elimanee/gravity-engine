@@ -366,6 +366,7 @@ impl App {
             Some(e) => e.sky_from.mix(&ZONES.get(e.zone).map_or(LevelSky::DAY, |z| z.sky), e.sky_t),
             None => match self.act.and_then(|i| ALL.get(i)).map(|a| a.zone) {
                 Some(Zone::Harbour) => LevelSky::HARBOUR,
+                Some(Zone::Halloween) => LevelSky::HALLOWEEN,
                 _ => LevelSky::DAY,
             },
         }

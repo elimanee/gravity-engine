@@ -51,6 +51,14 @@ fn look(c: Character) -> Look {
             shoe: Color::new(0.16, 0.62, 0.28, 1.0),
             shoe_dark: Color::new(0.95, 0.75, 0.15, 1.0),
         },
+        Character::Exe => Look {
+            main: Color::new(0.1, 0.2, 0.62, 1.0),
+            dark: Color::new(0.04, 0.08, 0.34, 1.0),
+            skin: Color::new(0.93, 0.78, 0.66, 1.0),
+            belly: Color::new(0.93, 0.78, 0.66, 1.0),
+            shoe: RED,
+            shoe_dark: SHOE_DARK,
+        },
         Character::Amy => Look {
             main: Color::new(1.0, 0.46, 0.66, 1.0),
             dark: Color::new(0.82, 0.26, 0.46, 1.0),
@@ -123,7 +131,8 @@ pub fn draw(s: &Sonic) {
     let (sin, cos) = angle.sin_cos();
     let f = Frame { at, sin, cos, facing: s.facing, scale: super::SCALE };
     let l = if s.super_form { golden(look(s.character), get_time() as f32) } else { look(s.character) };
-    if s.is_ball() && !(s.hammer_air && s.hammer.is_some()) {
+    // Curled up, except mid-swing or lunging out of a teleport.
+    if s.is_ball() && !(s.hammer_air && s.hammer.is_some()) && s.warp.is_none() {
         ball(&f, s, &l);
         if s.character == Character::Tails {
             // His tails trail behind the ball.
@@ -295,7 +304,7 @@ fn body(f: &Frame, s: &Sonic, l: &Look) {
     let h = t(1.0, -8.0 + look_up * 0.5);
     let q = |x: f32, y: f32| t(x, y + look_up * 0.5);
     match ch {
-        Character::Sonic => {
+        Character::Sonic | Character::Exe => {
             f.tri(q(-2.0, -16.0), q(-4.0, -9.0), q(-20.0, -17.0), l.dark);
             f.tri(q(-4.0, -11.0), q(-4.0, -3.0), q(-22.0, -7.0), l.dark);
             f.tri(q(-4.0, -6.0), q(-2.0, 1.0), q(-17.0, 3.0), l.dark);
@@ -365,10 +374,18 @@ fn body(f: &Frame, s: &Sonic, l: &Look) {
     let nose = q(12.5, -7.0);
     f.circle(nose.0, nose.1, 1.7, INK);
     f.line(q(7.0, -2.5), q(10.5, -3.0), 0.8, INK);
-    // Eye: one shared white shape with a pupil looking ahead (or up).
+    // Eye: one shared white shape with a pupil looking ahead (or up);
+    // Sonic.exe's is black with a glowing red pupil, and it bleeds.
     let e = q(5.0, -11.0);
-    f.ellipse(e.0, e.1, 4.0, 5.2, lean, WHITE_);
+    let exe = ch == Character::Exe;
+    f.ellipse(e.0, e.1, 4.0, 5.2, lean, if exe { INK } else { WHITE_ });
     let pupil = q(7.2, -11.0 + look_up);
+    if exe {
+        f.circle(pupil.0, pupil.1, 1.8, Color::new(1.0, 0.08, 0.08, 1.0));
+        f.circle(pupil.0, pupil.1, 0.8, Color::new(1.0, 0.75, 0.7, 1.0));
+        f.line(q(6.0, -6.5), q(6.5, -1.0), 1.1, Color::new(0.75, 0.0, 0.05, 1.0));
+        f.line(q(9.0, -6.0), q(9.0, -2.0), 0.9, Color::new(0.75, 0.0, 0.05, 1.0));
+    }
     let iris = if ch == Character::Amy || ch == Character::Tails {
         Color::new(0.1, 0.45, 0.2, 1.0)
     } else if ch == Character::Knuckles {
@@ -376,7 +393,9 @@ fn body(f: &Frame, s: &Sonic, l: &Look) {
     } else {
         INK
     };
-    f.ellipse(pupil.0, pupil.1, 1.4, 2.4, lean, iris);
+    if !exe {
+        f.ellipse(pupil.0, pupil.1, 1.4, 2.4, lean, iris);
+    }
     // Front arm.
     let front_hand = if let Some(k) = swinging {
         // Up behind her head, then down in front.

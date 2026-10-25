@@ -155,6 +155,7 @@ impl App {
             monitor: ed.monitor,
             badnik: ed.badnik,
             boss: ed.spec.boss_kind,
+            hunter: ed.spec.hunter,
             testing: ed.testing.is_some(),
             has_start: ed.start.is_some(),
             has_end: ed.spec.goal.is_some() || ed.spec.boss.is_some(),
@@ -171,6 +172,13 @@ impl App {
         let Some(ed) = self.level_editor.as_mut() else { return };
         match cmd {
             LevelCmd::Pick(item) => {
+                if item == Item::Hunter {
+                    ed.spec.hunter = !ed.spec.hunter;
+                    ed.saved = false;
+                    let msg = if ed.spec.hunter { "Sonic.exe will hunt the player" } else { "No more Sonic.exe" };
+                    self.toasts.status("level", msg);
+                    return;
+                }
                 // Again on Monitor, Badnik or Boss: the next kind.
                 let again = ed.item == Some(item);
                 if again && item == Item::Monitor {
@@ -307,6 +315,8 @@ impl App {
                 ed.spec.enemies.push(Placed { kind, at: at(p) });
             }
             Item::Vent => ed.spec.vents.push(at(vec2(m.x, g))),
+            Item::Pumpkin => ed.spec.pumpkins.push(at(vec2(m.x, g - 14.0))),
+            Item::Hunter => return false,
             Item::Monitor => ed.spec.monitors.push(Placed { kind: ed.monitor, at: at(vec2(m.x, g - MONITOR.y / 2.0)) }),
             Item::Spikes => ed.spec.spikes.push(at(vec2(m.x, g - SPIKES.y / 2.0))),
             Item::Post => ed.spec.posts.push(at(vec2(m.x, g - 40.0))),
@@ -389,7 +399,11 @@ impl App {
         let near = |p: [f32; 2]| (crate::physics::to_screen(p[0], p[1]) - m).length() < ERASE_REACH;
         let Some(ed) = self.level_editor.as_mut() else { return };
         let s = &mut ed.spec;
-        let before = (s.enemies.len(), s.monitors.len(), s.spikes.len(), s.posts.len() + s.vents.len(), s.goal, s.boss);
+        let tally = |s: &LevelSpec| {
+            let small = s.posts.len() + s.vents.len() + s.pumpkins.len();
+            (s.enemies.len(), s.monitors.len(), s.spikes.len(), small, s.goal, s.boss)
+        };
+        let before = tally(s);
         if let Some(i) = s.enemies.iter().position(|e| near(e.at)) {
             s.enemies.remove(i);
         } else if let Some(i) = s.monitors.iter().position(|e| near(e.at)) {
@@ -400,13 +414,14 @@ impl App {
             s.posts.remove(i);
         } else if let Some(i) = s.vents.iter().position(|&p| near(p)) {
             s.vents.remove(i);
+        } else if let Some(i) = s.pumpkins.iter().position(|&p| near(p)) {
+            s.pumpkins.remove(i);
         } else if s.goal.is_some_and(near) {
             s.goal = None;
         } else if s.boss.is_some_and(near) {
             s.boss = None;
         }
-        let changed = before
-            != (s.enemies.len(), s.monitors.len(), s.spikes.len(), s.posts.len() + s.vents.len(), s.goal, s.boss);
+        let changed = before != tally(s);
         if changed {
             ed.saved = false;
             self.level_preview();
@@ -473,7 +488,7 @@ impl App {
         }
         // Where a click would put it.
         let dropped = ed.item.is_some_and(|i| match i {
-            Item::Ring | Item::Boss | Item::Erase => false,
+            Item::Ring | Item::Boss | Item::Erase | Item::Hunter => false,
             Item::Badnik => walks(ed.badnik),
             _ => true,
         });

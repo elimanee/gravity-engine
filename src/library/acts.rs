@@ -2,8 +2,9 @@
 //! a goal and, at the end of a zone, a boss. They are played in the
 //! infinite world with nothing under the ground: a pit is a lost life.
 //!
-//! Two zones: Meadow (green hills) and Harbour (docks over the sea, a
-//! flooded tunnel, the anchor crane).
+//! Three zones: Meadow (green hills), Harbour (docks over the sea, a
+//! flooded tunnel, the anchor crane) and, for Halloween, a graveyard at
+//! night where Sonic.exe hunts the player.
 
 use super::{Builder, LEAF, SKY, SNOW, STONE, WOOD};
 use crate::game::{BossKind, EnemyKind, MonitorKind};
@@ -15,6 +16,7 @@ use crate::scene::SceneFile;
 pub enum Zone {
     Meadow,
     Harbour,
+    Halloween,
 }
 
 /// One act of the campaign.
@@ -58,6 +60,12 @@ pub const ALL: &[Act] = &[
         build: harbour_2,
     },
     Act { name: "Harbour Act 3", about: "The anchor crane guards the pier", zone: Zone::Harbour, build: harbour_3 },
+    Act {
+        name: "Halloween Night",
+        about: "Sonic.exe is after you: keep running, don't let him catch you",
+        zone: Zone::Halloween,
+        build: halloween,
+    },
 ];
 
 /// The ground's top in design px (the world's bottom is at 720).
@@ -73,6 +81,10 @@ const PLANK_EDGE: [u8; 3] = [200, 152, 100];
 const QUAY: [u8; 3] = [118, 116, 136];
 const QUAY_EDGE: [u8; 3] = [196, 194, 210];
 const SAND: [u8; 3] = [210, 186, 128];
+/// Halloween: graveyard soil, dead grass, gravestones.
+const SOIL: [u8; 3] = [70, 54, 86];
+const DEAD_GRASS: [u8; 3] = [96, 112, 72];
+const TOMB: [u8; 3] = [136, 136, 152];
 
 fn rings(b: &mut Builder, x: f32, y: f32, n: usize) {
     for k in 0..n {
@@ -306,6 +318,60 @@ fn harbour_3(b: &mut Builder) {
     b.boss(2500.0, G - 170.0);
 }
 
+fn halloween(b: &mut Builder) {
+    b.scene.night = Some(true);
+    b.hunter();
+    b.sonic(140.0, G - 40.0);
+    b.ground(-400.0, 1600.0, G, SOIL, DEAD_GRASS);
+    rings(b, 300.0, G - 40.0, 6);
+    b.pumpkin(520.0, G);
+    b.tomb(760.0, G, TOMB);
+    rings(b, 820.0, G - 40.0, 4);
+    b.pumpkin(1000.0, G);
+    b.monitor(MonitorKind::Rings, 1150.0, G);
+    b.walker(EnemyKind::Crawler, 1380.0, G);
+    // Over the hill.
+    b.hill(1600.0, 2500.0, G, 100.0, SOIL, DEAD_GRASS);
+    arc(b, 1800.0, G - 170.0, 7, 450.0, 30.0);
+    b.ground(2500.0, 2900.0, G, SOIL, DEAD_GRASS);
+    b.post(2560.0, G);
+    b.pumpkin(2700.0, G);
+    rings(b, 2740.0, G - 40.0, 4);
+    // An open grave.
+    arc(b, 2920.0, G - 80.0, 5, 180.0, 90.0);
+    b.ground(3120.0, 4900.0, G, SOIL, DEAD_GRASS);
+    b.dash_panel(3200.0, 3320.0, G);
+    let r = 110.0;
+    b.sonic_loop(3700.0, G - r, r, STONE);
+    for k in 0..8 {
+        let a = (k as f32 / 8.0 * 360.0).to_radians();
+        b.ring(3700.0 + a.cos() * (r - 42.0), G - r + a.sin() * (r - 42.0));
+    }
+    b.tomb(4150.0, G, TOMB);
+    b.pumpkin(4300.0, G);
+    rings(b, 4200.0, G - 90.0, 5);
+    b.enemy(EnemyKind::Flyer, 4450.0, G - 170.0);
+    // Stars to keep him away, up on a ledge.
+    b.spring(4650.0, G);
+    b.platform(4700.0, 4890.0, G - 230.0, WOOD);
+    b.monitor(MonitorKind::Invincible, 4800.0, G - 238.0);
+    arc(b, 4920.0, G - 80.0, 5, 160.0, 90.0);
+    b.ground(5100.0, 7700.0, G, SOIL, DEAD_GRASS);
+    b.post(5200.0, G);
+    rings(b, 5280.0, G - 40.0, 6);
+    b.pumpkin(5450.0, G);
+    b.tomb(5650.0, G, TOMB);
+    b.monitor(MonitorKind::Shield, 5850.0, G);
+    b.pumpkin(5950.0, G);
+    b.tomb(6150.0, G, TOMB);
+    rings(b, 6250.0, G - 40.0, 6);
+    b.walker(EnemyKind::Crab, 6450.0, G);
+    b.pumpkin(6650.0, G);
+    b.monitor(MonitorKind::Rings, 6800.0, G);
+    b.pumpkin(7150.0, G);
+    b.goal(7350.0, G);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,6 +389,16 @@ mod tests {
         }
         assert!(specs[1].game.as_ref().unwrap().vents.len() >= 2, "the tunnel has air");
         assert_eq!(specs[2].game.as_ref().unwrap().boss_kind, BossKind::Anchor);
+    }
+
+    #[test]
+    fn halloween_is_a_night_hunt() {
+        let a = ALL.iter().find(|a| a.zone == Zone::Halloween).expect("a Halloween act");
+        let sc = a.scene(0.0, 1440.0);
+        let g = sc.game.as_ref().unwrap();
+        assert!(g.hunter && g.goal.is_some());
+        assert_eq!(sc.night, Some(true));
+        assert!(g.pumpkins.len() >= 6);
     }
 
     #[test]

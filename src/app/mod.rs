@@ -188,6 +188,10 @@ pub struct App {
     game_sprites: Option<crate::game::sprites::Sprites>,
     /// Where and when Sonic last bounced off a spring.
     spring_fired: Option<(Vec2, f64)>,
+    /// Seconds of broken static over the screen (Sonic.exe appearing).
+    scare: f32,
+    /// Where (and when) Sonic.exe last vanished, for the static he leaves.
+    warp_echo: Option<(Vec2, f64)>,
     /// The Sonic level editor, its bar, and "My levels" (file, name).
     level_editor: Option<level_editor::LevelEditor>,
     level_bar: crate::ui::level_bar::LevelBar,
@@ -316,6 +320,8 @@ impl App {
             booms: Vec::new(),
             game_sprites: None,
             spring_fired: None,
+            scare: 0.0,
+            warp_echo: None,
             level: None,
             act: None,
             level_editor: None,
@@ -2255,6 +2261,7 @@ impl App {
         }
         if self.game.is_some() {
             self.draw_game_hud(top);
+            self.draw_scare();
         } else {
             self.draw_sonic_hud(top);
         }

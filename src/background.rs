@@ -311,6 +311,17 @@ impl LevelSky {
         sun: 0.9,
     };
 
+    /// Halloween: a purple night with an orange glow low down and a big moon.
+    pub const HALLOWEEN: LevelSky = LevelSky {
+        top: rgb(20, 8, 36),
+        mid: rgb(64, 26, 80),
+        low: rgb(214, 104, 44),
+        far: rgb(46, 26, 60),
+        near: rgb(28, 18, 38),
+        cloud: Color::new(0.45, 0.4, 0.55, 0.5),
+        sun: 0.85,
+    };
+
     /// From `self` to `other` as `t` goes from 0 to 1.
     pub fn mix(&self, other: &LevelSky, t: f32) -> LevelSky {
         let t = t.clamp(0.0, 1.0);

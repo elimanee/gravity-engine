@@ -6,7 +6,10 @@
 //! - `tails.png`, `knuckles.png`, `amy.png` / `amy.webp`: the Sonic 3
 //!   Tails and Sonic 3 & Knuckles Knuckles sheets (The Spriters Resource),
 //!   and CartoonsAnimate22's Amy sheet (its Sonic Mania style) or
-//!   DeltaConduit's (in the style of Sonic 1), each recognised by its size.
+//!   DeltaConduit's (in the style of Sonic 1), each recognised by its size;
+//! - `exe.png`: a Sonic.exe sheet in the style of Sonic 1 (691 × 677), with
+//!   his teleport, and the run and laugh of the one that hunts you in the
+//!   Halloween act.
 //!
 //! A picture is drawn with the character's centre at the point the layout
 //! gives (for the built-in sheets, worked out from the pixels: the feet,
@@ -435,7 +438,80 @@ const AMY_S1: Builtin = Builtin {
     ],
 };
 
-const BUILTINS: [&Builtin; 4] = [&TAILS, &KNUCKLES, &AMY, &AMY_S1];
+// Sonic.exe in the style of Sonic 1 (691 × 677): pictures loose on a
+// dark red page, cut tight around him.
+const EXE: Builtin = Builtin {
+    character: Character::Exe,
+    size: (691, 677),
+    background: &[[147, 70, 70]],
+    lossy: false,
+    boxed: false,
+    specs: &[
+        spec("idle", Fit::Feet, &[[113, 12, 33, 41]]),
+        spec(
+            "bored",
+            Fit::Feet,
+            &[[72, 423, 29, 39], [103, 423, 29, 39], [134, 423, 29, 39], [165, 423, 29, 39], [196, 423, 29, 39]],
+        ),
+        spec("look_up", Fit::Feet, &[[40, 418, 27, 44]]),
+        spec("crouch", Fit::Feet, &[[307, 632, 32, 25]]),
+        spec(
+            "walk",
+            Fit::Feet,
+            &[
+                [12, 368, 27, 41],
+                [44, 369, 27, 40],
+                [82, 369, 32, 40],
+                [122, 369, 27, 40],
+                [154, 368, 27, 41],
+                [187, 369, 28, 40],
+                [224, 370, 32, 40],
+                [260, 370, 28, 40],
+            ],
+        ),
+        spec(
+            "run",
+            Fit::Feet,
+            &[[377, 313, 31, 39], [428, 313, 31, 39], [479, 313, 31, 39], [530, 313, 31, 39], [581, 313, 31, 39]],
+        ),
+        spec("skid", Fit::Feet, &[[294, 375, 37, 35]]),
+        spec("push", Fit::Feet, &[[257, 476, 31, 39], [308, 476, 31, 39]]),
+        // The spinning pictures between the plain ball.
+        spec(
+            "roll",
+            Fit::Middle,
+            &[
+                [287, 220, 30, 30],
+                [217, 220, 30, 30],
+                [322, 220, 30, 30],
+                [217, 220, 30, 30],
+                [357, 220, 30, 30],
+                [217, 220, 30, 30],
+            ],
+        ),
+        spec(
+            "spindash",
+            Fit::Middle,
+            &[
+                [7, 223, 30, 27],
+                [42, 223, 30, 27],
+                [77, 223, 30, 27],
+                [112, 223, 30, 27],
+                [147, 223, 30, 27],
+                [182, 223, 30, 27],
+            ],
+        ),
+        spec("spring", Fit::Middle, &[[181, 255, 36, 47]]),
+        spec("hurt", Fit::Middle, &[[10, 480, 38, 32], [53, 481, 39, 31]]),
+        spec("dead", Fit::Middle, &[[97, 472, 33, 40]]),
+        spec("warp", Fit::Middle, &[[317, 431, 44, 26], [365, 433, 43, 26]]),
+        // The one who hunts you: arms out as he runs, and his laugh.
+        spec("chase", Fit::Feet, &[[296, 266, 39, 43], [347, 265, 39, 43], [400, 265, 36, 43], [443, 265, 38, 42]]),
+        spec("laugh", Fit::Feet, &[[489, 263, 44, 44], [539, 264, 44, 43]]),
+    ],
+};
+
+const BUILTINS: [&Builtin; 5] = [&TAILS, &KNUCKLES, &AMY, &AMY_S1, &EXE];
 
 /// The file a character's sheet is kept in (Sonic: any other PNG).
 fn file_names(c: Character) -> &'static [&'static str] {
@@ -444,6 +520,7 @@ fn file_names(c: Character) -> &'static [&'static str] {
         Character::Tails => &["tails.png"],
         Character::Knuckles => &["knuckles.png"],
         Character::Amy => &["amy.png", "amy.webp"],
+        Character::Exe => &["exe.png"],
     }
 }
 
@@ -749,6 +826,8 @@ impl Sheet {
             "hammer_air"
         } else if s.hammer.is_some() && !s.hammer_air && has("hammer") {
             "hammer"
+        } else if s.warp.is_some() && has("warp") {
+            "warp"
         } else if s.spindash.is_some() && has("spindash") {
             "spindash"
         } else if s.is_ball() {
@@ -788,25 +867,38 @@ impl Sheet {
     }
 
     fn blit(&self, pic: Pic, s: &Sonic, angle: f32) {
+        self.blit_at(pic, s.pos, s.facing, angle, WHITE);
+    }
+
+    fn blit_at(&self, pic: Pic, pos: Vec2, facing: f32, angle: f32, tint: Color) {
         let k = super::SCALE / self.scale.max(0.01);
         let size = vec2(pic.src.w, pic.src.h) * k;
-        let flip = s.facing < 0.0;
+        let flip = facing < 0.0;
         let cx = if flip { pic.src.w - pic.centre.x } else { pic.centre.x };
-        let top_left = s.pos - vec2(cx, pic.centre.y) * k;
+        let top_left = pos - vec2(cx, pic.centre.y) * k;
         draw_texture_ex(
             &self.texture,
             top_left.x,
             top_left.y,
-            WHITE,
+            tint,
             DrawTextureParams {
                 dest_size: Some(size),
                 source: Some(pic.src),
                 rotation: -angle,
                 flip_x: flip,
-                pivot: Some(s.pos),
+                pivot: Some(pos),
                 ..Default::default()
             },
         );
+    }
+
+    /// Picture `k` of animation `name`, centred on `pos` and facing
+    /// `facing` (the one who hunts you in the Halloween act); false when the
+    /// sheet has no such animation.
+    pub fn draw_anim(&self, name: &str, k: usize, pos: Vec2, facing: f32, tint: Color) -> bool {
+        let Some(anim) = self.anim(name) else { return false };
+        self.blit_at(anim.pics[k % anim.pics.len()], pos, facing, 0.0, tint);
+        true
     }
 
     /// Draw him from the sheet (world pass); golden when super.

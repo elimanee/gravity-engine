@@ -138,6 +138,7 @@ impl App {
         use crate::library::acts::{Zone, ALL};
         Some(match self.act.and_then(|i| ALL.get(i)).map(|a| a.zone) {
             Some(Zone::Harbour) => Song::Harbour,
+            Some(Zone::Halloween) => Song::Halloween,
             _ => Song::Meadow,
         })
     }

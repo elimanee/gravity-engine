@@ -86,7 +86,7 @@ async fn main() {
                 println!(
                     "usage: gravity_engine [--no-title] [--benchmark] [--act=N] [--special-stage=N] [FILES…]\n\n  \
                      --benchmark        run stress scenes, print frame times and quit\n  \
-                     --act=N            play Sonic act N (1-6)\n  \
+                     --act=N            play Sonic act N (1-7)\n  \
                      --special-stage=N  play special stage N (1-7)\n\n\
                      Press F1 in the app for controls."
                 );

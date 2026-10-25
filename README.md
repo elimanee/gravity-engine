@@ -4,7 +4,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
-![Version](https://img.shields.io/badge/version-3.1-8b78ff)
+![Version](https://img.shields.io/badge/version-3.2-8b78ff)
 
 **[Play it in your browser](https://elimanee.github.io/gravity-engine/)**, or [download it](#download) for Linux and Windows.
 
@@ -13,6 +13,24 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 | Sandbox | Settings drawer (Space) | Tool picker (Tab) |
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
+
+## What's new in 3.2: Halloween
+
+![Halloween Night: in a dark graveyard lit by a jack-o'-lantern and the moon, Sonic.exe, red-eyed, is right behind Sonic](docs/screenshots/halloween.png)
+
+### Halloween Night
+
+A new act after Harbour in Library → Sonic: a graveyard at night, gravestones to jump and jack-o'-lanterns that light the dark, with its own slow, eerie song. **Sonic.exe is hunting you.** A few seconds in, broken static flickers over the screen and he appears behind you, flying after you through everything, a little slower than a run, and faster as time goes on. Stop and he catches you: he laughs, you lose your rings (or a life), then he vanishes and comes back from behind. Get too far ahead and he closes in again. Invincible or super, he cannot touch you. Reach the goal to be rid of him.
+
+In the level editor, *Pumpkin* places jack-o'-lanterns and *Exe* sets him on the player in your own levels.
+
+### Play as Sonic.exe
+
+![Sonic.exe, drawn with shapes, lunging out of a teleport, broken static left where he vanished](docs/screenshots/sonic-exe.png)
+
+A fifth character (`Shift+N`, or *Exe* under *Play as* in Library → Sonic): he runs, rolls and spin-dashes like Sonic; **jump again in the air** and he vanishes in a burst of static and reappears a little further on — once a jump, and never through a wall. He is drawn with shapes (dark blue, black eyes with red pupils, bleeding), or from **a Sonic.exe sprite sheet** in the style of Sonic 1 (691 × 677), kept as `exe.png` in the Sonic folder: it also gives the one who hunts you his arms-out run and his laugh.
+
+Also: DeltaConduit's Amy sheet in the style of Sonic 1 is recognised as Amy's.
 
 ## What's new in 3.1
 
@@ -95,6 +113,7 @@ Gravity Engine 3.0 is also a Sonic game: Sonic and his friends play in the sandb
 | **Tails** | Space again in the air: fly; tap Space to flap; tired after 8 s |
 | **Knuckles** | jumps lower; Space again in the air: glide (hold), faster and faster; into a wall: climb ↑ ↓, over the top, or jump off; slides on landing |
 | **Amy** | `X` (controller X / □): hammer; Space again in the air: hammer spin; both destroy badniks and break monitors |
+| **Sonic.exe** | runs like Sonic; Space again in the air: teleport forward (once a jump) |
 
 While someone plays, `X` is the action button (the Winamp player is on `X` otherwise). The controller's A, B and Y jump.
 
@@ -142,7 +161,7 @@ A game controller plays Sonic and his friends (Linux joystick devices and XInput
 
 Each frame is the top-left corner of a `cell`-sized box whose centre is Sonic's centre, facing right; `transparent` lists background colours to cut out and `scale` is sheet pixels per original game pixel. Animations: `idle` (required), `bored`, `walk`, `run`, `roll` (also the spin dash), `skid`, `push`, `crouch`, `look_up`, `spring`; missing ones fall back to `walk` or `idle`. Frames play at the games' speed (held for 8 − speed frames, 4 − speed curled up) and turn with the ground.
 
-Tails, Knuckles and Amy can have theirs as well, recognised by their size and kept as `tails.png`, `knuckles.png` and `amy.png` / `amy.webp`: the Sonic 3 Tails sheet (1174 × 1820) and the Sonic 3 & Knuckles Knuckles sheet (1131 × 1862) from The Spriters Resource, and for Amy either CartoonsAnimate22's sheet (1274 × 2000, its Sonic Mania style) or DeltaConduit's custom sheet in the style of Sonic 1 (583 × 570; original sprites by Sega and Sonic Team). Where each character's centre sits in a picture is worked out from its pixels.
+Tails, Knuckles and Amy can have theirs as well, recognised by their size and kept as `tails.png`, `knuckles.png` and `amy.png` / `amy.webp`: the Sonic 3 Tails sheet (1174 × 1820) and the Sonic 3 & Knuckles Knuckles sheet (1131 × 1862) from The Spriters Resource, and for Amy either CartoonsAnimate22's sheet (1274 × 2000, its Sonic Mania style) or DeltaConduit's custom sheet in the style of Sonic 1 (583 × 570; original sprites by Sega and Sonic Team). Sonic.exe's is a sheet in the style of Sonic 1 (691 × 677), kept as `exe.png`. Where each character's centre sits in a picture is worked out from its pixels.
 
 The game mode's objects can come from sheets too, picked the same way (they are recognised by their size and kept beside Sonic's):
 
@@ -330,7 +349,8 @@ Without them, everything is drawn with shapes.
 - **Jelly and cloth** (`U` / `Shift+U`) — soft bodies from any image or shape, and fabric that drapes, flaps in the wind and tears
 - **Gadgets** (`L`) — lasers that reflect off mirrors and cross glass, thrusters, fans, cannons, lamps and grappling hooks; motors driven with the arrow keys
 - **Planets** — objects with their own gravity that others orbit
-- **Playable Sonic** (`Shift+O`) — arrows and `Space`, with the physics of the Mega Drive games: loops, rolling, spin dash, rings; **Tails, Knuckles and Amy** (`Shift+N`) fly, glide and climb, and swing a hammer
+- **Playable Sonic** (`Shift+O`) — arrows and `Space`, with the physics of the Mega Drive games: loops, rolling, spin dash, rings; **Tails, Knuckles, Amy and Sonic.exe** (`Shift+N`) fly, glide and climb, swing a hammer and teleport
+- **Halloween Night** — a graveyard act at night where Sonic.exe hunts you
 - **Sonic's game mode** (Library → Sonic) — six acts in two zones (Meadow and Harbour) with badniks, monitors, spikes, pits, water to drown in, star posts, two bosses and the goal signpost; score, time, lives and the end-of-act tally
 - **Special stages** — 50 rings at a goal open a giant ring to a Blue Spheres stage; win the seven **chaos emeralds** and turn **super** (any character)
 - **Music** — chiptune songs and jingles for Sonic's mode, made by the program
@@ -355,7 +375,7 @@ Press **F1** in the app for the full list.
 | `←` `↑` `→` `↓` | Drive motors, work the gadgets set to an arrow (a grappling hook shoots at the pointer) |
 | `O` | Drop a ragdoll (over an image: it becomes the head) |
 | `Shift+O` | Sonic joins (or leaves): `←` `→` run, `↓` roll, `Space` jump, `↓` + `Space` spin dash, `Shift+Space` pause |
-| `Shift+N` / `X` | Next character (Sonic, Tails, Knuckles, Amy) / action button while someone plays (Amy's hammer) |
+| `Shift+N` / `X` | Next character (Sonic, Tails, Knuckles, Amy, Sonic.exe) / action button while someone plays (Amy's hammer) |
 | `Space` twice | In the air with all seven emeralds and 50 rings: turn super |
 | Special stage | `←` `→` turn at the next crossing · `Space` jump · `↑` run forward again after a bumper · `Esc` leave |
 | Controller | Stick or d-pad: run · A / B / Y: jump · X: action · Select: next character · Start: pause |
@@ -406,7 +426,7 @@ sudo apt install pkg-config libopenmpt-dev libasound2-dev libx11-dev libxi-dev \
 cargo run --release
 ```
 
-Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins. `--act=N` and `--special-stage=N` go straight into Sonic act N (1–6) or special stage N (1–7).
+Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins. `--act=N` and `--special-stage=N` go straight into Sonic act N (1–7) or special stage N (1–7).
 
 `gravity_engine --benchmark` runs five stress scenes for a few seconds each at a fixed 60 Hz and prints the frame times (average, 95th percentile, worst), the bodies still moving, the time spent waiting for the screen and where each frame's time goes, then quits without saving anything.
 
@@ -432,7 +452,7 @@ Everything lives in `~/.config/gravity_engine/` (or `$XDG_CONFIG_HOME/gravity_en
 | `scenes/` | Default folder for saved scenes |
 | `challenges/` | Challenges made in the editor (`.gchallenge`), listed in Library → *My challenges* |
 | `levels/` | Sonic levels made in the level editor (`.gscene`), listed in Library → *Sonic* |
-| `sonic/` | Your sprite sheets for Sonic, Tails, Knuckles, Amy and the game's objects (see *Sonic sprite sheets*) |
+| `sonic/` | Your sprite sheets for Sonic, Tails, Knuckles, Amy, Sonic.exe and the game's objects (see *Sonic sprite sheets*) |
 | `ghost.json` | The endless run's best run, raced as a ghost |
 | `skins/` | Extra Winamp / Audacious skins (`.wsz` files or folders) for the classic player |
 | `sgdb_key` | SteamGridDB API key for the logo fetcher (or set `SGDB_API_KEY`) |
@@ -478,7 +498,7 @@ src/
 web/                   the web version's page, its WebAudio / storage plugin and build script
 ```
 
-`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, snow, jelly, cloth, laser beams, gadgets, planets, rope reeling, weather, night light, Sonic's running, jumping, spin dash, underwater speed and loops, Tails' flight, Knuckles' glide and climb, Amy's hammer, badniks, monitors, rings, lives and the bosses, air and bubbles, Super Sonic, the special stages, the acts, the music, sprite sheets, the endless run's zones, controllers, the profiler, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
+`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, snow, jelly, cloth, laser beams, gadgets, planets, rope reeling, weather, night light, Sonic's running, jumping, spin dash, underwater speed and loops, Tails' flight, Knuckles' glide and climb, Amy's hammer, Sonic.exe's teleport and his hunt, badniks, monitors, rings, lives and the bosses, air and bubbles, Super Sonic, the special stages, the acts, the music, sprite sheets, the endless run's zones, controllers, the profiler, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
 
 `gravity_engine --verify-challenges` (needs a display) checks that every built-in challenge can be solved.
 

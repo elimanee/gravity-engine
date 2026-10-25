@@ -96,6 +96,16 @@ impl App {
         if let Some(run) = &self.sonic {
             l.glow(run.sonic.pos, 230.0, Color::new(0.85, 0.9, 1.0, 0.55));
         }
+        // Jack-o'-lanterns, and Sonic.exe's eyes.
+        if let Some(g) = &self.game {
+            for p in g.pumpkins.iter().filter(|p| visible.contains(**p)) {
+                let flicker = 0.85 + 0.15 * (t * 11.0 + p.x).sin();
+                l.glow(*p, 150.0 * flicker, Color::new(1.0, 0.55, 0.15, 0.8));
+            }
+            if let Some(h) = g.hunter.as_ref().filter(|h| h.present()) {
+                l.glow(h.pos - vec2(-h.facing * 6.0, 18.0), 60.0, Color::new(1.0, 0.1, 0.05, 0.9));
+            }
+        }
         // The best run's ghost shows faintly.
         if let Some(ghost) = self.ghost_now() {
             l.glow(ghost.pos, 70.0, Color::new(0.6, 0.75, 1.0, 0.45));

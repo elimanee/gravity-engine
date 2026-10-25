@@ -62,7 +62,7 @@ const COLUMNS: &[&[(&str, &str)]] = &[
         ("Shift+O", "Sonic joins: ← → run, ↓ roll"),
         ("Space", "Jump · again in the air: fly, glide…"),
         ("↓ + Space", "Spin dash"),
-        ("Shift+N", "Tails, Knuckles, Amy"),
+        ("Shift+N", "Tails, Knuckles, Amy, Sonic.exe"),
         ("X", "Action (Amy's hammer)"),
         ("E → Sonic", "Acts, your levels, level editor"),
         ("Pad", "Stick, A jump, X action, Select"),

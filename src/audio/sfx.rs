@@ -63,6 +63,10 @@ pub enum Sound {
     /// Special stage: a blue sphere caught, a bumper.
     Sphere,
     Bumper,
+    /// A burst of broken static (Sonic.exe teleporting, appearing).
+    Static,
+    /// A low, slow laugh made of falling formant-like pulses.
+    Laugh,
     /// Challenge solved.
     Win,
 }
@@ -524,6 +528,37 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
             }
             out
         }
+        Sound::Static => {
+            // Noise chopped into steps, held and dropped like a broken signal.
+            let mut out = secs(0.35);
+            let mut held = 0.0;
+            let step = (RATE as f32 / 1800.0 / p) as usize;
+            for (k, s) in out.iter_mut().enumerate() {
+                if k % step.max(1) == 0 {
+                    held = n.next();
+                }
+                let t = k as f32 / RATE as f32;
+                let gate = if (t * 37.0).fract() < 0.7 { 1.0 } else { 0.2 };
+                *s = held * 0.3 * gate * (t / 0.005).min(1.0) * ((0.35 - t) / 0.08).clamp(0.0, 1.0);
+            }
+            out
+        }
+        Sound::Laugh => {
+            // "Ha… ha… ha…": breathy pulses falling in pitch.
+            let mut out = secs(1.4);
+            let dt = 1.0 / RATE as f32;
+            let mut phase = 0.0;
+            for (k, s) in out.iter_mut().enumerate() {
+                let t = k as f32 * dt;
+                let beat = (t / 0.28).fract();
+                let f = (150.0 - t * 40.0) * p;
+                phase += std::f32::consts::TAU * f * dt;
+                let voice = phase.sin() + 0.5 * (phase * 2.0).sin() + 0.25 * (phase * 3.0).sin();
+                let env = (beat / 0.03).min(1.0) * (-beat / 0.12).exp() * ((1.4 - t) / 0.3).clamp(0.0, 1.0);
+                *s = voice * 0.25 * env + n.next() * 0.08 * env;
+            }
+            out
+        }
         Sound::Win => {
             let mut out = secs(1.6);
             // C major arpeggio of soft bells.
@@ -544,7 +579,7 @@ pub fn synth(sound: Sound, pitch: f32, seed: u32) -> Vec<f32> {
 mod tests {
     use super::*;
 
-    const ALL: [Sound; 31] = [
+    const ALL: [Sound; 33] = [
         Sound::Hit { size: 80.0, hard: 0.2 },
         Sound::Hit { size: 20.0, hard: 1.0 },
         Sound::Shatter,
@@ -575,6 +610,8 @@ mod tests {
         Sound::Warp,
         Sound::Sphere,
         Sound::Bumper,
+        Sound::Static,
+        Sound::Laugh,
         Sound::Win,
     ];
 

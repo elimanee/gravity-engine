@@ -49,7 +49,11 @@ impl App {
         self.paused = false;
         let name = if spec.name.is_empty() { "Act" } else { spec.name.as_str() };
         let aim = if spec.goal.is_some() || spec.boss.is_some() { "reach the goal!" } else { "run as far as you can!" };
-        self.toasts.status("game", format!("{name}  ·  {aim}  ·  curl up to destroy badniks"));
+        if spec.hunter {
+            self.toasts.warn(format!("{name}  ·  Sonic.exe is coming: run for the goal!"));
+        } else {
+            self.toasts.status("game", format!("{name}  ·  {aim}  ·  curl up to destroy badniks"));
+        }
     }
 
     /// Leave the game mode (its bodies go too).
@@ -71,6 +75,7 @@ impl App {
             b.age += step;
         }
         self.booms.retain(|b| b.age < 0.6);
+        self.scare = (self.scare - step).max(0.0);
         let (Some(game), Some(run)) = (&mut self.game, &mut self.sonic) else { return };
         let grains: HashSet<RigidBodyHandle> = self.grains.bodies().collect();
         let world = &self.world;
@@ -194,6 +199,16 @@ impl App {
                     }
                 }
                 Effect::SuperEnd(at) => self.sound(Sound::Pop, at, 0.6),
+                Effect::HunterAppears(at) => {
+                    self.sound(Sound::Static, at, 0.7);
+                    self.scare = 0.35;
+                }
+                Effect::HunterCaught(at) => {
+                    self.sound(Sound::Laugh, at, 0.8);
+                    self.sound(Sound::Static, at, 0.5);
+                    self.scare = 0.6;
+                    self.pad.rumble(0.9, 0.4);
+                }
                 Effect::GiantRing(at) => {
                     self.sound(Sound::Warp, at, 0.7);
                     self.toasts.success("A giant ring!  ·  a special stage after the tally");
@@ -277,7 +292,51 @@ impl App {
     /// The level (world pass), before Sonic is drawn.
     pub(super) fn draw_game(&self) {
         let Some(g) = &self.game else { return };
-        game_art::draw(g, get_time() as f32, self.game_sprites.as_ref());
+        let t = get_time() as f32;
+        game_art::draw(g, t, self.game_sprites.as_ref());
+        self.draw_hunter(g, t);
+    }
+
+    /// Sonic.exe after the player: from his sheet when there is one, else
+    /// drawn with shapes; he flickers in through the static.
+    fn draw_hunter(&self, g: &Game, t: f32) {
+        use crate::sonic::{Character, Sonic};
+        let Some(h) = g.hunter.as_ref().filter(|h| h.present()) else { return };
+        if h.shown < 0.6 && (t * 30.0) as i32 % 3 == 0 {
+            return;
+        }
+        let at = h.pos + vec2(0.0, (t * 3.0).sin() * 4.0);
+        let laughing = h.laughed.is_some();
+        draw_circle(at.x, at.y, 44.0, Color::new(0.0, 0.0, 0.0, 0.22));
+        let (name, k) = if laughing { ("laugh", (t * 8.0) as usize) } else { ("chase", (t * 10.0) as usize) };
+        let sheet = self.sonic_sheet.get(Character::Exe);
+        if !sheet.is_some_and(|sh| sh.draw_anim(name, k, at, h.facing, WHITE)) {
+            let mut s = Sonic::as_character(at, Character::Exe);
+            s.grounded = true;
+            s.facing = h.facing;
+            s.gsp = if laughing { 0.0 } else { 7.0 * h.facing };
+            s.stride = t * 14.0;
+            s.anim = t * 10.0;
+            crate::sonic::art::draw(&s);
+        }
+    }
+
+    /// Broken static over the screen while Sonic.exe appears (screen pass).
+    pub(super) fn draw_scare(&self) {
+        if self.scare <= 0.0 {
+            return;
+        }
+        let (sw, sh) = (screen_width(), screen_height());
+        let a = (self.scare / 0.35).min(1.0);
+        let seed = (get_time() * 60.0) as u32;
+        for k in 0..60u32 {
+            let h = (k.wrapping_add(seed).wrapping_mul(2_654_435_761)) >> 8;
+            let y = (h % 10_000) as f32 / 10_000.0 * sh;
+            let grey = ((h >> 4) % 100) as f32 / 100.0;
+            let thick = 1.0 + ((h >> 11) % 4) as f32;
+            draw_rectangle(0.0, y, sw, thick, Color::new(grey, grey * 0.8, grey * 0.8, 0.35 * a));
+        }
+        draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.4, 0.0, 0.0, 0.12 * a));
     }
 
     /// Shield, sparkles and score popups (world pass), after Sonic.
