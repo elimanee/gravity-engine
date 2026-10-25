@@ -21,6 +21,8 @@ pub enum Song {
     Invincible,
     Super,
     Special,
+    /// The Halloween act: slow, in a harmonic minor, all echoes.
+    Halloween,
 }
 
 /// A tune played once.
@@ -45,6 +47,7 @@ const MAJOR: &[i32] = &[0, 2, 4, 5, 7, 9, 11];
 const MINOR: &[i32] = &[0, 2, 3, 5, 7, 8, 10];
 const DORIAN: &[i32] = &[0, 2, 3, 5, 7, 9, 10];
 const MIXOLYDIAN: &[i32] = &[0, 2, 4, 5, 7, 9, 10];
+const HARMONIC_MINOR: &[i32] = &[0, 2, 3, 5, 7, 8, 11];
 
 #[derive(Clone, Copy, PartialEq)]
 enum Bass {
@@ -85,6 +88,19 @@ struct Style {
 
 fn style(song: Song) -> Style {
     match song {
+        Song::Halloween => Style {
+            seed: 91,
+            bpm: 92.0,
+            root: 52,
+            scale: HARMONIC_MINOR,
+            chords: [0, 5, 0, 4, 0, 5, 1, 4],
+            chords_b: [3, 3, 0, 0, 5, 1, 4, 4],
+            duty: 0.5,
+            bass: Bass::Pulse,
+            drums: Drums::Soft,
+            arp: true,
+            echo: 0.42,
+        },
         Song::Meadow => Style {
             seed: 11,
             bpm: 144.0,
@@ -673,7 +689,7 @@ pub fn jingle(j: Jingle) -> Vec<f32> {
 mod tests {
     use super::*;
 
-    const ALL: [Song; 10] = [
+    const ALL: [Song; 11] = [
         Song::Meadow,
         Song::Twilight,
         Song::Snowfield,
@@ -684,6 +700,7 @@ mod tests {
         Song::Invincible,
         Song::Super,
         Song::Special,
+        Song::Halloween,
     ];
 
     #[test]

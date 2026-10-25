@@ -9,6 +9,9 @@
 //!   off it. Landing from a glide he slides on his belly.
 //! - Amy swings her hammer (the action button) on the ground, and spins
 //!   it when she jumps again in the air; both destroy badniks.
+//! - Sonic.exe (the creepypasta's) runs like Sonic; jump again in the air
+//!   and he vanishes and reappears a little further on (once a jump),
+//!   never through a wall.
 
 use super::*;
 use serde::{Deserialize, Serialize};
@@ -21,10 +24,12 @@ pub enum Character {
     Tails,
     Knuckles,
     Amy,
+    Exe,
 }
 
 impl Character {
-    pub const ALL: [Character; 4] = [Character::Sonic, Character::Tails, Character::Knuckles, Character::Amy];
+    pub const ALL: [Character; 5] =
+        [Character::Sonic, Character::Tails, Character::Knuckles, Character::Amy, Character::Exe];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -32,6 +37,15 @@ impl Character {
             Character::Tails => "Tails",
             Character::Knuckles => "Knuckles",
             Character::Amy => "Amy",
+            Character::Exe => "Sonic.exe",
+        }
+    }
+
+    /// A shorter name, for small buttons.
+    pub fn short(self) -> &'static str {
+        match self {
+            Character::Exe => "Exe",
+            c => c.label(),
         }
     }
 
@@ -48,6 +62,7 @@ impl Character {
             Character::Tails => "Space in the air: fly (tap to flap)",
             Character::Knuckles => "Space in the air: glide  ·  into a wall: climb ↑ ↓",
             Character::Amy => "X: hammer  ·  Space in the air: hammer spin",
+            Character::Exe => "Space in the air: teleport forward",
         }
     }
 
@@ -84,6 +99,9 @@ const HAMMER: u32 = 22;
 const HAMMER_HITS: (u32, u32) = (5, 16);
 const HAMMER_AIR: u32 = 30;
 const HAMMER_REACH: f32 = 24.0;
+/// Sonic.exe's teleport: how far (guide px), and how long it shows (frames).
+const WARP: f32 = 56.0;
+const WARP_SHOW: u32 = 14;
 
 impl Sonic {
     /// Turn into `c` where he is, feet staying on the ground.
@@ -107,6 +125,8 @@ impl Sonic {
         self.climb_up = None;
         self.hammer = None;
         self.hammer_air = false;
+        self.warp = None;
+        self.warped = false;
     }
 
     /// Jump speed for this character.
@@ -148,6 +168,8 @@ impl Sonic {
             Some(if self.hammer_air { 1.0 } else { 3.0 })
         } else if self.gliding.is_some() || self.sliding {
             Some(f32::INFINITY)
+        } else if self.warp.is_some() {
+            Some(3.0)
         } else {
             None
         }
@@ -209,7 +231,7 @@ impl Sonic {
 
     /// In the air: jumping again starts a character's move; moves going on
     /// carry on. Returns whether he steers as usual.
-    pub(super) fn air_moves(&mut self, input: Input, events: &mut Vec<Event>) -> bool {
+    pub(super) fn air_moves(&mut self, world: &PhysWorld, env: Env, input: Input, events: &mut Vec<Event>) -> bool {
         let again = input.jump_pressed && self.jumping && !self.hurt;
         // With every emerald and enough rings, jumping again turns him super first.
         if again && self.can_super && !self.super_form {
@@ -238,7 +260,11 @@ impl Sonic {
                 self.jumping = true;
                 events.push(Event::Hammer);
             }
+            Character::Exe if again && !self.warped => self.teleport(world, env, events),
             _ => {}
+        }
+        if let Some(f) = self.warp {
+            self.warp = (f + 1 < WARP_SHOW).then_some(f + 1);
         }
         if let Some(f) = self.flying {
             self.flying = Some(f + 1);
@@ -274,6 +300,21 @@ impl Sonic {
             return false;
         }
         !self.dropping
+    }
+
+    /// Sonic.exe vanishes and reappears up to [`WARP`] ahead, short of a
+    /// wall, keeping his speed (at least a run), with a little lift.
+    fn teleport(&mut self, world: &PhysWorld, env: Env, events: &mut Vec<Event>) {
+        let from = self.pos;
+        let dir = vec2(self.facing, 0.0);
+        let wr = self.radii().0;
+        let room = self.cast(world, env, from, dir, WARP + wr + 2.0).map_or(WARP, |h| (h.dist - wr - 2.0).max(0.0));
+        self.pos.x += self.facing * room * SCALE;
+        self.xsp = self.facing * self.xsp.abs().max(4.0);
+        self.ysp = self.ysp.min(-2.0);
+        self.warped = true;
+        self.warp = Some(0);
+        events.push(Event::Teleport { from });
     }
 
     /// Gravity for this frame in the air (`k`: the world's gravity relative to Earth's).
@@ -459,6 +500,34 @@ mod tests {
         s.can_super = true;
         jump_then(&mut s, &w, Input::default(), 10);
         assert!(s.super_form && s.flying.is_none());
+    }
+
+    #[test]
+    fn sonic_exe_teleports_once_a_jump_and_not_through_walls() {
+        let w = world();
+        let mut s = standing(Character::Exe, 500.0);
+        let press = Input { jump: true, jump_pressed: true, ..Input::default() };
+        s.frame(&w, &walls, press, None, 1.0);
+        run(&mut s, &w, Input { jump: true, ..Input::default() }, 8);
+        let before = s.pos.x;
+        let out = s.frame(&w, &walls, press, None, 1.0);
+        assert!(out.iter().any(|e| matches!(e, Event::Teleport { .. })));
+        assert!(s.pos.x - before > 70.0, "a blink forward: {}", s.pos.x - before);
+        assert!(s.warped && s.warp.is_some());
+        // Once a jump.
+        let x = s.pos.x;
+        let out = s.frame(&w, &walls, press, None, 1.0);
+        assert!(!out.iter().any(|e| matches!(e, Event::Teleport { .. })));
+        assert!((s.pos.x - x).abs() < 15.0);
+        // Never into the wall at the world's right edge.
+        let right = W - WALL_T * PPM;
+        let mut s = standing(Character::Exe, right - 60.0);
+        s.frame(&w, &walls, press, None, 1.0);
+        run(&mut s, &w, Input { jump: true, ..Input::default() }, 8);
+        s.frame(&w, &walls, press, None, 1.0);
+        assert!(s.pos.x + s.radii().0 * SCALE <= right + 1.0, "{} past the wall at {right}", s.pos.x);
+        assert_eq!(Character::ALL.len(), 5);
+        assert_eq!(Character::Exe.cycle(1), Character::Sonic);
     }
 
     #[test]

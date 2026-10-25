@@ -2,7 +2,8 @@
 //! leaping fish, a diving gull, a spiny puffer), spikes, item monitors,
 //! star posts, the goal signpost and two bosses; rings scattered when
 //! hurt, lives, score and time, air underwater (bubbles from vents), the
-//! giant ring to a special stage, Super Sonic, and the end-of-act tally.
+//! giant ring to a special stage, Super Sonic, the end-of-act tally, and
+//! on Halloween Sonic.exe hunting the player through the act.
 //!
 //! A level's contents are a [`LevelSpec`] saved in scene files. At play
 //! time they become a [`Game`], updated after Sonic each frame; what it
@@ -46,6 +47,19 @@ const VENT_EVERY: f32 = 4.5;
 pub const SPECIAL_RINGS: u32 = 50;
 /// The anchor's radius (world px).
 pub const ANCHOR_R: f32 = 22.0;
+/// The hunter (Sonic.exe): seconds before he first shows, his speed (world
+/// px/s, a little more each minute), how far behind he comes back, how far
+/// ahead the player may get before he closes in again, how long he keeps
+/// away after catching the player, and his size.
+const HUNT_DELAY: f32 = 4.0;
+const HUNT_SPEED: f32 = 330.0;
+const HUNT_SPEED_UP: f32 = 40.0;
+const HUNT_BEHIND: f32 = 520.0;
+const HUNT_LEAD: f32 = 1100.0;
+const HUNT_REST: f32 = 3.0;
+/// He stays this long laughing where he caught the player (s).
+pub const HUNT_LAUGH: f32 = 1.2;
+pub const HUNTER_R: f32 = 24.0;
 /// A gull rests this long between swoops and hovers this long before one (s).
 const GULL_REST: f32 = 3.0;
 const GULL_WARN: f32 = 0.5;
@@ -164,6 +178,10 @@ pub struct LevelSpec {
     pub boss_kind: BossKind,
     /// Air bubble vents on the floor of the water.
     pub vents: Vec<[f32; 2]>,
+    /// Sonic.exe hunts the player (the Halloween act).
+    pub hunter: bool,
+    /// Jack-o'-lanterns (lit at night).
+    pub pumpkins: Vec<[f32; 2]>,
 }
 
 impl LevelSpec {
@@ -176,6 +194,8 @@ impl LevelSpec {
             && self.goal.is_none()
             && self.boss.is_none()
             && self.vents.is_empty()
+            && !self.hunter
+            && self.pumpkins.is_empty()
     }
 }
 
@@ -292,6 +312,28 @@ pub struct Boss {
     floor: Option<f32>,
 }
 
+/// Sonic.exe, hunting the player: he appears behind, flies after him
+/// through everything, a little slower than a run; touching the player
+/// hurts, then he laughs, vanishes, and comes back from behind.
+pub struct Hunter {
+    pub pos: Vec2,
+    pub facing: f32,
+    /// Seconds until he (re)appears (he is not there meanwhile).
+    pub away: f32,
+    /// Seconds since he appeared, and since he caught the player.
+    pub shown: f32,
+    pub laughed: Option<f32>,
+    /// Seconds of hunting (he speeds up).
+    hunting: f32,
+}
+
+impl Hunter {
+    /// He is there to see (and to touch).
+    pub fn present(&self) -> bool {
+        self.away <= 0.0
+    }
+}
+
 /// The end-of-act tally: bonuses counted into the score.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tally {
@@ -347,6 +389,9 @@ pub enum Effect {
     Breathe(Vec2),
     /// Out of rings: no longer super.
     SuperEnd(Vec2),
+    /// Sonic.exe appeared (static), and caught the player (his laugh).
+    HunterAppears(Vec2),
+    HunterCaught(Vec2),
     /// The giant ring opened at the goal.
     GiantRing(Vec2),
     GameOver,
@@ -446,6 +491,8 @@ pub struct Game {
     pub giant_ring: bool,
     /// Seconds until a super form uses up its next ring.
     super_drain: f32,
+    pub hunter: Option<Hunter>,
+    pub pumpkins: Vec<Vec2>,
 }
 
 impl Game {
@@ -499,6 +546,15 @@ impl Game {
             emeralds_all: false,
             giant_ring: false,
             super_drain: 1.0,
+            hunter: spec.hunter.then_some(Hunter {
+                pos: start,
+                facing: 1.0,
+                away: HUNT_DELAY,
+                shown: 0.0,
+                laughed: None,
+                hunting: 0.0,
+            }),
+            pumpkins: spec.pumpkins.iter().map(|&p| px(p)).collect(),
         };
         // With a boss, the goal only shows once it is beaten.
         if g.boss.is_some() {
@@ -595,6 +651,12 @@ impl Game {
         }
         for b in &mut self.bubbles {
             b.pos -= d;
+        }
+        for p in &mut self.pumpkins {
+            *p -= d;
+        }
+        if let Some(h) = &mut self.hunter {
+            h.pos -= d;
         }
         if let Some(g) = &mut self.goal {
             *g -= d;
@@ -778,6 +840,10 @@ impl Game {
                             self.air = AIR;
                             self.lost.clear();
                             self.shots.clear();
+                            if let Some(h) = &mut self.hunter {
+                                h.away = HUNT_DELAY;
+                                h.laughed = None;
+                            }
                             if let Some(b) = &mut self.boss {
                                 b.locked = false;
                             }
@@ -892,8 +958,76 @@ impl Game {
                 out.push(Effect::Cleared);
             }
         }
+        self.hunt(dt, sonic, &mut out);
         self.update_world(dt, world, solid, sonic, &mut out, true);
         out
+    }
+
+    /// Sonic.exe after the player (while playing, until the goal).
+    fn hunt(&mut self, dt: f32, sonic: &mut Sonic, out: &mut Vec<Effect>) {
+        let done = self.goal_passed.is_some();
+        let sturdy = self.sturdy(sonic);
+        let Some(h) = &mut self.hunter else { return };
+        if done {
+            h.away = f32::INFINITY;
+            return;
+        }
+        // Caught: he laughs where he is, then vanishes for a while.
+        if let Some(t) = &mut h.laughed {
+            *t += dt;
+            if *t > HUNT_LAUGH {
+                h.laughed = None;
+                h.away = HUNT_REST;
+            }
+            return;
+        }
+        let me = sonic.pos;
+        // Far behind (or not there yet): he comes back from behind.
+        let behind = |facing: f32| me - vec2(facing.signum() * HUNT_BEHIND, 60.0);
+        if h.away > 0.0 {
+            h.away -= dt;
+            if h.away <= 0.0 && !sonic.dead {
+                let ahead = if sonic.xsp.abs() > 0.5 { sonic.xsp.signum() } else { sonic.facing };
+                h.pos = behind(ahead);
+                h.shown = 0.0;
+                h.laughed = None;
+                out.push(Effect::HunterAppears(h.pos));
+            } else {
+                h.away = h.away.max(0.0001);
+                return;
+            }
+        }
+        h.shown += dt;
+        h.hunting += dt;
+        if (me - h.pos).length() > HUNT_LEAD {
+            let ahead = (me.x - h.pos.x).signum();
+            h.pos = behind(ahead);
+            h.shown = 0.0;
+            out.push(Effect::HunterAppears(h.pos));
+        }
+        let speed = HUNT_SPEED + HUNT_SPEED_UP * h.hunting / 60.0;
+        let to = me - h.pos;
+        if to.length() > 1.0 {
+            h.pos += to.normalize() * (speed * dt).min(to.length());
+            if to.x.abs() > 4.0 {
+                h.facing = to.x.signum();
+            }
+        }
+        let (wr, hr) = sonic.radii();
+        let reach = HUNTER_R + wr.max(hr) * SCALE * 0.8;
+        if sonic.dead || (me - h.pos).length() > reach {
+            return;
+        }
+        if sturdy {
+            // Invincible or super: he cannot bear it and vanishes.
+            h.away = HUNT_REST;
+            out.push(Effect::HunterAppears(h.pos));
+        } else if self.invulnerable <= 0.0 {
+            let at = h.pos;
+            h.laughed = Some(0.0);
+            out.push(Effect::HunterCaught(at));
+            self.hurt(sonic, at, out);
+        }
     }
 
     /// Air underwater: chimes as it runs low, the countdown, drowning.
@@ -1627,6 +1761,55 @@ mod tests {
         g.rings = 3;
         let out = g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
         assert!(out.iter().any(|e| matches!(e, Effect::RingsLost(_))));
+    }
+
+    #[test]
+    fn sonic_exe_hunts_catches_laughs_and_comes_back() {
+        let mut w = world();
+        let spec = LevelSpec { hunter: true, goal: Some([200.0, 1.0]), ..LevelSpec::default() };
+        let mut g = Game::new(&spec, &mut w, vec2(0.0, 0.0));
+        let mut s = standing(800.0);
+        let mut fx = vec![];
+        for _ in 0..(HUNT_DELAY * 60.0) as usize + 2 {
+            fx.extend(g.update(1.0 / 60.0, &w, &all, &mut s, 1e9));
+        }
+        let h = g.hunter.as_ref().unwrap();
+        assert!(h.present() && fx.iter().any(|e| matches!(e, Effect::HunterAppears(_))));
+        assert!(h.pos.x < s.pos.x - 400.0, "he comes from behind");
+        // Standing still, he catches up: rings lost, then he laughs and goes.
+        g.rings = 5;
+        let mut caught = false;
+        for _ in 0..240 {
+            caught |= g.update(1.0 / 60.0, &w, &all, &mut s, 1e9).iter().any(|e| matches!(e, Effect::HunterCaught(_)));
+        }
+        assert!(caught && g.rings == 0 && !s.dead);
+        assert!(g.hunter.as_ref().unwrap().laughed.is_some() || !g.hunter.as_ref().unwrap().present());
+        for _ in 0..(HUNT_LAUGH * 60.0) as usize + 5 {
+            g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        }
+        assert!(!g.hunter.as_ref().unwrap().present(), "gone for a while");
+        // He comes back from behind; run far ahead and he closes in again.
+        g.hunter.as_mut().unwrap().away = 0.01;
+        let out = g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        assert!(out.iter().any(|e| matches!(e, Effect::HunterAppears(_))));
+        s.pos.x += 3000.0;
+        let out = g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        assert!(out.iter().any(|e| matches!(e, Effect::HunterAppears(_))));
+        assert!((g.hunter.as_ref().unwrap().pos.x - s.pos.x).abs() < HUNT_LEAD);
+        // Invincible, he cannot touch you.
+        g.invincible = 10.0;
+        g.invulnerable = 0.0;
+        g.rings = 3;
+        for _ in 0..240 {
+            g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        }
+        assert_eq!(g.rings, 3);
+        // Past the goal he is gone for good.
+        g.invincible = 0.0;
+        s.pos = g.goal.unwrap() + vec2(20.0, 0.0);
+        g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        assert!(!g.hunter.as_ref().unwrap().present());
     }
 
     #[test]

@@ -37,6 +37,9 @@ pub fn draw(g: &Game, t: f32, sp: Option<&Sprites>) {
     for v in &g.vents {
         vent(v.pos);
     }
+    for p in &g.pumpkins {
+        pumpkin(*p, t);
+    }
     for b in &g.bubbles {
         bubble(b);
     }
@@ -382,6 +385,28 @@ pub fn giant_ring(c: Vec2, r: f32, t: f32) {
         let a = t * 2.0 + k as f32 * std::f32::consts::FRAC_PI_2;
         let p = c + vec2(a.cos() * r * 1.3, a.sin() * r * 1.1);
         star(p, 4.0 + 2.0 * (t * 6.0 + k as f32).sin().abs(), Color::new(1.0, 1.0, 0.8, 0.9), a);
+    }
+}
+
+/// A jack-o'-lantern sitting on the ground at `at` (its centre).
+fn pumpkin(at: Vec2, t: f32) {
+    let orange = Color::new(0.95, 0.5, 0.08, 1.0);
+    let dark = Color::new(0.65, 0.28, 0.04, 1.0);
+    for (dx, r) in [(-9.0, 12.0), (9.0, 12.0), (0.0, 14.0)] {
+        draw_ellipse(at.x + dx, at.y, r, 14.0, 0.0, if dx == 0.0 { orange } else { dark });
+    }
+    draw_ellipse(at.x, at.y, 9.0, 13.5, 0.0, orange);
+    draw_rectangle(at.x - 2.0, at.y - 19.0, 4.0, 7.0, Color::new(0.3, 0.45, 0.15, 1.0));
+    // The candle inside flickers through the face.
+    let glow = Color::new(1.0, 0.85 + 0.15 * (t * 11.0 + at.x).sin(), 0.3, 1.0);
+    for s in [-1.0f32, 1.0] {
+        let e = at + vec2(s * 6.0, -4.0);
+        draw_triangle(e + vec2(-3.5, 2.5), e + vec2(3.5, 2.5), e + vec2(0.0, -3.5), glow);
+    }
+    let m = at + vec2(0.0, 5.0);
+    draw_triangle(m + vec2(-9.0, -1.0), m + vec2(9.0, -1.0), m + vec2(0.0, 5.0), glow);
+    for k in [-5.0f32, 0.0, 5.0] {
+        draw_triangle(m + vec2(k - 2.0, -1.0), m + vec2(k + 2.0, -1.0), m + vec2(k, -4.0), orange);
     }
 }
 

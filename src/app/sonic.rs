@@ -294,6 +294,13 @@ impl App {
                     self.sound(Sound::Dash, s.pos, 0.45);
                     self.pad.rumble(0.3, 0.1);
                 }
+                Event::Teleport { from } => {
+                    self.sound(Sound::Static, s.pos, 0.6);
+                    if self.s.effects {
+                        self.effects.smoke(from, 10.0, 0.15);
+                        self.effects.sparks(s.pos, vec2(-s.facing, 0.0), 10.0);
+                    }
+                }
                 Event::Transform => {
                     self.sound(Sound::Transform, s.pos, 0.7);
                     self.pad.rumble(0.6, 0.3);

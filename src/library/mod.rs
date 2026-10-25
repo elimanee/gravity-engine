@@ -276,6 +276,34 @@ impl Builder {
         self.level().boss_kind = kind;
     }
 
+    /// Sonic.exe hunts the player through this level.
+    pub fn hunter(&mut self) {
+        self.level().hunter = true;
+    }
+
+    /// A jack-o'-lantern on the ground at `ground`.
+    pub fn pumpkin(&mut self, x: f32, ground: f32) {
+        let at = self.phys(x, ground - 14.0);
+        self.level().pumpkins.push(at);
+    }
+
+    /// A gravestone on the ground at `ground`: something to jump.
+    pub fn tomb(&mut self, x: f32, ground: f32, rgb: [u8; 3]) {
+        let m = Material { flammable: false, friction: 0.6, bounce: 0.05, ..Material::DEFAULT };
+        let g = ground + 2.0;
+        let outline = [
+            (x - 14.0, g),
+            (x - 14.0, g - 30.0),
+            (x - 10.0, g - 38.0),
+            (x, g - 41.0),
+            (x + 10.0, g - 38.0),
+            (x + 14.0, g - 30.0),
+            (x + 14.0, g),
+            (x - 14.0, g),
+        ];
+        self.stroke(&outline, 4.0, rgb, true, m);
+    }
+
     /// An air bubble vent on the ground at `ground` (under water).
     pub fn vent(&mut self, x: f32, ground: f32) {
         let at = self.phys(x, ground);

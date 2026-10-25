@@ -83,14 +83,15 @@ impl Library {
 
     fn tabs(p: Rect) -> [Rect; 4] {
         let y = p.y + 44.0;
-        [0.0, 1.0, 2.0, 3.0].map(|k| Rect::new(p.x + PAD + k * 136.0, y, 130.0, 26.0))
+        [0.0, 1.0, 2.0, 3.0].map(|k| Rect::new(p.x + PAD + k * 116.0, y, 110.0, 26.0))
     }
 
     /// The character buttons (Sonic tab), right of the tabs.
-    fn characters(p: Rect) -> [Rect; 4] {
+    fn characters(p: Rect) -> [Rect; Character::ALL.len()] {
         let w = 58.0;
-        let x0 = p.x + p.w - PAD - 4.0 * (w + 4.0) + 4.0;
-        [0.0, 1.0, 2.0, 3.0].map(|k| Rect::new(x0 + k * (w + 4.0), p.y + 44.0, w, 26.0))
+        let n = Character::ALL.len() as f32;
+        let x0 = p.x + p.w - PAD - n * (w + 4.0) + 4.0;
+        std::array::from_fn(|k| Rect::new(x0 + k as f32 * (w + 4.0), p.y + 44.0, w, 26.0))
     }
 
     /// The "Edit" button of a "My challenges" cell.
@@ -135,8 +136,8 @@ impl Library {
                 self.tab = Tab::Mine;
             } else if tabs[3].contains(input.mouse) {
                 self.tab = Tab::Sonic;
-            } else if let Some(k) =
-                (0..4).find(|&k| self.tab == Tab::Sonic && Self::characters(p)[k].contains(input.mouse))
+            } else if let Some(k) = (0..Character::ALL.len())
+                .find(|&k| self.tab == Tab::Sonic && Self::characters(p)[k].contains(input.mouse))
             {
                 actions.push(Action::SetCharacter(Character::ALL[k]));
             } else if let Some(slot) = (0..self.count(mine)).find(|&i| Self::cell(p, i).contains(input.mouse)) {
@@ -210,7 +211,7 @@ impl Library {
             let label = "Play as";
             text(label, r[0].x - 8.0 - measure(label, 12.0), r[0].y + 17.0, 12.0, fade(TEXT_MUTED, f));
             for (k, c) in Character::ALL.into_iter().enumerate() {
-                draw_button(r[k], c.label(), r[k].contains(mouse), data.character == c, f);
+                draw_button(r[k], c.short(), r[k].contains(mouse), data.character == c, f);
             }
         }
 
