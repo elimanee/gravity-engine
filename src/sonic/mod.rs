@@ -16,6 +16,7 @@
 
 pub mod art;
 mod moves;
+pub mod regions;
 pub mod sheet;
 
 pub use moves::Character;
@@ -75,6 +76,17 @@ const PUSH: f32 = 10.0;
 /// Size: half widths and half heights standing (Sonic) and curled up.
 const STAND: (f32, f32) = (9.0, 19.0);
 const BALL: (f32, f32) = (7.0, 14.0);
+
+/// A character's half width and half height (guide px), standing or
+/// curled up.
+pub fn body_radii(c: Character, ball: bool) -> (f32, f32) {
+    if ball {
+        BALL
+    } else {
+        c.stand()
+    }
+}
+
 /// Launch speed of a spring (a surface with bounce 1).
 const SPRING: f32 = 10.0;
 /// Sensors start this far behind his centre (guide px).

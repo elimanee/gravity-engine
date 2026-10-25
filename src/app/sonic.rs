@@ -68,7 +68,7 @@ impl App {
     }
 
     /// (Re)load the sprite sheets from the Sonic folder: the characters', and the objects'.
-    fn load_sonic_sheet(&mut self) {
+    pub(super) fn load_sonic_sheet(&mut self) {
         let (sheets, errors) = Sheets::load();
         self.sonic_sheet = sheets;
         for e in errors {

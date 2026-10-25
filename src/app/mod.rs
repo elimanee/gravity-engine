@@ -68,6 +68,7 @@ mod night;
 mod player;
 mod player_body;
 mod ragdoll;
+mod regions;
 mod rewind;
 mod select;
 mod soft;
@@ -175,6 +176,8 @@ pub struct App {
     music: music::Music,
     /// A special stage being played (it takes the whole screen).
     special: Option<special::SpecialRun>,
+    /// The sprite region editor (it takes the whole screen too).
+    regions: Option<regions::RegionEditor>,
     /// The web version saves the settings as they change (closing the tab
     /// does not run `Drop`): what was saved last, and when to look again.
     autosaved: String,
@@ -313,6 +316,7 @@ impl App {
             bench: None,
             music: Default::default(),
             special: None,
+            regions: None,
             autosaved: String::new(),
             autosave_in: 2.0,
             game: None,
@@ -429,6 +433,11 @@ impl App {
             self.special_frame(dt);
             self.audio.tick();
             self.update_music();
+            return;
+        }
+        if self.regions.is_some() {
+            self.regions_frame(dt);
+            self.audio.tick();
             return;
         }
 
@@ -1283,6 +1292,7 @@ impl App {
                 self.toggle_sonic(at);
             }
             Action::LoadSonicSheet => self.pick_sonic_sheet(),
+            Action::EditSpriteRegions => self.open_regions(None),
             Action::LevelContinue => self.level_continue(),
             Action::OpenAct(i) => self.open_act(i),
             Action::OpenLevel(i) => self.open_level(i),

@@ -128,6 +128,8 @@ pub enum Action {
     ToggleSonic,
     /// Pick a sprite sheet for Sonic.
     LoadSonicSheet,
+    /// Edit which pictures of their sheets the characters are drawn from.
+    EditSpriteRegions,
     /// After an act's tally: the next act (or back to the library).
     LevelContinue,
     /// Play one of Sonic's built-in acts.
@@ -192,6 +194,7 @@ impl Action {
                 | Action::LoadScene
                 | Action::Screenshot
                 | Action::LoadSonicSheet
+                | Action::EditSpriteRegions
                 | Action::ToggleRecording
                 | Action::LoadSkin
         )
