@@ -4,7 +4,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
-![Version](https://img.shields.io/badge/version-3.3-8b78ff)
+![Version](https://img.shields.io/badge/version-3.4-8b78ff)
 
 **[Play it in your browser](https://elimanee.github.io/gravity-engine/)**, or [download it](#download) for Linux and Windows.
 
@@ -14,13 +14,22 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
 
-## What's new in 3.3: the sprite region editor
+## What's new in 3.4: any sheet, in the sprite region editor
 
 ![The sprite region editor on a home-made sheet new to the game: its background picked and cut out over a checkerboard, the walk animation's six pictures added in one go and numbered, the third one chosen with its centre and body shown, the animation playing at 10 pictures a second over the picture before](docs/screenshots/sprite-regions.png)
 
-Your sprite sheets can now be fixed up in the program: **Edit sprite regions…** in the settings opens a character's sheet, and for each animation (standing, walking, the spin dash, Tails' flight, Amy's hammer, Sonic.exe's teleport…) you choose its pictures on the sheet and where the character stands in them. Draw, move and resize the boxes, **double-click a sprite** to add it, drag the character's centre with its body and the ground shown around it, or let *Fit* tighten a box around its sprite; the animation plays beside it, over the picture before if you like, to line them up. What you save goes beside the sheet as `<character>.regions.json`, and the game draws from it at once. See [Editing the regions](#editing-the-regions).
+The sprite region editor goes further: **any picture can be a character's sheet**, not only the ones the game knows.
 
-*(The sheet in the picture is a little figure drawn for it: no sprites from the games are included.)*
+- **Open a sheet…** makes any PNG, WebP, GIF, BMP or JPEG a character's sheet. A sheet new to the game opens empty: click its background with the eyedropper (*Pick*) and it is cut out, over a checkerboard. Its sprites are then found by themselves, and **Shift-drag** adds every sprite in a box, row by row.
+- **Each animation has a pace**: the games' own, following the character's speed, or 4 to 30 pictures a second. It can **play once** and stop on its last picture, and each picture can be **held longer** or **mirrored**.
+- **Several pictures at once**: choose them with Shift- or Ctrl-click (or `Ctrl+A`), then move, fit, mirror or delete them together. *Same centre* lines them up, and copy / paste takes pictures from one animation to another.
+- **Try** (`T`) plays the character as edited, saved or not, on a test track with every pose to try, and `Esc` comes back to the editor.
+
+See [Editing the regions](#editing-the-regions). *(The sheet in the picture is a little figure drawn for it: no sprites from the games are included.)*
+
+## What's new in 3.3: the sprite region editor
+
+Your sprite sheets can now be fixed up in the program: **Edit sprite regions…** in the settings opens a character's sheet, and for each animation (standing, walking, the spin dash, Tails' flight, Amy's hammer, Sonic.exe's teleport…) you choose its pictures on the sheet and where the character stands in them. Draw, move and resize the boxes, **double-click a sprite** to add it, drag the character's centre with its body and the ground shown around it, or let *Fit* tighten a box around its sprite; the animation plays beside it, over the picture before if you like, to line them up. What you save goes beside the sheet as `<character>.regions.json`, and the game draws from it at once. See [Editing the regions](#editing-the-regions).
 
 ## What's new in 3.2: Halloween
 
