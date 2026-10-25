@@ -4,9 +4,9 @@
 //! buttons; every one of them becomes a rigid body. Press F1 in the app for
 //! the full list of controls.
 //!
-//! Usage: `gravity_engine [--no-title] [--benchmark] [--act=N] [--special-stage=N] [FILES…]` — files may
-//! be images, audio (tracker modules, mp3/flac/ogg/…, .pls playlists) or
-//! `.gscene` scenes.
+//! Usage: `gravity_engine [--no-title] [--benchmark] [--act=N] [--special-stage=N]
+//! [--sprite-regions[=CHARACTER]] [FILES…]` — files may be images, audio
+//! (tracker modules, mp3/flac/ogg/…, .pls playlists) or `.gscene` scenes.
 
 // No console window behind the game on Windows release builds.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
@@ -69,6 +69,7 @@ async fn main() {
     let mut benchmark = false;
     let mut act = None;
     let mut special = None;
+    let mut regions = None;
     let mut files = vec![];
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
@@ -82,12 +83,21 @@ async fn main() {
             a if a.starts_with("--special-stage=") => {
                 special = a[16..].parse::<usize>().ok().and_then(|n| n.checked_sub(1));
             }
+            // Straight into the sprite region editor (on this character's sheet).
+            "--sprite-regions" => regions = Some(None),
+            a if a.starts_with("--sprite-regions=") => {
+                let name = a[17..].to_lowercase();
+                regions = Some(sonic::Character::ALL.into_iter().find(|c| c.short().to_lowercase() == name));
+            }
             "-h" | "--help" => {
                 println!(
-                    "usage: gravity_engine [--no-title] [--benchmark] [--act=N] [--special-stage=N] [FILES…]\n\n  \
+                    "usage: gravity_engine [--no-title] [--benchmark] [--act=N] [--special-stage=N] \
+                     [--sprite-regions[=CHARACTER]] [FILES…]\n\n  \
                      --benchmark        run stress scenes, print frame times and quit\n  \
                      --act=N            play Sonic act N (1-7)\n  \
-                     --special-stage=N  play special stage N (1-7)\n\n\
+                     --special-stage=N  play special stage N (1-7)\n  \
+                     --sprite-regions   edit the characters' sprite sheet regions (sonic, tails,\n                     \
+                     knuckles, amy or exe)\n\n\
                      Press F1 in the app for controls."
                 );
                 return;
@@ -116,6 +126,9 @@ async fn main() {
     }
     if let Some(i) = special {
         app.play_special(i);
+    }
+    if let Some(c) = regions {
+        app.edit_regions(c);
     }
     loop {
         app.frame();

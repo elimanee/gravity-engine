@@ -19,6 +19,7 @@
 //! The game's objects can have sheets in the same folder too (see
 //! [`crate::game::sprites`]); those names are not Sonic's.
 
+use super::regions::Regions;
 use super::{Character, Sonic};
 use macroquad::prelude::*;
 use serde::Deserialize;
@@ -524,6 +525,15 @@ fn file_names(c: Character) -> &'static [&'static str] {
     }
 }
 
+/// Whether `c` has a sheet in the Sonic folder (usable or not).
+pub fn has_sheet(c: Character) -> bool {
+    let Some(dir) = dir().filter(|d| d.is_dir()) else { return false };
+    match c {
+        Character::Sonic => find(&dir).is_ok(),
+        c => file_names(c).iter().any(|n| dir.join(n).is_file()),
+    }
+}
+
 /// Which character's built-in sheet an image of this size is.
 pub fn character_of(size: (u32, u32)) -> Option<Character> {
     BUILTINS.iter().find(|b| b.size == size).map(|b| b.character)
@@ -532,15 +542,17 @@ pub fn character_of(size: (u32, u32)) -> Option<Character> {
 /// A picture: where it is on the sheet, and where the character's centre
 /// is in it (sheet px from its top-left).
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Pic {
-    src: Rect,
-    centre: Vec2,
+pub struct Pic {
+    pub src: Rect,
+    pub centre: Vec2,
 }
 
-#[derive(Default)]
-struct Anim {
-    pics: Vec<Pic>,
-    behind: Vec<Pic>,
+/// An animation's pictures, and the pieces drawn behind them (Tails'
+/// tails, on their own clock).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Anim {
+    pub pics: Vec<Pic>,
+    pub behind: Vec<Pic>,
 }
 
 /// A loaded sheet.
@@ -578,13 +590,14 @@ impl Sheets {
     }
 }
 
-/// Is this file one of the other sheets rather than Sonic's?
+/// Is this file one of the other sheets rather than Sonic's (or the
+/// regions edited on a sheet)?
 fn is_not_sonics(p: &Path) -> bool {
     use crate::game::sprites::{MONITORS, OBJECTS};
     let others = Character::ALL.iter().skip(1).flat_map(|&c| file_names(c).iter().copied());
-    p.file_name()
-        .and_then(|n| n.to_str())
-        .is_some_and(|n| n == OBJECTS || n == MONITORS || others.clone().any(|o| o == n))
+    p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+        n == OBJECTS || n == MONITORS || n.ends_with(".regions.json") || others.clone().any(|o| o == n)
+    })
 }
 
 /// Sonic's PNG in `dir` (`sheet.png` first), and its layout.
@@ -706,59 +719,166 @@ fn cut(img: &image::RgbaImage, b: &Builtin, s: &Spec) -> Anim {
     Anim { pics, behind }
 }
 
-impl Sheet {
-    /// `c`'s sheet in the Sonic folder, if there is one.
-    pub fn load(c: Character) -> Result<Option<Sheet>, String> {
-        let Some(dir) = dir().filter(|d| d.is_dir()) else { return Ok(None) };
-        if c == Character::Sonic {
-            return Self::load_sonic(&dir);
+/// The sprite at `r` on a sheet with its background cleared: the opaque
+/// pixels inside `r` and those joined to them up to `grow` px around it.
+/// Returns the picture tight around it, centred as a standing character
+/// (`feet`: its half height above the bottom, under its head) or a curled
+/// up one (the middle).
+pub fn find_sprite(img: &image::RgbaImage, r: Rect, grow: f32, feet: Option<f32>) -> Option<Pic> {
+    let (w, h) = img.dimensions();
+    let span = |a: f32, b: f32, max: u32| ((a.max(0.0) as u32).min(max), (b.max(0.0).ceil() as u32).min(max));
+    let (ax0, ax1) = span(r.x - grow, r.x + r.w + grow, w);
+    let (ay0, ay1) = span(r.y - grow, r.y + r.h + grow, h);
+    let (sx0, sx1) = span(r.x, r.x + r.w, w);
+    let (sy0, sy1) = span(r.y, r.y + r.h, h);
+    let opaque = |x: u32, y: u32| img.get_pixel(x, y)[3] > 96;
+    let aw = (ax1 - ax0) as usize;
+    let mut seen = vec![false; aw * (ay1 - ay0) as usize];
+    let at = |x: u32, y: u32| (y - ay0) as usize * aw + (x - ax0) as usize;
+    let mut todo = vec![];
+    for y in sy0..sy1 {
+        for x in (sx0..sx1).filter(|&x| opaque(x, y)) {
+            seen[at(x, y)] = true;
+            todo.push((x, y));
         }
-        let Some(path) = file_names(c).iter().map(|n| dir.join(n)).find(|p| p.is_file()) else { return Ok(None) };
-        let mut img = image::open(&path).map_err(|e| e.to_string())?.to_rgba8();
-        // A character may have more than one known sheet: its size says which.
-        let Some(b) = BUILTINS.iter().find(|b| b.character == c && b.size == img.dimensions()) else {
-            return Err(format!("not a known sheet ({}×{})", img.width(), img.height()));
-        };
-        if b.lossy {
-            clear_background_near(&mut img, b.background);
-        } else {
-            clear_background(&mut img, b.background);
-        }
-        let anims = b.specs.iter().map(|s| (s.name.to_string(), cut(&img, b, s))).collect();
-        let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-        Ok(Some(Sheet { texture: upload(&img), anims, scale: 1.0, name }))
     }
-
-    fn load_sonic(dir: &Path) -> Result<Option<Sheet>, String> {
-        let (png, layout) = match find(dir) {
-            Ok(found) => found,
-            Err(e) if e == "no PNG sprite sheet" => return Ok(None),
-            Err(e) => return Err(e),
-        };
-        let mut img = image::open(&png).map_err(|e| e.to_string())?.to_rgba8();
-        let layout = match layout {
-            Some(l) => l,
-            None if img.dimensions() == (690, 1558) => sonic1(),
-            None => return Err("unknown sheet layout: add a sheet.json beside it (see the README)".into()),
-        };
-        if !layout.animations.contains_key("idle") {
-            return Err("the sheet has no \"idle\" animation".into());
+    let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0, 0);
+    while let Some((x, y)) = todo.pop() {
+        (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
+        for (dx, dy) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+            let (nx, ny) = (x as i64 + dx, y as i64 + dy);
+            if nx < ax0 as i64 || ny < ay0 as i64 || nx >= ax1 as i64 || ny >= ay1 as i64 {
+                continue;
+            }
+            let (nx, ny) = (nx as u32, ny as u32);
+            if !seen[at(nx, ny)] && opaque(nx, ny) {
+                seen[at(nx, ny)] = true;
+                todo.push((nx, ny));
+            }
         }
-        clear_background(&mut img, &layout.transparent);
-        let [w, h] = layout.cell.map(|v| v as f32);
-        let anims = layout
-            .animations
-            .iter()
-            .map(|(name, cells)| {
-                let pics = cells
-                    .iter()
-                    .map(|&[x, y]| Pic { src: Rect::new(x as f32, y as f32, w, h), centre: vec2(w, h) / 2.0 })
-                    .collect();
-                (name.clone(), Anim { pics, behind: vec![] })
-            })
-            .collect();
-        let name = png.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-        Ok(Some(Sheet { texture: upload(&img), anims, scale: layout.scale, name }))
+    }
+    if x0 == u32::MAX {
+        return None;
+    }
+    let (bw, bh) = (x1 - x0, y1 - y0);
+    let (_, head) = measure(img, [x0, y0, bw, bh].map(|v| v.min(u16::MAX as u32) as u16))?;
+    let centre = match feet {
+        Some(hr) => vec2(head - x0 as f32, bh as f32 - hr),
+        None => vec2(bw as f32, bh as f32) / 2.0,
+    };
+    Some(Pic { src: Rect::new(x0 as f32, y0 as f32, bw as f32, bh as f32), centre })
+}
+
+/// A character's sheet ready to draw from: the picture with its background
+/// cleared, and its layout's animations.
+struct Prepared {
+    image: image::RgbaImage,
+    scale: f32,
+    name: String,
+    anims: HashMap<String, Anim>,
+}
+
+/// `c`'s sheet in the Sonic folder, if there is one, cut by its layout.
+fn prepare(c: Character) -> Result<Option<Prepared>, String> {
+    let Some(dir) = dir().filter(|d| d.is_dir()) else { return Ok(None) };
+    if c == Character::Sonic {
+        return prepare_sonic(&dir);
+    }
+    let Some(path) = file_names(c).iter().map(|n| dir.join(n)).find(|p| p.is_file()) else { return Ok(None) };
+    let mut img = image::open(&path).map_err(|e| e.to_string())?.to_rgba8();
+    // A character may have more than one known sheet: its size says which.
+    let Some(b) = BUILTINS.iter().find(|b| b.character == c && b.size == img.dimensions()) else {
+        return Err(format!("not a known sheet ({}×{})", img.width(), img.height()));
+    };
+    if b.lossy {
+        clear_background_near(&mut img, b.background);
+    } else {
+        clear_background(&mut img, b.background);
+    }
+    let anims = b.specs.iter().map(|s| (s.name.to_string(), cut(&img, b, s))).collect();
+    let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    Ok(Some(Prepared { image: img, scale: 1.0, name, anims }))
+}
+
+fn prepare_sonic(dir: &Path) -> Result<Option<Prepared>, String> {
+    let (png, layout) = match find(dir) {
+        Ok(found) => found,
+        Err(e) if e == "no PNG sprite sheet" => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let mut img = image::open(&png).map_err(|e| e.to_string())?.to_rgba8();
+    let layout = match layout {
+        Some(l) => l,
+        None if img.dimensions() == (690, 1558) => sonic1(),
+        None => return Err("unknown sheet layout: add a sheet.json beside it (see the README)".into()),
+    };
+    if !layout.animations.contains_key("idle") {
+        return Err("the sheet has no \"idle\" animation".into());
+    }
+    clear_background(&mut img, &layout.transparent);
+    let [w, h] = layout.cell.map(|v| v as f32);
+    let anims = layout
+        .animations
+        .iter()
+        .map(|(name, cells)| {
+            let pics = cells
+                .iter()
+                .map(|&[x, y]| Pic { src: Rect::new(x as f32, y as f32, w, h), centre: vec2(w, h) / 2.0 })
+                .collect();
+            (name.clone(), Anim { pics, behind: vec![] })
+        })
+        .collect();
+    let name = png.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    Ok(Some(Prepared { image: img, scale: layout.scale, name, anims }))
+}
+
+/// A character's sheet as the sprite region editor works on it.
+pub struct Editable {
+    /// The sheet, its background cleared.
+    pub image: image::RgbaImage,
+    pub texture: Texture2D,
+    /// Sheet pixels per guide pixel.
+    pub scale: f32,
+    pub name: String,
+    /// The layout's own animations.
+    pub defaults: HashMap<String, Anim>,
+    /// With the regions kept so far.
+    pub anims: HashMap<String, Anim>,
+    /// Why the regions kept could not be read (the editor starts over).
+    pub warning: Option<String>,
+}
+
+impl Editable {
+    /// `c`'s sheet, if there is one.
+    pub fn open(c: Character) -> Result<Option<Editable>, String> {
+        let Some(p) = prepare(c)? else { return Ok(None) };
+        let mut anims = p.anims.clone();
+        let warning = match Regions::read(c, p.image.dimensions()) {
+            Ok(r) => {
+                if let Some(r) = r {
+                    r.apply(&mut anims);
+                }
+                None
+            }
+            Err(e) => Some(e),
+        };
+        let texture = upload(&p.image);
+        Ok(Some(Editable { image: p.image, texture, scale: p.scale, name: p.name, defaults: p.anims, anims, warning }))
+    }
+}
+
+impl Sheet {
+    /// `c`'s sheet in the Sonic folder, if there is one, with the regions
+    /// edited on it.
+    pub fn load(c: Character) -> Result<Option<Sheet>, String> {
+        let Some(mut p) = prepare(c)? else { return Ok(None) };
+        if let Some(r) = Regions::read(c, p.image.dimensions())? {
+            r.apply(&mut p.anims);
+        }
+        if p.anims.get("idle").is_none_or(|a| a.pics.is_empty()) {
+            return Err(format!("no \"idle\" picture left in {}", super::regions::file_name(c)));
+        }
+        Ok(Some(Sheet { texture: upload(&p.image), anims: p.anims, scale: p.scale, name: p.name }))
     }
 
     /// Copy a chosen sheet into the Sonic folder: as the character or the
@@ -1059,5 +1179,36 @@ mod tests {
         clear_background_near(&mut img, AMY.background);
         assert_eq!(img.get_pixel(0, 0)[3], 0);
         assert_eq!(img.get_pixel(1, 0)[3], 255);
+    }
+    #[test]
+    fn sprites_are_found_around_a_point_or_in_a_box() {
+        // Two figures: 10 × 20 at (5, 10), with a hole, and 6 × 6 at (30, 4).
+        let mut img = image::RgbaImage::from_pixel(48, 40, image::Rgba([0, 0, 0, 0]));
+        for y in 10..30 {
+            for x in 5..15 {
+                img.put_pixel(x, y, image::Rgba([255, 0, 0, 255]));
+            }
+        }
+        img.put_pixel(9, 20, image::Rgba([0, 0, 0, 0]));
+        for y in 4..10 {
+            for x in 30..36 {
+                img.put_pixel(x, y, image::Rgba([0, 0, 255, 255]));
+            }
+        }
+        // From one of its pixels, it grows to the whole figure (not the other).
+        let p = find_sprite(&img, Rect::new(6.0, 11.0, 1.0, 1.0), 64.0, Some(15.0)).unwrap();
+        assert_eq!(p.src, Rect::new(5.0, 10.0, 10.0, 20.0));
+        assert_eq!(p.centre, vec2(5.0, 20.0 - 15.0), "standing: under the head, its half height above the feet");
+        // Nothing to find in the hole alone.
+        assert!(find_sprite(&img, Rect::new(9.0, 20.0, 1.0, 1.0), 64.0, None).is_none());
+        // A loose box tightens around what is in it, centred in the middle.
+        let p = find_sprite(&img, Rect::new(26.0, 0.0, 14.0, 14.0), 0.0, None).unwrap();
+        assert_eq!(p.src, Rect::new(30.0, 4.0, 6.0, 6.0));
+        assert_eq!(p.centre, vec2(3.0, 3.0));
+        // A box cutting a figure grows to it, within reach (8 px past it).
+        let p = find_sprite(&img, Rect::new(5.0, 10.0, 10.0, 8.0), 8.0, None).unwrap();
+        assert_eq!(p.src, Rect::new(5.0, 10.0, 10.0, 16.0));
+        let p = find_sprite(&img, Rect::new(5.0, 10.0, 10.0, 8.0), 16.0, None).unwrap();
+        assert_eq!(p.src, Rect::new(5.0, 10.0, 10.0, 20.0));
     }
 }

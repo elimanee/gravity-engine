@@ -163,6 +163,36 @@ Each frame is the top-left corner of a `cell`-sized box whose centre is Sonic's 
 
 Tails, Knuckles and Amy can have theirs as well, recognised by their size and kept as `tails.png`, `knuckles.png` and `amy.png` / `amy.webp`: the Sonic 3 Tails sheet (1174 × 1820) and the Sonic 3 & Knuckles Knuckles sheet (1131 × 1862) from The Spriters Resource, and for Amy either CartoonsAnimate22's sheet (1274 × 2000, its Sonic Mania style) or DeltaConduit's custom sheet in the style of Sonic 1 (583 × 570; original sprites by Sega and Sonic Team). Sonic.exe's is a sheet in the style of Sonic 1 (691 × 677), kept as `exe.png`. Where each character's centre sits in a picture is worked out from its pixels.
 
+#### Editing the regions
+
+*Edit sprite regions…* in the settings (or `--sprite-regions[=CHARACTER]`) opens a character's sheet over the whole window, to change which pictures each animation uses and where the character stands in them: for a built-in layout that is a little off, or a sheet the game does not know (a `sheet.json` with rough cells is enough to start from). The buttons along the top switch between the characters that have a sheet.
+
+- **The animations** are listed on the left with how many pictures each has (a dot marks those changed, amber until saved); above the sheet, when the game shows the one picked.
+- **On the sheet**, its pictures are numbered boxes and the other animations' are faint (point at one to see whose it is, right-click it to go to it).
+  - Drag on an empty part of the sheet to draw a new picture: it tightens around the sprite inside. **Double-click a sprite** to add it whole.
+  - Drag a picture to move it, its edges or corners to resize it (the character stays where it is), and the red cross to place the character's centre. The green box is the character's body in the game; its bottom is the ground under the feet.
+  - The arrow keys move the picture by a pixel (Shift: 10); with Ctrl they resize it, with Alt they move the centre.
+  - *Fit: feet* (`F`) tightens the picture around its sprite and puts the centre above the feet; *Fit: middle* (`M`) puts it in the middle (curled up, in the air).
+  - Wheel: zoom; right-drag: pan; `Home`: back to the animation.
+- **On the right**, the animation plays (`Space` pauses it; `←` `→` or `[` `]` step through it; *Onion* shows the picture before faintly, to line them up), and its pictures are listed in order: click one to pick it, *← Earlier* / *Later →* reorder them, *Duplicate* (`D`), *Delete* (`Del`). For Tails, *Body* / *Behind* (`B`) switch to his tails, drawn behind him on their own clock.
+- *Undo* / *Redo* (`Ctrl+Z` / `Ctrl+Y`), *Reset this animation*, *Reset all* and *Save* (`Ctrl+S`); `Esc` leaves (press it twice to leave unsaved changes).
+
+What is saved goes beside the sheet as `<character>.regions.json` (`sonic`, `tails`, `knuckles`, `amy` or `exe`), with only the animations changed, and the game draws from it at once. It belongs to that sheet: one of another size ignores it. Each picture is its box on the sheet (`rect`: x, y, width, height) and the character's centre from the box's top-left (`centre`); an animation with no pictures left is one the sheet does not have.
+
+```json
+{
+  "size": [691, 677],
+  "animations": {
+    "warp": {
+      "frames": [
+        {"rect": [317, 431, 44, 26], "centre": [22, 13]},
+        {"rect": [365, 433, 43, 26], "centre": [21.5, 13]}
+      ]
+    }
+  }
+}
+```
+
 The game mode's objects can come from sheets too, picked the same way (they are recognised by their size and kept beside Sonic's):
 
 - `objects.png`: the Sonic 1 *Common Objects* sheet (712 × 1014): rings, monitors, spikes, star posts, the goal signpost, springs, explosions, the shield, invincibility stars, score numbers and *GAME OVER*;
@@ -426,7 +456,7 @@ sudo apt install pkg-config libopenmpt-dev libasound2-dev libx11-dev libxi-dev \
 cargo run --release
 ```
 
-Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins. `--act=N` and `--special-stage=N` go straight into Sonic act N (1–7) or special stage N (1–7).
+Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins. `--act=N` and `--special-stage=N` go straight into Sonic act N (1–7) or special stage N (1–7), and `--sprite-regions[=CHARACTER]` into the sprite region editor (`sonic`, `tails`, `knuckles`, `amy` or `exe`).
 
 `gravity_engine --benchmark` runs five stress scenes for a few seconds each at a fixed 60 Hz and prints the frame times (average, 95th percentile, worst), the bodies still moving, the time spent waiting for the screen and where each frame's time goes, then quits without saving anything.
 
@@ -452,7 +482,7 @@ Everything lives in `~/.config/gravity_engine/` (or `$XDG_CONFIG_HOME/gravity_en
 | `scenes/` | Default folder for saved scenes |
 | `challenges/` | Challenges made in the editor (`.gchallenge`), listed in Library → *My challenges* |
 | `levels/` | Sonic levels made in the level editor (`.gscene`), listed in Library → *Sonic* |
-| `sonic/` | Your sprite sheets for Sonic, Tails, Knuckles, Amy, Sonic.exe and the game's objects (see *Sonic sprite sheets*) |
+| `sonic/` | Your sprite sheets for Sonic, Tails, Knuckles, Amy, Sonic.exe and the game's objects, and the regions edited on them (`<character>.regions.json`; see *Sonic sprite sheets*) |
 | `ghost.json` | The endless run's best run, raced as a ghost |
 | `skins/` | Extra Winamp / Audacious skins (`.wsz` files or folders) for the classic player |
 | `sgdb_key` | SteamGridDB API key for the logo fetcher (or set `SGDB_API_KEY`) |
@@ -472,7 +502,8 @@ src/
 │                      building tools, selection, impacts and shattering, fire, jelly and
 │                      cloth, gadgets, grappling hooks, weather, night lights, the physical
 │                      player, sounds and slow motion, challenge mode, challenge editor and verifier,
-│                      Sonic's game, the level editor, the endless run and the benchmark
+│                      Sonic's game, the level editor, the sprite region editor, the endless run and
+│                      the benchmark
 ├── camera.rs          zoom / pan and the world ↔ screen mapping
 ├── config.rs          constants and paths          settings.rs   persisted preferences
 ├── skin.rs            Winamp 2 / Audacious skins (.wsz, folders, skin.hints)
@@ -483,7 +514,8 @@ src/
 ├── effects.rs         particles                    library/      examples, challenges, acts, levels
 ├── weather.rs         rain, snow and lightning     lighting.rs   the night's light map and shadows
 ├── sonic/             Sonic, Tails, Knuckles and Amy: movement after the Sonic Physics Guide, their
-│                      moves, their drawing with shapes and from sprite sheets
+│                      moves, their drawing with shapes and from sprite sheets (and the regions
+│                      edited on them)
 ├── game/              Sonic's game mode: badniks, monitors, spikes, star posts, the bosses, air and
 │                      bubbles, lives and score, and its objects drawn with shapes or from sprite sheets
 ├── special/           special stages: the globe of spheres, its seven layouts and its drawing
@@ -498,7 +530,7 @@ src/
 web/                   the web version's page, its WebAudio / storage plugin and build script
 ```
 
-`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, snow, jelly, cloth, laser beams, gadgets, planets, rope reeling, weather, night light, Sonic's running, jumping, spin dash, underwater speed and loops, Tails' flight, Knuckles' glide and climb, Amy's hammer, Sonic.exe's teleport and his hunt, badniks, monitors, rings, lives and the bosses, air and bubbles, Super Sonic, the special stages, the acts, the music, sprite sheets, the endless run's zones, controllers, the profiler, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
+`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, snow, jelly, cloth, laser beams, gadgets, planets, rope reeling, weather, night light, Sonic's running, jumping, spin dash, underwater speed and loops, Tails' flight, Knuckles' glide and climb, Amy's hammer, Sonic.exe's teleport and his hunt, finding sprites on a sheet and the regions edited on it, badniks, monitors, rings, lives and the bosses, air and bubbles, Super Sonic, the special stages, the acts, the music, sprite sheets, the endless run's zones, controllers, the profiler, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
 
 `gravity_engine --verify-challenges` (needs a display) checks that every built-in challenge can be solved.
 
