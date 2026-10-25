@@ -539,20 +539,55 @@ pub fn character_of(size: (u32, u32)) -> Option<Character> {
     BUILTINS.iter().find(|b| b.size == size).map(|b| b.character)
 }
 
-/// A picture: where it is on the sheet, and where the character's centre
-/// is in it (sheet px from its top-left).
+/// A picture: where it is on the sheet, where the character's centre is
+/// in it (sheet px from its top-left), whether it is drawn mirrored, and
+/// how long it shows (in pictures: 2 is twice as long as the others).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Pic {
     pub src: Rect,
     pub centre: Vec2,
+    pub flip: bool,
+    pub hold: f32,
 }
 
-/// An animation's pictures, and the pieces drawn behind them (Tails'
-/// tails, on their own clock).
+impl Pic {
+    pub fn new(src: Rect, centre: Vec2) -> Pic {
+        Pic { src, centre, flip: false, hold: 1.0 }
+    }
+}
+
+/// An animation's pictures, the pieces drawn behind them (Tails' tails, on
+/// their own clock), its pace in pictures a second (none: the games' own,
+/// which follows the character's speed) and whether it plays once,
+/// stopping on its last picture.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Anim {
     pub pics: Vec<Pic>,
     pub behind: Vec<Pic>,
+    pub fps: Option<f32>,
+    pub once: bool,
+}
+
+impl Anim {
+    /// How long its pictures show together (in pictures).
+    pub fn length(&self) -> f32 {
+        self.pics.iter().map(|p| p.hold.max(0.01)).sum()
+    }
+
+    /// The picture showing `t` pictures in: looping, or stopping on the
+    /// last when played once.
+    pub fn at(&self, t: f32, once: bool) -> usize {
+        let length = self.length();
+        let t = if once { t.clamp(0.0, length) } else { t.rem_euclid(length.max(0.01)) };
+        let mut end = 0.0;
+        for (k, p) in self.pics.iter().enumerate() {
+            end += p.hold.max(0.01);
+            if t < end {
+                return k;
+            }
+        }
+        self.pics.len().saturating_sub(1)
+    }
 }
 
 /// A loaded sheet.
@@ -572,6 +607,12 @@ pub struct Sheets {
 impl Sheets {
     pub fn get(&self, c: Character) -> Option<&Sheet> {
         self.sheets.iter().find(|(k, _)| *k == c).map(|(_, s)| s)
+    }
+
+    /// Draw `c` from `sheet` (one being edited, to try it).
+    pub fn set(&mut self, c: Character, sheet: Sheet) {
+        self.sheets.retain(|(k, _)| *k != c);
+        self.sheets.push((c, sheet));
     }
 
     /// Load every character's sheet in the Sonic folder; problems are
@@ -711,12 +752,81 @@ fn cut(img: &image::RgbaImage, b: &Builtin, s: &Spec) -> Anim {
                 (None, Some(m)) if !b.boxed => centre_of(m) - vec2(r[0] as f32, r[1] as f32),
                 _ => vec2(dx, dy),
             };
-            Pic { src: rect(r), centre }
+            Pic::new(rect(r), centre)
         })
         .collect();
     // Pieces behind are boxed like the body: same place in their box.
-    let behind = s.behind.iter().map(|&r| Pic { src: rect(r), centre: vec2(dx, dy) }).collect();
-    Anim { pics, behind }
+    let behind = s.behind.iter().map(|&r| Pic::new(rect(r), vec2(dx, dy))).collect();
+    Anim { pics, behind, ..Default::default() }
+}
+
+/// Neighbouring pixels, corners included.
+const AROUND: [(i64, i64); 8] = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)];
+
+fn opaque_at(img: &image::RgbaImage, x: u32, y: u32) -> bool {
+    img.as_raw()[(y as usize * img.width() as usize + x as usize) * 4 + 3] > 96
+}
+
+/// Every sprite on a sheet with its background cleared: the boxes around
+/// its groups of joined opaque pixels (pieces a pixel apart are one), in
+/// reading order, leaving out specks.
+pub fn detect_sprites(img: &image::RgbaImage) -> Vec<Rect> {
+    let (w, h) = img.dimensions();
+    let mut seen = vec![false; w as usize * h as usize];
+    let mut boxes: Vec<[u32; 4]> = vec![];
+    let mut todo = vec![];
+    for y in 0..h {
+        for x in 0..w {
+            let i = y as usize * w as usize + x as usize;
+            if seen[i] || !opaque_at(img, x, y) {
+                continue;
+            }
+            seen[i] = true;
+            todo.push((x, y));
+            let mut b = [x, y, x + 1, y + 1];
+            while let Some((x, y)) = todo.pop() {
+                b = [b[0].min(x), b[1].min(y), b[2].max(x + 1), b[3].max(y + 1)];
+                for (dx, dy) in AROUND {
+                    let (nx, ny) = (x as i64 + dx, y as i64 + dy);
+                    if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+                        continue;
+                    }
+                    let (nx, ny) = (nx as u32, ny as u32);
+                    let j = ny as usize * w as usize + nx as usize;
+                    if !seen[j] && opaque_at(img, nx, ny) {
+                        seen[j] = true;
+                        todo.push((nx, ny));
+                    }
+                }
+            }
+            boxes.push(b);
+        }
+    }
+    // Boxes touching (or a pixel apart) are one sprite.
+    loop {
+        let mut joined = false;
+        let mut k = 0;
+        while k < boxes.len() {
+            let mut j = k + 1;
+            while j < boxes.len() {
+                let (a, b) = (boxes[k], boxes[j]);
+                if a[0] <= b[2] + 1 && b[0] <= a[2] + 1 && a[1] <= b[3] + 1 && b[1] <= a[3] + 1 {
+                    boxes[k] = [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])];
+                    boxes.swap_remove(j);
+                    joined = true;
+                } else {
+                    j += 1;
+                }
+            }
+            k += 1;
+        }
+        if !joined {
+            break;
+        }
+    }
+    boxes.retain(|b| b[2] - b[0] >= 4 && b[3] - b[1] >= 4 && (b[2] - b[0]) * (b[3] - b[1]) >= 48);
+    boxes.sort_by_key(|b| (b[1], b[0]));
+    boxes.into_iter().map(|b| Rect::new(b[0] as f32, b[1] as f32, (b[2] - b[0]) as f32, (b[3] - b[1]) as f32)).collect()
 }
 
 /// The sprite at `r` on a sheet with its background cleared: the opaque
@@ -731,7 +841,7 @@ pub fn find_sprite(img: &image::RgbaImage, r: Rect, grow: f32, feet: Option<f32>
     let (ay0, ay1) = span(r.y - grow, r.y + r.h + grow, h);
     let (sx0, sx1) = span(r.x, r.x + r.w, w);
     let (sy0, sy1) = span(r.y, r.y + r.h, h);
-    let opaque = |x: u32, y: u32| img.get_pixel(x, y)[3] > 96;
+    let opaque = |x: u32, y: u32| opaque_at(img, x, y);
     let aw = (ax1 - ax0) as usize;
     let mut seen = vec![false; aw * (ay1 - ay0) as usize];
     let at = |x: u32, y: u32| (y - ay0) as usize * aw + (x - ax0) as usize;
@@ -745,7 +855,7 @@ pub fn find_sprite(img: &image::RgbaImage, r: Rect, grow: f32, feet: Option<f32>
     let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0, 0);
     while let Some((x, y)) = todo.pop() {
         (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
-        for (dx, dy) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+        for (dx, dy) in AROUND {
             let (nx, ny) = (x as i64 + dx, y as i64 + dy);
             if nx < ax0 as i64 || ny < ay0 as i64 || nx >= ax1 as i64 || ny >= ay1 as i64 {
                 continue;
@@ -766,16 +876,32 @@ pub fn find_sprite(img: &image::RgbaImage, r: Rect, grow: f32, feet: Option<f32>
         Some(hr) => vec2(head - x0 as f32, bh as f32 - hr),
         None => vec2(bw as f32, bh as f32) / 2.0,
     };
-    Some(Pic { src: Rect::new(x0 as f32, y0 as f32, bw as f32, bh as f32), centre })
+    Some(Pic::new(Rect::new(x0 as f32, y0 as f32, bw as f32, bh as f32), centre))
 }
 
-/// A character's sheet ready to draw from: the picture with its background
-/// cleared, and its layout's animations.
+/// Cut out `colours`: exactly, or by closeness (`soft`, for lossy images).
+fn clear(img: &mut image::RgbaImage, colours: &[[u8; 3]], soft: bool) {
+    if colours.is_empty() {
+    } else if soft {
+        clear_background_near(img, colours);
+    } else {
+        clear_background(img, colours);
+    }
+}
+
+/// A character's sheet ready to draw from, as its layout cuts it.
 struct Prepared {
+    /// The sheet as it is, and with the layout's background cleared.
+    original: image::RgbaImage,
     image: image::RgbaImage,
+    /// The layout's background colours, and whether they go by closeness.
+    background: Vec<[u8; 3]>,
+    soft: bool,
     scale: f32,
     name: String,
     anims: HashMap<String, Anim>,
+    /// The game knows how to cut it up (else only regions edited on it can).
+    known: bool,
 }
 
 /// `c`'s sheet in the Sonic folder, if there is one, cut by its layout.
@@ -785,19 +911,27 @@ fn prepare(c: Character) -> Result<Option<Prepared>, String> {
         return prepare_sonic(&dir);
     }
     let Some(path) = file_names(c).iter().map(|n| dir.join(n)).find(|p| p.is_file()) else { return Ok(None) };
-    let mut img = image::open(&path).map_err(|e| e.to_string())?.to_rgba8();
+    let original = image::open(&path).map_err(|e| e.to_string())?.to_rgba8();
+    let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let mut img = original.clone();
     // A character may have more than one known sheet: its size says which.
     let Some(b) = BUILTINS.iter().find(|b| b.character == c && b.size == img.dimensions()) else {
-        return Err(format!("not a known sheet ({}×{})", img.width(), img.height()));
+        let anims = HashMap::new();
+        return Ok(Some(Prepared {
+            original,
+            image: img,
+            background: vec![],
+            soft: false,
+            scale: 1.0,
+            name,
+            anims,
+            known: false,
+        }));
     };
-    if b.lossy {
-        clear_background_near(&mut img, b.background);
-    } else {
-        clear_background(&mut img, b.background);
-    }
+    clear(&mut img, b.background, b.lossy);
     let anims = b.specs.iter().map(|s| (s.name.to_string(), cut(&img, b, s))).collect();
-    let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    Ok(Some(Prepared { image: img, scale: 1.0, name, anims }))
+    let background = b.background.to_vec();
+    Ok(Some(Prepared { original, image: img, background, soft: b.lossy, scale: 1.0, name, anims, known: true }))
 }
 
 fn prepare_sonic(dir: &Path) -> Result<Option<Prepared>, String> {
@@ -806,40 +940,59 @@ fn prepare_sonic(dir: &Path) -> Result<Option<Prepared>, String> {
         Err(e) if e == "no PNG sprite sheet" => return Ok(None),
         Err(e) => return Err(e),
     };
-    let mut img = image::open(&png).map_err(|e| e.to_string())?.to_rgba8();
+    let original = image::open(&png).map_err(|e| e.to_string())?.to_rgba8();
+    let name = png.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let mut img = original.clone();
     let layout = match layout {
         Some(l) => l,
         None if img.dimensions() == (690, 1558) => sonic1(),
-        None => return Err("unknown sheet layout: add a sheet.json beside it (see the README)".into()),
+        None => {
+            let anims = HashMap::new();
+            return Ok(Some(Prepared {
+                original,
+                image: img,
+                background: vec![],
+                soft: false,
+                scale: 1.0,
+                name,
+                anims,
+                known: false,
+            }));
+        }
     };
-    if !layout.animations.contains_key("idle") {
-        return Err("the sheet has no \"idle\" animation".into());
-    }
     clear_background(&mut img, &layout.transparent);
     let [w, h] = layout.cell.map(|v| v as f32);
     let anims = layout
         .animations
         .iter()
         .map(|(name, cells)| {
-            let pics = cells
-                .iter()
-                .map(|&[x, y]| Pic { src: Rect::new(x as f32, y as f32, w, h), centre: vec2(w, h) / 2.0 })
-                .collect();
-            (name.clone(), Anim { pics, behind: vec![] })
+            let pics =
+                cells.iter().map(|&[x, y]| Pic::new(Rect::new(x as f32, y as f32, w, h), vec2(w, h) / 2.0)).collect();
+            (name.clone(), Anim { pics, ..Default::default() })
         })
         .collect();
-    let name = png.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    Ok(Some(Prepared { image: img, scale: layout.scale, name, anims }))
+    let (background, scale) = (layout.transparent, layout.scale);
+    Ok(Some(Prepared { original, image: img, background, soft: false, scale, name, anims, known: true }))
 }
 
 /// A character's sheet as the sprite region editor works on it.
 pub struct Editable {
-    /// The sheet, its background cleared.
+    /// The sheet as it is, and as drawn (its backgrounds cleared).
+    pub original: image::RgbaImage,
     pub image: image::RgbaImage,
     pub texture: Texture2D,
-    /// Sheet pixels per guide pixel.
+    /// The layout's own background colours, their closeness and its scale.
+    pub layout_background: Vec<[u8; 3]>,
+    pub layout_soft: bool,
+    pub layout_scale: f32,
+    /// Background colours picked besides, cut out by closeness or not, and
+    /// sheet pixels per guide pixel.
+    pub background: Vec<[u8; 3]>,
+    pub soft: bool,
     pub scale: f32,
     pub name: String,
+    /// The game knows how to cut this sheet up (else it starts empty).
+    pub known: bool,
     /// The layout's own animations.
     pub defaults: HashMap<String, Anim>,
     /// With the regions kept so far.
@@ -852,18 +1005,59 @@ impl Editable {
     /// `c`'s sheet, if there is one.
     pub fn open(c: Character) -> Result<Option<Editable>, String> {
         let Some(p) = prepare(c)? else { return Ok(None) };
-        let mut anims = p.anims.clone();
-        let warning = match Regions::read(c, p.image.dimensions()) {
-            Ok(r) => {
-                if let Some(r) = r {
-                    r.apply(&mut anims);
-                }
-                None
-            }
-            Err(e) => Some(e),
+        let mut ed = Editable {
+            texture: upload(&p.image),
+            image: p.image,
+            original: p.original,
+            layout_background: p.background,
+            layout_soft: p.soft,
+            layout_scale: p.scale,
+            background: vec![],
+            soft: false,
+            scale: p.scale,
+            name: p.name,
+            known: p.known,
+            anims: p.anims.clone(),
+            defaults: p.anims,
+            warning: None,
         };
-        let texture = upload(&p.image);
-        Ok(Some(Editable { image: p.image, texture, scale: p.scale, name: p.name, defaults: p.anims, anims, warning }))
+        match Regions::read(c, ed.image.dimensions()) {
+            Ok(Some(r)) => {
+                r.apply(&mut ed.anims);
+                ed.background = r.background;
+                ed.soft = r.soft;
+                ed.scale = r.scale.unwrap_or(ed.scale);
+                if !ed.background.is_empty() || ed.soft {
+                    ed.recolour();
+                }
+            }
+            Ok(None) => {}
+            Err(e) => ed.warning = Some(e),
+        }
+        Ok(Some(ed))
+    }
+
+    /// Clear the backgrounds again, after the colours changed.
+    pub fn recolour(&mut self) {
+        let mut img = self.original.clone();
+        clear(&mut img, &self.layout_background, self.layout_soft);
+        clear(&mut img, &self.background, self.soft || self.layout_soft);
+        self.texture = upload(&img);
+        self.image = img;
+    }
+
+    /// The regions to keep: what changed from the layout.
+    pub fn regions(&self) -> Regions {
+        let mut r = Regions::changes(self.image.dimensions(), &self.defaults, &self.anims);
+        r.background = self.background.clone();
+        r.soft = self.soft;
+        r.scale = (self.scale != self.layout_scale).then_some(self.scale);
+        r
+    }
+
+    /// The sheet as edited, to play with before it is saved.
+    pub fn sheet(&self) -> Sheet {
+        Sheet { texture: self.texture.clone(), anims: self.anims.clone(), scale: self.scale, name: self.name.clone() }
     }
 }
 
@@ -872,13 +1066,21 @@ impl Sheet {
     /// edited on it.
     pub fn load(c: Character) -> Result<Option<Sheet>, String> {
         let Some(mut p) = prepare(c)? else { return Ok(None) };
-        if let Some(r) = Regions::read(c, p.image.dimensions())? {
+        let (w, h) = p.image.dimensions();
+        let regions = Regions::read(c, (w, h))?;
+        if !p.known && regions.is_none() {
+            return Err(format!("the game does not know this sheet ({w} × {h}): lay it out with Edit sprite regions…"));
+        }
+        let mut scale = p.scale;
+        if let Some(r) = &regions {
+            clear(&mut p.image, &r.background, r.soft || p.soft);
             r.apply(&mut p.anims);
+            scale = r.scale.unwrap_or(scale);
         }
         if p.anims.get("idle").is_none_or(|a| a.pics.is_empty()) {
-            return Err(format!("no \"idle\" picture left in {}", super::regions::file_name(c)));
+            return Err("no \"idle\" picture: give it one with Edit sprite regions…".into());
         }
-        Ok(Some(Sheet { texture: upload(&p.image), anims: p.anims, scale: p.scale, name: p.name }))
+        Ok(Some(Sheet { texture: upload(&p.image), anims: p.anims, scale, name: p.name }))
     }
 
     /// Copy a chosen sheet into the Sonic folder: as the character or the
@@ -916,74 +1118,50 @@ impl Sheet {
         Ok("sheet.png".into())
     }
 
+    /// Make `src` (any picture file) `c`'s sheet, as a PNG under the
+    /// character's name; the sheet it had goes (Sonic's layout too).
+    pub fn install_for(src: &Path, c: Character) -> Result<String, String> {
+        let dir = dir().ok_or("no config directory")?;
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let img = image::open(src).map_err(|e| e.to_string())?;
+        if c == Character::Sonic {
+            for old in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+                let p = old.path();
+                let theirs = p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png") || e == "json");
+                if theirs && !is_not_sonics(&p) {
+                    let _ = std::fs::remove_file(p);
+                }
+            }
+        } else {
+            for n in file_names(c) {
+                let _ = std::fs::remove_file(dir.join(n));
+            }
+        }
+        let name = file_names(c)[0];
+        img.save(dir.join(name)).map_err(|e| e.to_string())?;
+        Ok(name.to_string())
+    }
+
     fn anim(&self, name: &str) -> Option<&Anim> {
         self.anims.get(name).filter(|a| !a.pics.is_empty())
     }
 
     /// The animation for his state, and which of its pictures.
     fn pick(&self, s: &Sonic) -> Option<(&Anim, usize)> {
-        let speed = if s.grounded { s.gsp.abs() } else { s.xsp.abs() };
-        let has = |n: &str| self.anim(n).is_some();
-        let name = if s.dead && has("dead") {
-            "dead"
-        } else if (s.hurt || s.dead) && has("hurt") {
-            "hurt"
-        } else if s.climb_up.is_some() && has("climb_up") {
-            "climb_up"
-        } else if s.climbing.is_some() && has("climb") {
-            "climb"
-        } else if s.gliding.is_some() && has("glide") {
-            "glide"
-        } else if s.sliding && has("slide") {
-            "slide"
-        } else if s.dropping && has("drop") {
-            "drop"
-        } else if s.flying.is_some() && s.tired() && has("fly_tired") {
-            "fly_tired"
-        } else if s.flying.is_some() && has("fly") {
-            "fly"
-        } else if s.hammer.is_some() && s.hammer_air && has("hammer_air") {
-            "hammer_air"
-        } else if s.hammer.is_some() && !s.hammer_air && has("hammer") {
-            "hammer"
-        } else if s.warp.is_some() && has("warp") {
-            "warp"
-        } else if s.spindash.is_some() && has("spindash") {
-            "spindash"
-        } else if s.is_ball() {
-            "roll"
-        } else if !s.grounded && s.ysp < 0.0 {
-            "spring"
-        } else if s.skidding {
-            "skid"
-        } else if s.pushing {
-            "push"
-        } else if s.crouching {
-            "crouch"
-        } else if s.looking_up {
-            "look_up"
-        } else if s.grounded && speed == 0.0 {
-            if s.idle > 180 && has("bored") {
-                "bored"
-            } else {
-                "idle"
-            }
-        } else if speed >= 6.0 && has("run") {
-            "run"
-        } else {
-            "walk"
+        let name = s.poses().into_iter().chain(["walk", "idle"]).find(|n| self.anim(n).is_some())?;
+        let anim = self.anim(name)?;
+        let length = anim.length();
+        let (t, once) = match (anim.fps, name) {
+            (Some(fps), _) => (s.pose_frames as f32 / super::FPS * fps, anim.once),
+            (None, "bored") => (s.idle.saturating_sub(180) as f32 / 30.0, anim.once),
+            (None, "push") => (s.anim / 8.0, anim.once),
+            // Played once through, with the move.
+            (None, "hammer") => (s.hammer.map_or(0.0, |h| h as f32 / 22.0) * length, true),
+            (None, "climb_up") => (s.climb_up.map_or(0.0, |(t, _, _)| t as f32 / 18.0) * length, true),
+            (None, _) if anim.once => (s.anim - s.pose_anim, true),
+            (None, _) => (s.anim, false),
         };
-        let anim = self.anim(name).or_else(|| self.anim("walk")).or_else(|| self.anim("idle"))?;
-        let n = anim.pics.len();
-        let k = match name {
-            "bored" => ((s.idle - 180) / 30) as usize,
-            "push" => (s.anim / 8.0) as usize,
-            // Played once through.
-            "hammer" => s.hammer.map_or(0, |h| (h as usize * n / 22).min(n - 1)),
-            "climb_up" => s.climb_up.map_or(0, |(t, _, _)| (t as usize * n / 18).min(n - 1)),
-            _ => s.anim as usize,
-        };
-        Some((anim, k % n))
+        Some((anim, anim.at(t, once)))
     }
 
     fn blit(&self, pic: Pic, s: &Sonic, angle: f32) {
@@ -993,7 +1171,8 @@ impl Sheet {
     fn blit_at(&self, pic: Pic, pos: Vec2, facing: f32, angle: f32, tint: Color) {
         let k = super::SCALE / self.scale.max(0.01);
         let size = vec2(pic.src.w, pic.src.h) * k;
-        let flip = facing < 0.0;
+        // A mirrored picture faces the other way.
+        let flip = (facing < 0.0) != pic.flip;
         let cx = if flip { pic.src.w - pic.centre.x } else { pic.centre.x };
         let top_left = pos - vec2(cx, pic.centre.y) * k;
         draw_texture_ex(
@@ -1012,12 +1191,13 @@ impl Sheet {
         );
     }
 
-    /// Picture `k` of animation `name`, centred on `pos` and facing
-    /// `facing` (the one who hunts you in the Halloween act); false when the
-    /// sheet has no such animation.
-    pub fn draw_anim(&self, name: &str, k: usize, pos: Vec2, facing: f32, tint: Color) -> bool {
+    /// Animation `name` `seconds` in (at its own pace, else `fps`),
+    /// centred on `pos` and facing `facing` (the one who hunts you in the
+    /// Halloween act); false when the sheet has no such animation.
+    pub fn draw_anim(&self, name: &str, seconds: f32, fps: f32, pos: Vec2, facing: f32, tint: Color) -> bool {
         let Some(anim) = self.anim(name) else { return false };
-        self.blit_at(anim.pics[k % anim.pics.len()], pos, facing, 0.0, tint);
+        let k = anim.at(seconds * anim.fps.unwrap_or(fps), anim.once);
+        self.blit_at(anim.pics[k], pos, facing, 0.0, tint);
         true
     }
 
@@ -1210,5 +1390,43 @@ mod tests {
         assert_eq!(p.src, Rect::new(5.0, 10.0, 10.0, 16.0));
         let p = find_sprite(&img, Rect::new(5.0, 10.0, 10.0, 8.0), 16.0, None).unwrap();
         assert_eq!(p.src, Rect::new(5.0, 10.0, 10.0, 20.0));
+    }
+
+    #[test]
+    fn pictures_hold_and_animations_loop_or_play_once() {
+        let pic = |hold: f32| Pic { hold, ..Pic::new(Rect::new(0.0, 0.0, 8.0, 8.0), vec2(4.0, 4.0)) };
+        // The second picture shows twice as long as the others.
+        let a = Anim { pics: vec![pic(1.0), pic(2.0), pic(1.0)], ..Default::default() };
+        assert_eq!(a.length(), 4.0);
+        let looped: Vec<usize> = (0..9).map(|t| a.at(t as f32, false)).collect();
+        assert_eq!(looped, [0, 1, 1, 2, 0, 1, 1, 2, 0]);
+        // Once through, it stays on its last picture.
+        let once: Vec<usize> = (0..7).map(|t| a.at(t as f32, true)).collect();
+        assert_eq!(once, [0, 1, 1, 2, 2, 2, 2]);
+        assert_eq!(Anim::default().at(3.0, false), 0, "no pictures: nothing to pick from");
+    }
+
+    #[test]
+    fn sprites_are_found_on_the_whole_sheet_in_reading_order() {
+        let mut img = image::RgbaImage::from_pixel(64, 40, image::Rgba([0, 0, 0, 0]));
+        let mut fill = |x0: u32, y0: u32, x1: u32, y1: u32| {
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    img.put_pixel(x, y, image::Rgba([200, 60, 60, 255]));
+                }
+            }
+        };
+        // A figure whose detached piece is a pixel away, another to its
+        // left lower down, one on the next row, and a speck.
+        fill(30, 4, 40, 16);
+        fill(41, 6, 44, 10);
+        fill(4, 6, 14, 18);
+        fill(10, 24, 20, 36);
+        fill(56, 30, 58, 32);
+        let found = detect_sprites(&img);
+        assert_eq!(
+            found,
+            [Rect::new(30.0, 4.0, 14.0, 12.0), Rect::new(4.0, 6.0, 10.0, 12.0), Rect::new(10.0, 24.0, 10.0, 12.0)]
+        );
     }
 }

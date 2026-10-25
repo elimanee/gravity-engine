@@ -4,6 +4,23 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [3.4.0]
+
+### Added
+- **Any picture as a character's sheet**, in the sprite region editor: *Open a sheet…* makes any PNG, WebP, GIF, BMP or JPEG a character's sheet (kept as a PNG under its name), and a sheet the game does not know opens empty, to be laid out there. An eyedropper (*Pick*, `I`) cuts out its background colours, *Soft edges* cuts them by closeness (lossy pictures), *Scale* sets its pixels per game pixel, and a checkerboard shows through what is cut out
+- **Sprites found by themselves** once the background is gone (Shift shows them): **Shift-drag a box** to add every sprite in it, row by row
+- **Animation settings**: a *Pace* per animation (the games' own, following the character's speed, or 4 to 30 pictures a second), *Play once* (stops on the last picture; it starts again with the move), and per picture *Hold* (2 to 8 times as long, `-` / `=`) and *Mirror* (`H`)
+- **Several pictures at once**: Shift- / Ctrl-click or `Ctrl+A` to choose them, then drag, nudge, fit, hold, mirror, duplicate or delete them together; *Same centre* (`C`) lines them up on one picture; *Copy* / *Paste* (`Ctrl+C` / `Ctrl+V`) take pictures to another animation
+- **Try** (`T`): play the character as edited, saved or not, on a test track (stand, crouch, spin dash, push, a hill, a loop, a badnik, a spring, a wall to climb); `Esc` comes back to the editor and then to your scene
+
+### Changed
+- The `.regions.json` files can hold the new settings (`flip`, `hold`, `fps`, `once`, `background`, `soft`, `scale`); those written by 3.3.0 still read
+
+### Downloads
+- `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
+- `gravity_engine-windows-x86_64.zip` — Windows build: unzip and run `gravity_engine.exe` (keep the DLLs next to it)
+- Or play it in the browser: https://elimanee.github.io/gravity-engine/ (the sprite region editor needs the desktop version, like your own sprite sheets)
+
 ## [3.3.0]
 
 ### Added

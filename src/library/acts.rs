@@ -68,6 +68,15 @@ pub const ALL: &[Act] = &[
     },
 ];
 
+/// Where the sprite region editor lets a character try its sprites (not
+/// part of the campaign).
+pub const TEST_TRACK: Act = Act {
+    name: "Sprite test",
+    about: "Stand, run, push, roll, spring, climb: every pose to try",
+    zone: Zone::Meadow,
+    build: test_track,
+};
+
 /// The ground's top in design px (the world's bottom is at 720).
 const G: f32 = 560.0;
 const DIRT: [u8; 3] = [150, 98, 62];
@@ -97,6 +106,29 @@ fn arc(b: &mut Builder, x: f32, y: f32, n: usize, w: f32, h: f32) {
         let t = k as f32 / (n - 1).max(1) as f32;
         b.ring(x + t * w, y - h * 4.0 * t * (1.0 - t));
     }
+}
+
+/// Room to stand, look up, crouch and spin dash; a low wall to push; a
+/// hill; a loop; a badnik to bump into; a spring up to a ledge; and a high
+/// wall to climb at the end.
+fn test_track(b: &mut Builder) {
+    b.sonic(200.0, G - 40.0);
+    b.block(-700.0, -600.0, G - 420.0, G, ROCK, STONE);
+    b.ground(-600.0, 4300.0, G, DIRT, LEAF);
+    rings(b, 300.0, G - 40.0, 4);
+    b.block(720.0, 780.0, G - 60.0, G, ROCK, STONE);
+    b.monitor(MonitorKind::Rings, 1000.0, G);
+    b.hill(1250.0, 2050.0, G, 100.0, DIRT, LEAF);
+    arc(b, 1450.0, G - 160.0, 7, 400.0, 30.0);
+    let r = 110.0;
+    b.sonic_loop(2500.0, G - r, r, STONE);
+    b.walker(EnemyKind::Crawler, 3000.0, G);
+    rings(b, 3100.0, G - 40.0, 4);
+    b.spring(3350.0, G);
+    b.platform(3420.0, 3640.0, G - 230.0, WOOD);
+    rings(b, 3460.0, G - 280.0, 5);
+    b.monitor(MonitorKind::Rings, 3800.0, G);
+    b.block(4150.0, 4300.0, G - 420.0, G, ROCK, STONE);
 }
 
 fn meadow_1(b: &mut Builder) {
@@ -375,6 +407,16 @@ fn halloween(b: &mut Builder) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_test_track_has_every_pose_to_try_and_no_end() {
+        let sc = TEST_TRACK.scene(0.0, 1440.0);
+        let game = sc.game.as_ref().unwrap();
+        assert!(sc.sonic.is_some() && !sc.rings.is_empty());
+        assert!(game.goal.is_none() && game.boss.is_none(), "it ends when Esc says so");
+        assert!(game.enemies.len() == 1 && game.monitors.len() == 2);
+        assert!(!ALL.iter().any(|a| a.name == TEST_TRACK.name), "not part of the campaign");
+    }
 
     #[test]
     fn harbour_has_water_new_badniks_and_the_anchor_crane() {

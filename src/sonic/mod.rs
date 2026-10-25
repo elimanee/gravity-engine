@@ -224,6 +224,11 @@ pub struct Sonic {
     /// Sprite animation clock (frames of the current animation) and
     /// frames spent standing idle.
     pub anim: f32,
+    /// What he is doing for the sprite sheets (the first of [`Sonic::poses`]),
+    /// for how many frames, and `anim` when it began.
+    pub pose: &'static str,
+    pub pose_frames: u32,
+    pub pose_anim: f32,
     pub idle: u32,
     /// Knocked back by a hit: no control until he lands.
     pub hurt: bool,
@@ -311,6 +316,9 @@ impl Sonic {
             stride: 0.0,
             spin: 0.0,
             anim: 0.0,
+            pose: "idle",
+            pose_frames: 0,
+            pose_anim: 0.0,
             idle: 0,
             hurt: false,
             dead: false,
@@ -555,7 +563,63 @@ impl Sonic {
         let still = self.grounded && self.gsp == 0.0 && !self.crouching && !self.looking_up && !self.is_ball();
         self.idle = if still { self.idle + 1 } else { 0 };
         self.spin += if self.grounded { self.gsp } else { self.xsp.abs().max(4.0) * self.facing } * 0.12;
+        let pose = self.poses()[0];
+        if pose == self.pose {
+            self.pose_frames += 1;
+        } else {
+            (self.pose, self.pose_frames, self.pose_anim) = (pose, 0, self.anim);
+        }
         events
+    }
+
+    /// The sprite sheet animations his state calls for, the likeliest
+    /// first: a sheet draws the first it has (else walking, else standing).
+    pub fn poses(&self) -> Vec<&'static str> {
+        let mut out = Vec::with_capacity(4);
+        for (when, name) in [
+            (self.dead, "dead"),
+            (self.hurt || self.dead, "hurt"),
+            (self.climb_up.is_some(), "climb_up"),
+            (self.climbing.is_some(), "climb"),
+            (self.gliding.is_some(), "glide"),
+            (self.sliding, "slide"),
+            (self.dropping, "drop"),
+            (self.flying.is_some() && self.tired(), "fly_tired"),
+            (self.flying.is_some(), "fly"),
+            (self.hammer.is_some() && self.hammer_air, "hammer_air"),
+            (self.hammer.is_some() && !self.hammer_air, "hammer"),
+            (self.warp.is_some(), "warp"),
+            (self.spindash.is_some(), "spindash"),
+        ] {
+            if when {
+                out.push(name);
+            }
+        }
+        let speed = if self.grounded { self.gsp.abs() } else { self.xsp.abs() };
+        if self.is_ball() {
+            out.push("roll");
+        } else if !self.grounded && self.ysp < 0.0 {
+            out.push("spring");
+        } else if self.skidding {
+            out.push("skid");
+        } else if self.pushing {
+            out.push("push");
+        } else if self.crouching {
+            out.push("crouch");
+        } else if self.looking_up {
+            out.push("look_up");
+        } else if self.grounded && speed == 0.0 {
+            if self.idle > 180 {
+                out.push("bored");
+            }
+            out.push("idle");
+        } else {
+            if speed >= 6.0 {
+                out.push("run");
+            }
+            out.push("walk");
+        }
+        out
     }
 
     fn ground_frame(&mut self, world: &PhysWorld, env: Env, input: Input, c: Consts, events: &mut Vec<Event>) {
@@ -1013,6 +1077,25 @@ mod tests {
 
     fn run(s: &mut Sonic, w: &PhysWorld, env: Env, input: Input, frames: usize) -> Vec<Event> {
         (0..frames).flat_map(|_| s.frame(w, env, input, None, 1.0)).collect()
+    }
+
+    #[test]
+    fn poses_follow_what_he_does_and_are_timed_from_their_start() {
+        let w = world();
+        let mut s = standing(300.0);
+        run(&mut s, &w, &walls, Input::default(), 10);
+        assert_eq!(s.poses(), ["idle"]);
+        assert_eq!((s.pose, s.pose_frames), ("idle", 10));
+        // Bored after a while, still standing below that.
+        s.idle = 200;
+        assert_eq!(s.poses(), ["bored", "idle"]);
+        // Down + jump: the spin dash, curled up underneath.
+        run(&mut s, &w, &walls, Input { down: true, ..Input::default() }, 2);
+        assert_eq!(s.poses(), ["crouch"]);
+        run(&mut s, &w, &walls, Input { down: true, jump: true, jump_pressed: true, ..Input::default() }, 1);
+        assert_eq!(s.poses(), ["spindash", "roll"]);
+        assert_eq!((s.pose, s.pose_frames), ("spindash", 0), "a new pose starts its clock again");
+        assert_eq!(s.pose_anim, s.anim);
     }
 
     #[test]
