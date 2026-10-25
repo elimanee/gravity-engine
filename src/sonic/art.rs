@@ -131,7 +131,8 @@ pub fn draw(s: &Sonic) {
     let (sin, cos) = angle.sin_cos();
     let f = Frame { at, sin, cos, facing: s.facing, scale: super::SCALE };
     let l = if s.super_form { golden(look(s.character), get_time() as f32) } else { look(s.character) };
-    if s.is_ball() && !(s.hammer_air && s.hammer.is_some()) {
+    // Curled up, except mid-swing or lunging out of a teleport.
+    if s.is_ball() && !(s.hammer_air && s.hammer.is_some()) && s.warp.is_none() {
         ball(&f, s, &l);
         if s.character == Character::Tails {
             // His tails trail behind the ball.

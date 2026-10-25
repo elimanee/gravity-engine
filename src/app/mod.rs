@@ -190,6 +190,8 @@ pub struct App {
     spring_fired: Option<(Vec2, f64)>,
     /// Seconds of broken static over the screen (Sonic.exe appearing).
     scare: f32,
+    /// Where (and when) Sonic.exe last vanished, for the static he leaves.
+    warp_echo: Option<(Vec2, f64)>,
     /// The Sonic level editor, its bar, and "My levels" (file, name).
     level_editor: Option<level_editor::LevelEditor>,
     level_bar: crate::ui::level_bar::LevelBar,
@@ -319,6 +321,7 @@ impl App {
             game_sprites: None,
             spring_fired: None,
             scare: 0.0,
+            warp_echo: None,
             level: None,
             act: None,
             level_editor: None,

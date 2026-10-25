@@ -296,6 +296,7 @@ impl App {
                 }
                 Event::Teleport { from } => {
                     self.sound(Sound::Static, s.pos, 0.6);
+                    self.warp_echo = Some((from, get_time()));
                     if self.s.effects {
                         self.effects.smoke(from, 10.0, 0.15);
                         self.effects.sparks(s.pos, vec2(-s.facing, 0.0), 10.0);
@@ -380,6 +381,22 @@ impl App {
         for (k, r) in self.rings.iter().enumerate() {
             if !sp.is_some_and(|sp| sp.ring(*r, t)) {
                 art::ring(*r, t + k as f32 * 0.07, SCALE);
+            }
+        }
+        // The static Sonic.exe leaves where he vanished.
+        if let Some((at, when)) = self.warp_echo {
+            let age = (get_time() - when) as f32;
+            if age < 0.4 {
+                let a = 1.0 - age / 0.4;
+                let seed = (get_time() * 60.0) as u32;
+                for k in 0..14u32 {
+                    let h = k.wrapping_add(seed).wrapping_mul(2_654_435_761) >> 8;
+                    let y = at.y - 30.0 + (h % 60) as f32;
+                    let w = 20.0 + ((h >> 6) % 40) as f32;
+                    let x = at.x - w / 2.0 + ((h >> 12) % 16) as f32 - 8.0;
+                    let grey = 0.3 + ((h >> 3) % 60) as f32 / 100.0;
+                    draw_rectangle(x, y, w, 2.0, Color::new(grey, grey * 0.6, grey * 0.6, 0.7 * a));
+                }
             }
         }
         if let Some(run) = self.sonic.as_ref().filter(|_| !self.sonic_blinks()) {

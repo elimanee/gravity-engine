@@ -4,10 +4,22 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
-## [Unreleased]
+## [3.2.0]
 
 ### Added
+- **Halloween Night**: a new act after Harbour, a graveyard at night with gravestones, jack-o'-lanterns that light the dark and its own eerie song, where **Sonic.exe hunts you**: he appears behind in a burst of static, flies after you through everything a little slower than a run (and faster as time goes on), and when he catches you he laughs and you lose your rings or a life; then he vanishes and comes back from behind. Invincible or super, he cannot touch you
+- **Sonic.exe as a fifth character** (`Shift+N`, *Exe* under *Play as*): runs like Sonic; jump again in the air to teleport forward, once a jump, never through a wall. Drawn with shapes, or from a Sonic.exe sheet in the style of Sonic 1 (691 × 677) kept as `exe.png`, which also gives the hunter his run and laugh
 - DeltaConduit's Amy sheet in the style of Sonic 1 (583 × 570) is recognised as Amy's (`amy.png`), alongside CartoonsAnimate22's
+- Level editor: *Pumpkin* (jack-o'-lanterns) and *Exe* (Sonic.exe hunts the player)
+- Sounds: broken static and a laugh
+
+### Fixed
+- In the web version, text needing new letters could be drawn for a frame from a texture already deleted (errors in the browser's console): the usual letters are now ready from the start
+
+### Downloads
+- `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
+- `gravity_engine-windows-x86_64.zip` — Windows build: unzip and run `gravity_engine.exe` (keep the DLLs next to it)
+- Or play it in the browser: https://elimanee.github.io/gravity-engine/
 
 ## [3.1.0]
 
