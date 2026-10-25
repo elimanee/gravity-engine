@@ -16,7 +16,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ## What's new in 3.3: the sprite region editor
 
-![The sprite region editor on a home-made sheet: the walk animation's six pictures numbered on the sheet, the second one fitted around its sprite with its centre and body shown, the animation playing beside it over the picture before](docs/screenshots/sprite-regions.png)
+![The sprite region editor on a home-made sheet new to the game: its background picked and cut out over a checkerboard, the walk animation's six pictures added in one go and numbered, the third one chosen with its centre and body shown, the animation playing at 10 pictures a second over the picture before](docs/screenshots/sprite-regions.png)
 
 Your sprite sheets can now be fixed up in the program: **Edit sprite regions…** in the settings opens a character's sheet, and for each animation (standing, walking, the spin dash, Tails' flight, Amy's hammer, Sonic.exe's teleport…) you choose its pictures on the sheet and where the character stands in them. Draw, move and resize the boxes, **double-click a sprite** to add it, drag the character's centre with its body and the ground shown around it, or let *Fit* tighten a box around its sprite; the animation plays beside it, over the picture before if you like, to line them up. What you save goes beside the sheet as `<character>.regions.json`, and the game draws from it at once. See [Editing the regions](#editing-the-regions).
 
@@ -151,7 +151,7 @@ A game controller plays Sonic and his friends (Linux joystick devices and XInput
 
 ### Sonic sprite sheets
 
-*Sonic sprites…* in the settings (or putting a PNG in `~/.config/gravity_engine/sonic/`) makes Sonic use a sprite sheet you provide. Nothing is copied into the program: the sheet stays on your computer. Triangly's Sonic 1 sheet from The Spriters Resource (690 × 1558) is recognised as it is. For any other sheet, put a `sheet.json` next to it:
+*Sonic sprites…* in the settings (or putting a PNG in `~/.config/gravity_engine/sonic/`) makes Sonic use a sprite sheet you provide. Nothing is copied into the program: the sheet stays on your computer. Triangly's Sonic 1 sheet from The Spriters Resource (690 × 1558) is recognised as it is. Any other sheet, for any character, can be laid out in the sprite region editor (see *Editing the regions* below), or for Sonic with a `sheet.json` next to it:
 
 ```json
 {
@@ -173,29 +173,43 @@ Tails, Knuckles and Amy can have theirs as well, recognised by their size and ke
 
 #### Editing the regions
 
-*Edit sprite regions…* in the settings (or `--sprite-regions[=CHARACTER]`) opens a character's sheet over the whole window, to change which pictures each animation uses and where the character stands in them: for a built-in layout that is a little off, or a sheet the game does not know (a `sheet.json` with rough cells is enough to start from). The buttons along the top switch between the characters that have a sheet.
+*Edit sprite regions…* in the settings (or `--sprite-regions[=CHARACTER]`) opens a character's sheet over the whole window, to change which pictures each animation uses, where the character stands in them, how long each shows and at what pace the animation plays: for a built-in layout that is a little off, or **any sheet at all**. The buttons along the top switch between the characters (one without a sheet asks for a picture).
+
+**Any picture as a sheet.** *Open a sheet…* (bottom left) makes any picture (PNG, WebP, GIF, BMP or JPEG) the character's sheet: it is kept as a PNG under the character's name (`sheet.png` for Sonic, `tails.png`…), and a sheet the game does not know opens empty. *Pick* (`I`) is an eyedropper: click the sheet's background and that colour is cut out (pick several if it has more; click a swatch to put one back). *Soft edges* cuts them out by closeness, for lossy pictures such as JPEGs, and *Scale* tells how many sheet pixels make one of the game's (2 for sprites drawn twice as big). A checkerboard shows through what is cut out. Once the background is gone, the sheet's sprites are found by themselves: hold Shift to see them.
 
 - **The animations** are listed on the left with how many pictures each has (a dot marks those changed, amber until saved); above the sheet, when the game shows the one picked.
-- **On the sheet**, its pictures are numbered boxes and the other animations' are faint (point at one to see whose it is, right-click it to go to it).
-  - Drag on an empty part of the sheet to draw a new picture: it tightens around the sprite inside. **Double-click a sprite** to add it whole.
+- **On the sheet**, its pictures are numbered boxes (`×2` held longer, `↔` mirrored) and the other animations' are faint (point at one to see whose it is, right-click it to go to it).
+  - Drag on an empty part of the sheet to draw a new picture: it tightens around the sprite inside. **Double-click a sprite** to add it whole, or **Shift-drag a box** to add every sprite in it, row by row, left to right.
   - Drag a picture to move it, its edges or corners to resize it (the character stays where it is), and the red cross to place the character's centre. The green box is the character's body in the game; its bottom is the ground under the feet.
-  - The arrow keys move the picture by a pixel (Shift: 10); with Ctrl they resize it, with Alt they move the centre.
-  - *Fit: feet* (`F`) tightens the picture around its sprite and puts the centre above the feet; *Fit: middle* (`M`) puts it in the middle (curled up, in the air).
+  - **Choose several pictures** with Shift- or Ctrl-click (on the sheet or below the preview), or all of them with `Ctrl+A`: dragging, the arrow keys, *Fit*, *Hold*, *Mirror*, *Duplicate*, *Copy* and *Delete* act on them all.
+  - The arrow keys move the pictures by a pixel (Shift: 10); with Ctrl they resize them, with Alt they move their centres.
+  - *Fit: feet* (`F`) tightens a picture around its sprite and puts the centre above the feet; *Fit: middle* (`M`) puts it in the middle (curled up, in the air). *Same centre* (`C`) gives the other pictures chosen (or, with one chosen, the whole animation) the same place for the character, measured from the bottom middle of their boxes.
+  - *Copy* / *Paste* (`Ctrl+C` / `Ctrl+V`) take pictures from one animation to another (use the walk for the run, then change what differs).
   - Wheel: zoom; right-drag: pan; `Home`: back to the animation.
 - **On the right**, the animation plays (`Space` pauses it; `←` `→` or `[` `]` step through it; *Onion* shows the picture before faintly, to line them up), and its pictures are listed in order: click one to pick it, *← Earlier* / *Later →* reorder them, *Duplicate* (`D`), *Delete* (`Del`). For Tails, *Body* / *Behind* (`B`) switch to his tails, drawn behind him on their own clock.
+  - **Pace**: *Game* follows the character's speed as in the Mega Drive games; otherwise a fixed number of pictures a second (4 to 30). **Play once** stops on the last picture instead of looping (a hammer swing, a laugh), starting again whenever the character starts doing it again.
+  - **Hold** (`-` / `=`) shows a picture 2 to 8 times as long as the others; **Mirror** (`H`) draws it facing the other way (for a sheet whose sprites face left, or to use one both ways).
+- **Try** (`T`) plays the character as edited, saved or not, on a test track with room to stand, look up, crouch and spin dash, a wall to push, a hill, a loop, a badnik, a spring up to a ledge and a high wall to climb; `Esc` comes back to the editor, and afterwards to the scene you had.
 - *Undo* / *Redo* (`Ctrl+Z` / `Ctrl+Y`), *Reset this animation*, *Reset all* and *Save* (`Ctrl+S`); `Esc` leaves (press it twice to leave unsaved changes).
 
-What is saved goes beside the sheet as `<character>.regions.json` (`sonic`, `tails`, `knuckles`, `amy` or `exe`), with only the animations changed, and the game draws from it at once. It belongs to that sheet: one of another size ignores it. Each picture is its box on the sheet (`rect`: x, y, width, height) and the character's centre from the box's top-left (`centre`); an animation with no pictures left is one the sheet does not have.
+What is saved goes beside the sheet as `<character>.regions.json` (`sonic`, `tails`, `knuckles`, `amy` or `exe`), with only what changed, and the game draws from it at once. It belongs to that sheet: one of another size ignores it. Each picture is its box on the sheet (`rect`: x, y, width, height) and the character's centre from the box's top-left (`centre`), maybe mirrored (`flip`) or held longer (`hold`); an animation may have a `fps` and play `once`, and one with no pictures left is one the sheet does not have. For a sheet laid out here, the file also keeps its `background` colours, `soft` and `scale`.
 
 ```json
 {
-  "size": [691, 677],
+  "size": [316, 160],
+  "background": [[0, 128, 128]],
   "animations": {
-    "warp": {
+    "idle": {
       "frames": [
-        {"rect": [317, 431, 44, 26], "centre": [22, 13]},
-        {"rect": [365, 433, 43, 26], "centre": [21.5, 13]}
+        {"rect": [11, 4, 35, 48], "centre": [17, 33]}
       ]
+    },
+    "walk": {
+      "frames": [
+        {"rect": [11, 56, 35, 48], "centre": [17, 33], "hold": 2},
+        {"rect": [66, 56, 29, 48], "centre": [14, 33], "flip": true}
+      ],
+      "fps": 10
     }
   }
 }
@@ -538,7 +552,7 @@ src/
 web/                   the web version's page, its WebAudio / storage plugin and build script
 ```
 
-`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, snow, jelly, cloth, laser beams, gadgets, planets, rope reeling, weather, night light, Sonic's running, jumping, spin dash, underwater speed and loops, Tails' flight, Knuckles' glide and climb, Amy's hammer, Sonic.exe's teleport and his hunt, finding sprites on a sheet and the regions edited on it, badniks, monitors, rings, lives and the bosses, air and bubbles, Super Sonic, the special stages, the acts, the music, sprite sheets, the endless run's zones, controllers, the profiler, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
+`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, snow, jelly, cloth, laser beams, gadgets, planets, rope reeling, weather, night light, Sonic's running, jumping, spin dash, underwater speed and loops, Tails' flight, Knuckles' glide and climb, Amy's hammer, Sonic.exe's teleport and his hunt, finding sprites on a sheet, the regions edited on it, pictures held and animations played once, the poses a sheet draws, badniks, monitors, rings, lives and the bosses, air and bubbles, Super Sonic, the special stages, the acts, the music, sprite sheets, the endless run's zones, controllers, the profiler, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
 
 `gravity_engine --verify-challenges` (needs a display) checks that every built-in challenge can be solved.
 

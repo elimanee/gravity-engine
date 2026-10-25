@@ -123,7 +123,7 @@ impl App {
     }
 
     /// Switch to the world size `sc` was made in.
-    fn level_world(&mut self, sc: &scene::SceneFile) {
+    pub(super) fn level_world(&mut self, sc: &scene::SceneFile) {
         if let Some(size) = sc.world_size.filter(|&s| s != self.s.world_size && (1..=4).contains(&s)) {
             self.set_world_size(size);
         }

@@ -176,8 +176,10 @@ pub struct App {
     music: music::Music,
     /// A special stage being played (it takes the whole screen).
     special: Option<special::SpecialRun>,
-    /// The sprite region editor (it takes the whole screen too).
+    /// The sprite region editor (it takes the whole screen too), and while
+    /// its sprites are tried, what to come back to.
     regions: Option<regions::RegionEditor>,
+    region_test: Option<regions::RegionTest>,
     /// The web version saves the settings as they change (closing the tab
     /// does not run `Drop`): what was saved last, and when to look again.
     autosaved: String,
@@ -317,6 +319,7 @@ impl App {
             music: Default::default(),
             special: None,
             regions: None,
+            region_test: None,
             autosaved: String::new(),
             autosave_in: 2.0,
             game: None,
@@ -435,7 +438,10 @@ impl App {
             self.update_music();
             return;
         }
-        if self.regions.is_some() {
+        if self.region_test.is_some() && is_key_pressed(KeyCode::Escape) {
+            self.end_region_test();
+        }
+        if self.regions.is_some() && self.region_test.is_none() {
             self.regions_frame(dt);
             self.audio.tick();
             return;
@@ -494,6 +500,7 @@ impl App {
             let _t = crate::profile::span("draw");
             self.draw(dt, &input);
         }
+        self.draw_region_test();
 
         if let Some(Title::Leaving(po)) = &mut self.title {
             po.draw();

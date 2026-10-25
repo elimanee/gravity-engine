@@ -308,9 +308,13 @@ impl App {
         let at = h.pos + vec2(0.0, (t * 3.0).sin() * 4.0);
         let laughing = h.laughed.is_some();
         draw_circle(at.x, at.y, 44.0, Color::new(0.0, 0.0, 0.0, 0.22));
-        let (name, k) = if laughing { ("laugh", (t * 8.0) as usize) } else { ("chase", (t * 10.0) as usize) };
+        // The laugh from its start (a laugh played once stops on its last picture).
+        let (name, since, fps) = match h.laughed {
+            Some(since) => ("laugh", since, 8.0),
+            None => ("chase", t, 10.0),
+        };
         let sheet = self.sonic_sheet.get(Character::Exe);
-        if !sheet.is_some_and(|sh| sh.draw_anim(name, k, at, h.facing, WHITE)) {
+        if !sheet.is_some_and(|sh| sh.draw_anim(name, since, fps, at, h.facing, WHITE)) {
             let mut s = Sonic::as_character(at, Character::Exe);
             s.grounded = true;
             s.facing = h.facing;
