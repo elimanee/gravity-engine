@@ -558,14 +558,16 @@ impl Pic {
 
 /// An animation's pictures, the pieces drawn behind them (Tails' tails, on
 /// their own clock), its pace in pictures a second (none: the games' own,
-/// which follows the character's speed) and whether it plays once,
-/// stopping on its last picture.
+/// which follows the character's speed), whether it plays once, stopping
+/// on its last picture, and its loop point: the pictures before it open
+/// the animation once, then it loops from there.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Anim {
     pub pics: Vec<Pic>,
     pub behind: Vec<Pic>,
     pub fps: Option<f32>,
     pub once: bool,
+    pub loop_from: usize,
 }
 
 impl Anim {
@@ -574,11 +576,26 @@ impl Anim {
         self.pics.iter().map(|p| p.hold.max(0.01)).sum()
     }
 
-    /// The picture showing `t` pictures in: looping, or stopping on the
-    /// last when played once.
+    /// Whether it is timed from when the character began doing it (played
+    /// once, or opening before its loop).
+    pub fn timed_from_start(&self) -> bool {
+        self.once || self.loop_from > 0
+    }
+
+    /// The picture showing `t` pictures in: stopping on the last when
+    /// played once, else looping from the loop point (the pictures before
+    /// it shown only the first time through).
     pub fn at(&self, t: f32, once: bool) -> usize {
         let length = self.length();
-        let t = if once { t.clamp(0.0, length) } else { t.rem_euclid(length.max(0.01)) };
+        let from = self.loop_from.min(self.pics.len().saturating_sub(1));
+        let opening: f32 = self.pics[..from].iter().map(|p| p.hold.max(0.01)).sum();
+        let t = if once {
+            t.clamp(0.0, length)
+        } else if (0.0..opening).contains(&t) {
+            t
+        } else {
+            opening + (t - opening).rem_euclid((length - opening).max(0.01))
+        };
         let mut end = 0.0;
         for (k, p) in self.pics.iter().enumerate() {
             end += p.hold.max(0.01);
@@ -1151,15 +1168,16 @@ impl Sheet {
         let name = s.poses().into_iter().chain(["walk", "idle"]).find(|n| self.anim(n).is_some())?;
         let anim = self.anim(name)?;
         let length = anim.length();
+        // The games' pace: from when he began, or running on.
+        let anim_t = if anim.timed_from_start() { s.anim - s.pose_anim } else { s.anim };
         let (t, once) = match (anim.fps, name) {
             (Some(fps), _) => (s.pose_frames as f32 / super::FPS * fps, anim.once),
             (None, "bored") => (s.idle.saturating_sub(180) as f32 / 30.0, anim.once),
-            (None, "push") => (s.anim / 8.0, anim.once),
+            (None, "push") => (anim_t / 8.0, anim.once),
             // Played once through, with the move.
             (None, "hammer") => (s.hammer.map_or(0.0, |h| h as f32 / 22.0) * length, true),
             (None, "climb_up") => (s.climb_up.map_or(0.0, |(t, _, _)| t as f32 / 18.0) * length, true),
-            (None, _) if anim.once => (s.anim - s.pose_anim, true),
-            (None, _) => (s.anim, false),
+            (None, _) => (anim_t, anim.once),
         };
         Some((anim, anim.at(t, once)))
     }
@@ -1404,6 +1422,25 @@ mod tests {
         let once: Vec<usize> = (0..7).map(|t| a.at(t as f32, true)).collect();
         assert_eq!(once, [0, 1, 1, 2, 2, 2, 2]);
         assert_eq!(Anim::default().at(3.0, false), 0, "no pictures: nothing to pick from");
+    }
+
+    #[test]
+    fn a_loop_point_opens_once_then_loops_from_there() {
+        let pic = |hold: f32| Pic { hold, ..Pic::new(Rect::new(0.0, 0.0, 8.0, 8.0), vec2(4.0, 4.0)) };
+        // Two pictures to open with (the first held twice as long), then two looping.
+        let mut a = Anim { pics: vec![pic(2.0), pic(1.0), pic(1.0), pic(1.0)], loop_from: 2, ..Default::default() };
+        assert!(a.timed_from_start());
+        let shown: Vec<usize> = (0..10).map(|t| a.at(t as f32, false)).collect();
+        assert_eq!(shown, [0, 0, 1, 2, 3, 2, 3, 2, 3, 2]);
+        // Played once, it stops on the last picture all the same.
+        assert_eq!(a.at(9.0, true), 3);
+        // A loop point past the end loops on the last picture.
+        a.loop_from = 9;
+        assert_eq!((a.at(5.0, false), a.at(50.0, false)), (3, 3));
+        // From the first picture: the whole animation loops, as before.
+        a.loop_from = 0;
+        assert!(!a.timed_from_start());
+        assert_eq!(a.at(5.0, false), 0);
     }
 
     #[test]

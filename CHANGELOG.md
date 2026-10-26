@@ -4,6 +4,12 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [Unreleased]
+
+### Added
+- **Loop points** in the sprite region editor: *Loop here* (`L`) on a picture makes the ones before it an opening, played once, and the animation loops from there (`↻` marks it; bars under the pictures show the opening and the loop). In the game the opening plays again whenever the character starts the move; saved as `loop_from` in `.regions.json`
+- Sonic.exe's chase is timed from when he appears
+
 ## [3.4.0]
 
 ### Added

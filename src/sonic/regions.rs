@@ -17,6 +17,10 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
+fn is_zero(v: &usize) -> bool {
+    *v == 0
+}
+
 fn one() -> f32 {
     1.0
 }
@@ -41,8 +45,9 @@ pub struct Region {
 }
 
 /// An animation's pictures in order, the pieces drawn behind them (Tails'
-/// tails), its pace (pictures a second; none: the games') and whether it
-/// plays once.
+/// tails), its pace (pictures a second; none: the games'), whether it
+/// plays once, and the picture it loops back to (from 0, the first: the
+/// ones before it open the animation once).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AnimRegions {
     pub frames: Vec<Region>,
@@ -52,6 +57,8 @@ pub struct AnimRegions {
     pub fps: Option<f32>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub once: bool,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub loop_from: usize,
 }
 
 /// A `<character>.regions.json`.
@@ -101,7 +108,8 @@ impl Regions {
             if was != now {
                 let frames = now.pics.iter().map(to_region).collect();
                 let behind = now.behind.iter().map(to_region).collect();
-                animations.insert(name.clone(), AnimRegions { frames, behind, fps: now.fps, once: now.once });
+                let (fps, once, loop_from) = (now.fps, now.once, now.loop_from);
+                animations.insert(name.clone(), AnimRegions { frames, behind, fps, once, loop_from });
             }
         }
         Regions { size: [size.0, size.1], animations, ..Default::default() }
@@ -117,7 +125,7 @@ impl Regions {
         for (name, a) in &self.animations {
             let pics = a.frames.iter().map(to_pic).collect();
             let behind = a.behind.iter().map(to_pic).collect();
-            anims.insert(name.clone(), Anim { pics, behind, fps: a.fps, once: a.once });
+            anims.insert(name.clone(), Anim { pics, behind, fps: a.fps, once: a.once, loop_from: a.loop_from });
         }
     }
 
@@ -190,6 +198,9 @@ impl Regions {
                 if a.once {
                     fields.push("\"once\": true".to_string());
                 }
+                if a.loop_from > 0 {
+                    fields.push(format!("\"loop_from\": {}", a.loop_from));
+                }
                 format!("    {name}: {{\n      {}\n    }}", fields.join(",\n      "))
             })
             .collect();
@@ -234,6 +245,7 @@ mod tests {
         let dash = Anim { pics: vec![pic(160.0, 15.0)], behind: vec![pic(200.0, 9.0)], ..Default::default() };
         anims.insert("spindash".to_string(), dash);
         // Paced, played once, a picture mirrored and held twice as long.
+        anims.get_mut("walk").unwrap().loop_from = 1;
         let run = anims.get_mut("run").unwrap();
         (run.fps, run.once) = (Some(12.0), true);
         (run.pics[0].flip, run.pics[0].hold) = (true, 2.0);
@@ -247,6 +259,7 @@ mod tests {
         assert!(text.contains(r#""centre": [16.5, 21]"#), "{text}");
         assert!(text.contains(r#""centre": [15, 21], "flip": true, "hold": 2}"#), "{text}");
         assert!(text.contains(r#""fps": 12"#) && text.contains(r#""once": true"#), "{text}");
+        assert!(text.contains(r#""loop_from": 1"#), "{text}");
         assert!(text.contains(r#""background": [[0, 128, 128]]"#) && text.contains(r#""scale": 2"#), "{text}");
         let back: Regions = serde_json::from_str(&text).unwrap();
         assert_eq!(back, r);
@@ -265,7 +278,7 @@ mod tests {
             r#"{"size": [10, 10], "animations": {"idle": {"frames": [{"rect": [0, 0, 5, 5], "centre": [2.5, 3]}]}}}"#;
         let r: Regions = serde_json::from_str(older).unwrap();
         let idle = &r.animations["idle"];
-        assert!(idle.behind.is_empty() && idle.fps.is_none() && !idle.once);
+        assert!(idle.behind.is_empty() && idle.fps.is_none() && !idle.once && idle.loop_from == 0);
         assert_eq!((idle.frames[0].flip, idle.frames[0].hold), (false, 1.0));
         assert!(r.background.is_empty() && !r.soft && r.scale.is_none());
     }

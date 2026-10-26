@@ -169,6 +169,7 @@ enum Cmd {
     HoldLess,
     HoldMore,
     Mirror,
+    LoopHere,
     FitFeet,
     FitMiddle,
     SameCentre,
@@ -649,6 +650,13 @@ impl RegionEditor {
         let at = self.selected.map_or(n, |k| (k + 1).min(n));
         let count = new.len();
         self.pics_mut().splice(at..at, new);
+        // The loop point stays on its picture.
+        if !self.behind {
+            let a = self.current_mut();
+            if a.loop_from > 0 && at <= a.loop_from {
+                a.loop_from += count;
+            }
+        }
         self.selected = Some(at + count - 1);
         self.marked = (at..at + count).collect();
         self.playing = false;
@@ -757,6 +765,12 @@ impl RegionEditor {
             for &k in chosen.iter().rev() {
                 ed.pics_mut().remove(k);
             }
+            // The loop point stays on its picture (or the one after it).
+            if !ed.behind {
+                let a = ed.current_mut();
+                let before = chosen.iter().filter(|&&k| k < a.loop_from).count();
+                a.loop_from = (a.loop_from - before).min(a.pics.len().saturating_sub(1));
+            }
         });
         let n = self.pics().len();
         self.select_only((n > 0).then(|| first.min(n - 1)));
@@ -798,8 +812,34 @@ impl RegionEditor {
         if to < 0 || to as usize >= self.pics().len() {
             return;
         }
-        self.change(|ed| ed.pics_mut().swap(k, to as usize));
-        self.select_only(Some(to as usize));
+        let to = to as usize;
+        self.change(|ed| {
+            ed.pics_mut().swap(k, to);
+            // The loop point goes with its picture.
+            if !ed.behind {
+                let a = ed.current_mut();
+                if a.loop_from > 0 && (a.loop_from == k || a.loop_from == to) {
+                    a.loop_from = if a.loop_from == k { to } else { k };
+                }
+            }
+        });
+        self.select_only(Some(to));
+    }
+
+    /// Where the animation loops back to, when it opens with pictures
+    /// before it (and loops: not played once).
+    fn loop_point(&self) -> Option<usize> {
+        let a = self.current()?;
+        (!self.behind && !a.once && a.loop_from > 0 && a.loop_from < a.pics.len()).then_some(a.loop_from)
+    }
+
+    /// Loop from the selected picture (again: the whole animation loops).
+    fn loop_here(&mut self) {
+        let Some(k) = self.selected.filter(|_| !self.behind) else { return };
+        let to = if self.loop_point() == Some(k) { 0 } else { k };
+        self.change(|ed| ed.current_mut().loop_from = to);
+        // From the start, to see it open.
+        (self.clock, self.playing) = (0.0, true);
     }
 
     fn step_picture(&mut self, by: isize) {
@@ -1005,14 +1045,18 @@ impl RegionEditor {
         y -= 34.0;
         let pic = self.selected_pic();
         steppers.push(Stepper {
-            r: Rect::new(side.x, y, w2, 28.0),
+            r: Rect::new(side.x, y, w3, 28.0),
             label: "Hold",
             value: format!("×{}", num(pic.map_or(1.0, |p| p.hold))),
             less: Cmd::HoldLess,
             more: Cmd::HoldMore,
             enabled: any,
         });
-        push(Rect::new(side.x + w2 + 6.0, y, w2, 28.0), "Mirror", Cmd::Mirror, pic.is_some_and(|p| p.flip), any);
+        let flipped = pic.is_some_and(|p| p.flip);
+        push(Rect::new(side.x + w3 + 6.0, y, w3, 28.0), "Mirror", Cmd::Mirror, flipped, any);
+        let looping = self.selected.is_some() && self.loop_point() == self.selected;
+        let can_loop = chosen.len() == 1 && !self.behind && !self.current().is_some_and(|a| a.once);
+        push(Rect::new(side.x + 2.0 * (w3 + 6.0), y, w3, 28.0), "Loop here", Cmd::LoopHere, looping, can_loop);
         y -= 58.0;
         let info = y;
         // Above: the preview, its controls, the layers, the pace and the
@@ -1160,7 +1204,10 @@ impl RegionEditor {
             Cmd::Next => self.step_picture(1),
             Cmd::Play => {
                 self.playing = !self.playing;
-                if !self.playing {
+                if self.playing {
+                    // From the start: its opening shows again.
+                    self.clock = 0.0;
+                } else {
                     // Stop on the picture showing.
                     let k = self.shown().or(self.selected);
                     self.select_only(k);
@@ -1180,6 +1227,7 @@ impl RegionEditor {
             Cmd::HoldLess => self.step_hold(-1.0),
             Cmd::HoldMore => self.step_hold(1.0),
             Cmd::Mirror => self.mirror(),
+            Cmd::LoopHere => self.loop_here(),
             Cmd::FitFeet => self.fit(true),
             Cmd::FitMiddle => self.fit(false),
             Cmd::SameCentre => self.same_centre(),
@@ -1295,6 +1343,7 @@ impl RegionEditor {
             (KeyCode::M, Cmd::FitMiddle),
             (KeyCode::C, Cmd::SameCentre),
             (KeyCode::H, Cmd::Mirror),
+            (KeyCode::L, Cmd::LoopHere),
             (KeyCode::Equal, Cmd::HoldMore),
             (KeyCode::Minus, Cmd::HoldLess),
             (KeyCode::Space, Cmd::Play),
@@ -1783,6 +1832,9 @@ impl RegionEditor {
             if q.flip {
                 label += " ↔";
             }
+            if self.loop_point() == Some(k) {
+                label += " ↻";
+            }
             let lw = measure_bold(&label, 11.0) + 8.0;
             let tag = Rect::new(r.x, r.y - 15.0, lw, 15.0);
             draw_rectangle(tag.x, tag.y, tag.w, tag.h, c);
@@ -1940,10 +1992,14 @@ impl RegionEditor {
         clip(None);
         let pace = match a.fps {
             Some(f) => format!("{} pictures a second", num(f)),
-            None => "the games' pace (follows his speed)".to_string(),
+            None => "the games' pace".to_string(),
         };
-        let once = if a.once { "  ·  once" } else { "" };
-        text(&format!("×{z}  ·  {pace}{once}"), pv.x + 10.0, baseline(pv.y + 14.0, 11.0), 11.0, TEXT_MUTED);
+        let how = match self.loop_point() {
+            _ if a.once => "  ·  once".to_string(),
+            Some(k) => format!("  ·  loops from {}", k + 1),
+            None => String::new(),
+        };
+        text(&format!("×{z}  ·  {pace}{how}"), pv.x + 10.0, baseline(pv.y + 14.0, 11.0), 11.0, TEXT_MUTED);
         if let Some(k) = k {
             let s = format!("{} / {}", k + 1, list.len());
             text(&s, pv.right() - 10.0 - measure(&s, 11.0), baseline(pv.bottom() - 12.0, 11.0), 11.0, TEXT_MUTED);
@@ -1983,6 +2039,14 @@ impl RegionEditor {
             };
             rrect_lines(*t, 6.0, if lit { 2.0 } else { 1.0 }, border);
             text_bold(&(k + 1).to_string(), t.x + 4.0, t.y + 12.0, 10.0, TEXT_DIM);
+            // The opening, played once, and the loop after it.
+            if let Some(from) = self.loop_point() {
+                let c = if k < from { alpha(WARNING, 0.75) } else { alpha(SUCCESS, 0.85) };
+                draw_rectangle(t.x + 6.0, t.bottom() - 3.0, t.w - 12.0, 2.0, c);
+                if k == from {
+                    text_bold("↻", t.right() - 4.0 - measure_bold("↻", 11.0), t.y + 12.0, 11.0, SUCCESS);
+                }
+            }
             if q.hold != 1.0 {
                 let s = format!("×{}", num(q.hold));
                 text_bold(&s, t.right() - 4.0 - measure_bold(&s, 10.0), t.bottom() - 4.0, 10.0, WARNING);
@@ -2015,6 +2079,9 @@ impl RegionEditor {
                 }
                 if q.flip {
                     head += "  ·  mirrored";
+                }
+                if self.loop_point() == Some(k) {
+                    head += "  ·  loops from here";
                 }
                 line(0.0, &head, TEXT);
                 let r = q.src;
