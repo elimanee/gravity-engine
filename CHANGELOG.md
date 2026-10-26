@@ -4,11 +4,16 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
-## [Unreleased]
+## [3.4.1]
 
 ### Added
 - **Loop points** in the sprite region editor: *Loop here* (`L`) on a picture makes the ones before it an opening, played once, and the animation loops from there (`↻` marks it; bars under the pictures show the opening and the loop). In the game the opening plays again whenever the character starts the move; saved as `loop_from` in `.regions.json`
 - Sonic.exe's chase is timed from when he appears
+
+### Downloads
+- `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
+- `gravity_engine-windows-x86_64.zip` — Windows build: unzip and run `gravity_engine.exe` (keep the DLLs next to it)
+- Or play it in the browser: https://elimanee.github.io/gravity-engine/ (the sprite region editor needs the desktop version, like your own sprite sheets)
 
 ## [3.4.0]
 
