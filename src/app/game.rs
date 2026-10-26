@@ -308,10 +308,11 @@ impl App {
         let at = h.pos + vec2(0.0, (t * 3.0).sin() * 4.0);
         let laughing = h.laughed.is_some();
         draw_circle(at.x, at.y, 44.0, Color::new(0.0, 0.0, 0.0, 0.22));
-        // The laugh from its start (a laugh played once stops on its last picture).
+        // Timed from the laugh, or from his coming (where an animation played
+        // once, or opening before its loop, starts).
         let (name, since, fps) = match h.laughed {
             Some(since) => ("laugh", since, 8.0),
-            None => ("chase", t, 10.0),
+            None => ("chase", h.shown, 10.0),
         };
         let sheet = self.sonic_sheet.get(Character::Exe);
         if !sheet.is_some_and(|sh| sh.draw_anim(name, since, fps, at, h.facing, WHITE)) {
