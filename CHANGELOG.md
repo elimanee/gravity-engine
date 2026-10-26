@@ -4,6 +4,14 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [Unreleased]
+
+### Added
+- **Repeated runs** in the sprite region editor: choose pictures that follow one another and *Repeat* them 2 to 16 times before the animation goes on, as many runs per animation as needed (like the "Loop ×8" marks on sheets), besides its loop point. A bar along their tops and `↻×8` show them; saved as `repeats` in `.regions.json`
+
+### Changed
+- In the sprite region editor, Shift-click now chooses a run of pictures (from the selected one); Ctrl-click still adds one
+
 ## [3.4.1]
 
 ### Added

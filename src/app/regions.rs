@@ -10,7 +10,7 @@
 use super::*;
 use crate::library::acts;
 use crate::sonic::regions;
-use crate::sonic::sheet::{self, detect_sprites, find_sprite, Anim, Editable, Pic};
+use crate::sonic::sheet::{self, detect_sprites, find_sprite, Anim, Editable, Pic, Repeat};
 use crate::sonic::{body_radii, Character};
 use crate::ui::theme::*;
 use crate::ui::widgets::clip;
@@ -85,8 +85,10 @@ const PACES: &[f32] = &[4.0, 6.0, 8.0, 10.0, 12.0, 15.0, 20.0, 24.0, 30.0];
 /// Sheet pixels per guide pixel a sheet can be given.
 const SCALES: &[f32] = &[0.5, 1.0, 1.5, 2.0, 3.0, 4.0];
 
-/// The longest a picture can be held (in pictures).
+/// The longest a picture can be held (in pictures), and the most times a
+/// run can repeat.
 const MOST_HOLD: f32 = 8.0;
+const MOST_REPEATS: u32 = 16;
 
 /// The preview plays the games' own pace at this many pictures a second
 /// (in the game it follows the character's speed); the pieces behind at
@@ -170,6 +172,8 @@ enum Cmd {
     HoldMore,
     Mirror,
     LoopHere,
+    RepeatLess,
+    RepeatMore,
     FitFeet,
     FitMiddle,
     SameCentre,
@@ -650,12 +654,9 @@ impl RegionEditor {
         let at = self.selected.map_or(n, |k| (k + 1).min(n));
         let count = new.len();
         self.pics_mut().splice(at..at, new);
-        // The loop point stays on its picture.
+        // The loop point and repeated runs keep to their pictures.
         if !self.behind {
-            let a = self.current_mut();
-            if a.loop_from > 0 && at <= a.loop_from {
-                a.loop_from += count;
-            }
+            self.current_mut().reindex(n, |i| Some(if i < at { i } else { i + count }));
         }
         self.selected = Some(at + count - 1);
         self.marked = (at..at + count).collect();
@@ -761,15 +762,16 @@ impl RegionEditor {
     fn delete(&mut self) {
         let chosen = self.chosen();
         let Some(&first) = chosen.first() else { return };
+        let n = self.pics().len();
         self.change(|ed| {
             for &k in chosen.iter().rev() {
                 ed.pics_mut().remove(k);
             }
-            // The loop point stays on its picture (or the one after it).
+            // The loop point and repeated runs keep to their pictures (or
+            // the ones after them).
             if !ed.behind {
-                let a = ed.current_mut();
-                let before = chosen.iter().filter(|&&k| k < a.loop_from).count();
-                a.loop_from = (a.loop_from - before).min(a.pics.len().saturating_sub(1));
+                let gone = |i: usize| chosen.binary_search(&i).is_ok();
+                ed.current_mut().reindex(n, |i| (!gone(i)).then(|| i - chosen.iter().filter(|&&k| k < i).count()));
             }
         });
         let n = self.pics().len();
@@ -831,6 +833,55 @@ impl RegionEditor {
     fn loop_point(&self) -> Option<usize> {
         let a = self.current()?;
         (!self.behind && !a.once && a.loop_from > 0 && a.loop_from < a.pics.len()).then_some(a.loop_from)
+    }
+
+    /// The chosen pictures, when they follow one another: (first, last).
+    fn chosen_run(&self) -> Option<(usize, usize)> {
+        let chosen = self.chosen();
+        let (&a, &b) = (chosen.first()?, chosen.last()?);
+        (b - a + 1 == chosen.len()).then_some((a, b))
+    }
+
+    /// How many times the chosen run plays: that of the run it is in, else once.
+    fn run_times(&self) -> u32 {
+        let Some((a, b)) = self.chosen_run() else { return 1 };
+        let run = self.current().and_then(|an| an.repeat_of(a)).filter(|r| b <= r.to);
+        run.map_or(1, |r| r.times)
+    }
+
+    /// Repeat the chosen run more or fewer times (once: not repeated). In a
+    /// run already, that run changes; otherwise the chosen pictures become
+    /// one, in place of any they cut across.
+    fn step_repeat(&mut self, by: i32) {
+        if self.behind {
+            return;
+        }
+        let Some((a, b)) = self.chosen_run() else {
+            self.notes.push(Note::Info("Choose pictures that follow one another (Shift-click the last)".into()));
+            return;
+        };
+        let times = (self.run_times() as i32 + by).clamp(1, MOST_REPEATS as i32) as u32;
+        self.change(|ed| {
+            let runs = &mut ed.current_mut().repeats;
+            if let Some(r) = runs.iter_mut().find(|r| r.from <= a && b <= r.to) {
+                r.times = times;
+            } else {
+                runs.retain(|r| r.to < a || r.from > b);
+                runs.push(Repeat { from: a, to: b, times });
+            }
+            runs.retain(|r| r.times >= 2);
+            runs.sort_by_key(|r| r.from);
+        });
+        // From the start, to see it play.
+        (self.clock, self.playing) = (0.0, true);
+    }
+
+    /// Choose the pictures from the selected one to `k` (Shift-click).
+    fn select_run(&mut self, k: usize) {
+        self.playing = false;
+        let a = self.selected.unwrap_or(k);
+        self.marked = (a.min(k)..=a.max(k)).collect();
+        self.selected = Some(k);
     }
 
     /// Loop from the selected picture (again: the whole animation loops).
@@ -1057,6 +1108,24 @@ impl RegionEditor {
         let looping = self.selected.is_some() && self.loop_point() == self.selected;
         let can_loop = chosen.len() == 1 && !self.behind && !self.current().is_some_and(|a| a.once);
         push(Rect::new(side.x + 2.0 * (w3 + 6.0), y, w3, 28.0), "Loop here", Cmd::LoopHere, looping, can_loop);
+        y -= 34.0;
+        let run = self.chosen_run().filter(|_| !self.behind);
+        let times = self.run_times();
+        // Within a run: the whole run.
+        let inside = run.and_then(|(a, b)| self.current()?.repeat_of(a).filter(|r| b <= r.to));
+        let run = inside.map(|r| (r.from, r.to)).or(run);
+        steppers.push(Stepper {
+            r: Rect::new(side.x, y, side.w, 28.0),
+            label: "Repeat",
+            value: match run {
+                Some((a, b)) if a != b => format!("pictures {}–{}  ×{times}", a + 1, b + 1),
+                Some((a, _)) => format!("picture {}  ×{times}", a + 1),
+                None => "×1".to_string(),
+            },
+            less: Cmd::RepeatLess,
+            more: Cmd::RepeatMore,
+            enabled: run.is_some(),
+        });
         y -= 58.0;
         let info = y;
         // Above: the preview, its controls, the layers, the pace and the
@@ -1158,7 +1227,9 @@ impl RegionEditor {
         }
         if let Some(k) = l.thumbs.iter().position(|t| t.contains(m)) {
             input.consumed = true;
-            if input.shift || input.ctrl {
+            if input.shift {
+                self.select_run(k);
+            } else if input.ctrl {
                 self.toggle(k);
             } else {
                 self.select_only(Some(k));
@@ -1228,6 +1299,8 @@ impl RegionEditor {
             Cmd::HoldMore => self.step_hold(1.0),
             Cmd::Mirror => self.mirror(),
             Cmd::LoopHere => self.loop_here(),
+            Cmd::RepeatLess => self.step_repeat(-1),
+            Cmd::RepeatMore => self.step_repeat(1),
             Cmd::FitFeet => self.fit(true),
             Cmd::FitMiddle => self.fit(false),
             Cmd::SameCentre => self.same_centre(),
@@ -1434,6 +1507,10 @@ impl RegionEditor {
         let under = self.pics().iter().rposition(|q| q.src.contains(p));
         if input.shift || input.ctrl {
             return match under {
+                Some(k) if input.shift => {
+                    self.select_run(k);
+                    None
+                }
                 Some(k) => {
                     self.toggle(k);
                     None
@@ -1663,7 +1740,7 @@ impl RegionEditor {
             "Drag on the sheet: new picture",
             "Double-click a sprite: add it",
             "Shift-drag: add every sprite in the box",
-            "Shift / Ctrl-click: choose several",
+            "Shift-click: a run  ·  Ctrl-click: one more",
             "Drag a box, its edges, its cross",
             "Arrows move (Shift ×10, Ctrl size, Alt centre)",
             "Wheel zoom",
@@ -1834,6 +1911,9 @@ impl RegionEditor {
             }
             if self.loop_point() == Some(k) {
                 label += " ↻";
+            }
+            if let Some(r) = self.current().and_then(|a| a.repeat_of(k)).filter(|r| r.from == k && !self.behind) {
+                label += &format!(" ↻×{}", r.times);
             }
             let lw = measure_bold(&label, 11.0) + 8.0;
             let tag = Rect::new(r.x, r.y - 15.0, lw, 15.0);
@@ -2039,6 +2119,14 @@ impl RegionEditor {
             };
             rrect_lines(*t, 6.0, if lit { 2.0 } else { 1.0 }, border);
             text_bold(&(k + 1).to_string(), t.x + 4.0, t.y + 12.0, 10.0, TEXT_DIM);
+            // Repeated runs, along their tops.
+            if let Some(r) = self.current().and_then(|a| a.repeat_of(k)).filter(|_| !self.behind) {
+                draw_rectangle(t.x + 6.0, t.y + 1.0, t.w - 12.0, 2.0, alpha(ACCENT_HI, 0.9));
+                if r.from == k {
+                    let s = format!("×{}", r.times);
+                    text_bold(&s, t.x + 18.0, t.y + 12.0, 10.0, ACCENT_HI);
+                }
+            }
             // The opening, played once, and the loop after it.
             if let Some(from) = self.loop_point() {
                 let c = if k < from { alpha(WARNING, 0.75) } else { alpha(SUCCESS, 0.85) };
@@ -2082,6 +2170,9 @@ impl RegionEditor {
                 }
                 if self.loop_point() == Some(k) {
                     head += "  ·  loops from here";
+                }
+                if let Some(r) = self.current().and_then(|a| a.repeat_of(k)).filter(|_| !self.behind) {
+                    head += &format!("  ·  run ×{}", r.times);
                 }
                 line(0.0, &head, TEXT);
                 let r = q.src;

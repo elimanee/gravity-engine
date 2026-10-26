@@ -191,7 +191,7 @@ Tails, Knuckles and Amy can have theirs as well, recognised by their size and ke
 - **On the sheet**, its pictures are numbered boxes (`×2` held longer, `↔` mirrored) and the other animations' are faint (point at one to see whose it is, right-click it to go to it).
   - Drag on an empty part of the sheet to draw a new picture: it tightens around the sprite inside. **Double-click a sprite** to add it whole, or **Shift-drag a box** to add every sprite in it, row by row, left to right.
   - Drag a picture to move it, its edges or corners to resize it (the character stays where it is), and the red cross to place the character's centre. The green box is the character's body in the game; its bottom is the ground under the feet.
-  - **Choose several pictures** with Shift- or Ctrl-click (on the sheet or below the preview), or all of them with `Ctrl+A`: dragging, the arrow keys, *Fit*, *Hold*, *Mirror*, *Duplicate*, *Copy* and *Delete* act on them all.
+  - **Choose several pictures** (on the sheet or below the preview): Shift-click chooses a run of them, from the selected one to the one clicked, Ctrl-click one more; `Ctrl+A` all of them. dragging, the arrow keys, *Fit*, *Hold*, *Mirror*, *Duplicate*, *Copy* and *Delete* act on them all.
   - The arrow keys move the pictures by a pixel (Shift: 10); with Ctrl they resize them, with Alt they move their centres.
   - *Fit: feet* (`F`) tightens a picture around its sprite and puts the centre above the feet; *Fit: middle* (`M`) puts it in the middle (curled up, in the air). *Same centre* (`C`) gives the other pictures chosen (or, with one chosen, the whole animation) the same place for the character, measured from the bottom middle of their boxes.
   - *Copy* / *Paste* (`Ctrl+C` / `Ctrl+V`) take pictures from one animation to another (use the walk for the run, then change what differs).
@@ -200,10 +200,11 @@ Tails, Knuckles and Amy can have theirs as well, recognised by their size and ke
   - **Pace**: *Game* follows the character's speed as in the Mega Drive games; otherwise a fixed number of pictures a second (4 to 30). **Play once** stops on the last picture instead of looping (a hammer swing, a laugh), starting again whenever the character starts doing it again.
   - **Hold** (`-` / `=`) shows a picture 2 to 8 times as long as the others; **Mirror** (`H`) draws it facing the other way (for a sheet whose sprites face left, or to use one both ways).
   - **Loop here** (`L`) sets the **loop point** on the selected picture: the pictures before it open the animation once (taking off, leaping off a spring…), then it loops from there; `↻` marks it, and the bars under the pictures show the opening (amber) and the loop (green). In the game the opening plays again whenever the character starts doing it again; on the loop point's own picture, *Loop here* goes back to looping the whole animation.
+  - **Repeat** plays the run of pictures chosen 2 to 16 times over before the animation goes on, as sheets mark it ("Loop ×8"): an animation can have as many runs as it needs, besides its loop point (Knuckles waiting: tapping his foot eight times, then looking round three times…). A bar along the top of their pictures shows the runs, `↻×8` on the first; choose a picture in a run to change how many times it repeats, or set it back to ×1 to undo it.
 - **Try** (`T`) plays the character as edited, saved or not, on a test track with room to stand, look up, crouch and spin dash, a wall to push, a hill, a loop, a badnik, a spring up to a ledge and a high wall to climb; `Esc` comes back to the editor, and afterwards to the scene you had.
 - *Undo* / *Redo* (`Ctrl+Z` / `Ctrl+Y`), *Reset this animation*, *Reset all* and *Save* (`Ctrl+S`); `Esc` leaves (press it twice to leave unsaved changes).
 
-What is saved goes beside the sheet as `<character>.regions.json` (`sonic`, `tails`, `knuckles`, `amy` or `exe`), with only what changed, and the game draws from it at once. It belongs to that sheet: one of another size ignores it. Each picture is its box on the sheet (`rect`: x, y, width, height) and the character's centre from the box's top-left (`centre`), maybe mirrored (`flip`) or held longer (`hold`); an animation may have a `fps`, play `once` or loop back to picture `loop_from` (counted from 0), and one with no pictures left is one the sheet does not have. For a sheet laid out here, the file also keeps its `background` colours, `soft` and `scale`.
+What is saved goes beside the sheet as `<character>.regions.json` (`sonic`, `tails`, `knuckles`, `amy` or `exe`), with only what changed, and the game draws from it at once. It belongs to that sheet: one of another size ignores it. Each picture is its box on the sheet (`rect`: x, y, width, height) and the character's centre from the box's top-left (`centre`), maybe mirrored (`flip`) or held longer (`hold`); an animation may have a `fps`, play `once`, loop back to picture `loop_from` (counted from 0) and have `repeats` (runs `from` one picture `to` another played a number of `times`), and one with no pictures left is one the sheet does not have. For a sheet laid out here, the file also keeps its `background` colours, `soft` and `scale`.
 
 ```json
 {
@@ -221,7 +222,8 @@ What is saved goes beside the sheet as `<character>.regions.json` (`sonic`, `tai
         {"rect": [66, 56, 29, 48], "centre": [14, 33], "flip": true}
       ],
       "fps": 10,
-      "loop_from": 1
+      "loop_from": 1,
+      "repeats": [{"from": 0, "to": 1, "times": 8}]
     }
   }
 }

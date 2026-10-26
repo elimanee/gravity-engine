@@ -6,7 +6,7 @@
 //! same names, and only count for a sheet of the size they were made on
 //! (another sheet of that character ignores them).
 
-use super::sheet::{Anim, Pic};
+use super::sheet::{Anim, Pic, Repeat};
 use super::Character;
 use macroquad::prelude::{vec2, Rect};
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,9 @@ pub struct AnimRegions {
     pub once: bool,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub loop_from: usize,
+    /// Runs of pictures played several times over on the way.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repeats: Vec<Repeat>,
 }
 
 /// A `<character>.regions.json`.
@@ -108,8 +111,8 @@ impl Regions {
             if was != now {
                 let frames = now.pics.iter().map(to_region).collect();
                 let behind = now.behind.iter().map(to_region).collect();
-                let (fps, once, loop_from) = (now.fps, now.once, now.loop_from);
-                animations.insert(name.clone(), AnimRegions { frames, behind, fps, once, loop_from });
+                let (fps, once, loop_from, repeats) = (now.fps, now.once, now.loop_from, now.repeats.clone());
+                animations.insert(name.clone(), AnimRegions { frames, behind, fps, once, loop_from, repeats });
             }
         }
         Regions { size: [size.0, size.1], animations, ..Default::default() }
@@ -125,7 +128,8 @@ impl Regions {
         for (name, a) in &self.animations {
             let pics = a.frames.iter().map(to_pic).collect();
             let behind = a.behind.iter().map(to_pic).collect();
-            anims.insert(name.clone(), Anim { pics, behind, fps: a.fps, once: a.once, loop_from: a.loop_from });
+            let (fps, once, loop_from, repeats) = (a.fps, a.once, a.loop_from, a.repeats.clone());
+            anims.insert(name.clone(), Anim { pics, behind, fps, once, loop_from, repeats });
         }
     }
 
@@ -201,6 +205,14 @@ impl Regions {
                 if a.loop_from > 0 {
                     fields.push(format!("\"loop_from\": {}", a.loop_from));
                 }
+                if !a.repeats.is_empty() {
+                    let runs: Vec<String> = a
+                        .repeats
+                        .iter()
+                        .map(|r| format!("{{\"from\": {}, \"to\": {}, \"times\": {}}}", r.from, r.to, r.times))
+                        .collect();
+                    fields.push(format!("\"repeats\": [{}]", runs.join(", ")));
+                }
                 format!("    {name}: {{\n      {}\n    }}", fields.join(",\n      "))
             })
             .collect();
@@ -246,6 +258,7 @@ mod tests {
         anims.insert("spindash".to_string(), dash);
         // Paced, played once, a picture mirrored and held twice as long.
         anims.get_mut("walk").unwrap().loop_from = 1;
+        anims.get_mut("walk").unwrap().repeats = vec![Repeat { from: 0, to: 1, times: 8 }];
         let run = anims.get_mut("run").unwrap();
         (run.fps, run.once) = (Some(12.0), true);
         (run.pics[0].flip, run.pics[0].hold) = (true, 2.0);
@@ -260,6 +273,7 @@ mod tests {
         assert!(text.contains(r#""centre": [15, 21], "flip": true, "hold": 2}"#), "{text}");
         assert!(text.contains(r#""fps": 12"#) && text.contains(r#""once": true"#), "{text}");
         assert!(text.contains(r#""loop_from": 1"#), "{text}");
+        assert!(text.contains(r#""repeats": [{"from": 0, "to": 1, "times": 8}]"#), "{text}");
         assert!(text.contains(r#""background": [[0, 128, 128]]"#) && text.contains(r#""scale": 2"#), "{text}");
         let back: Regions = serde_json::from_str(&text).unwrap();
         assert_eq!(back, r);
@@ -279,6 +293,7 @@ mod tests {
         let r: Regions = serde_json::from_str(older).unwrap();
         let idle = &r.animations["idle"];
         assert!(idle.behind.is_empty() && idle.fps.is_none() && !idle.once && idle.loop_from == 0);
+        assert!(idle.repeats.is_empty());
         assert_eq!((idle.frames[0].flip, idle.frames[0].hold), (false, 1.0));
         assert!(r.background.is_empty() && !r.soft && r.scale.is_none());
     }
