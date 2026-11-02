@@ -25,6 +25,7 @@ The sprite region editor goes further: **any picture can be a character's sheet*
 - **Several pictures at once**: choose them with Shift- or Ctrl-click (or `Ctrl+A`), then move, fit, mirror or delete them together. *Same centre* lines them up, and copy / paste takes pictures from one animation to another.
 - **Try** (`T`) plays the character as edited, saved or not, on a test track with every pose to try, and `Esc` comes back to the editor.
 - **Loop points** (3.4.1): *Loop here* (`L`) makes the pictures before the selected one an opening, played once each time the character starts the move, and the animation loops from there.
+- **Repeated runs** (3.4.2): Shift-click a run of pictures and *Repeat* plays it 2 to 16 times before the animation goes on, as many runs as an animation needs (like the "Loop ×8" marks on sheets).
 
 See [Editing the regions](#editing-the-regions). *(The sheet in the picture is a little figure drawn for it: no sprites from the games are included.)*
 
