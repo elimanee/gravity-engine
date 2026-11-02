@@ -59,7 +59,7 @@ pub fn load_fonts() {
             // The glyphs of the usual sizes up front: the atlas growing in the
             // middle of a frame shows in browsers as text drawn from a texture
             // already deleted.
-            let chars: Vec<char> = (' '..='~').chain("·←→↑↓×…✓°↔▶↻".chars()).collect();
+            let chars: Vec<char> = (' '..='~').chain("·←→↑↓×…✓°↔▶↻–".chars()).collect();
             for size in (10..=16).chain([20]) {
                 regular.populate_font_cache(&chars, size);
                 bold.populate_font_cache(&chars, size);

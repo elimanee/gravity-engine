@@ -22,7 +22,7 @@
 use super::regions::Regions;
 use super::{Character, Sonic};
 use macroquad::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -556,11 +556,21 @@ impl Pic {
     }
 }
 
+/// A run of an animation's pictures played several times over before it
+/// goes on (`from` and `to` are the first and last pictures, counted from 0).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Repeat {
+    pub from: usize,
+    pub to: usize,
+    pub times: u32,
+}
+
 /// An animation's pictures, the pieces drawn behind them (Tails' tails, on
 /// their own clock), its pace in pictures a second (none: the games' own,
 /// which follows the character's speed), whether it plays once, stopping
-/// on its last picture, and its loop point: the pictures before it open
-/// the animation once, then it loops from there.
+/// on its last picture, its loop point (the pictures before it open the
+/// animation once, then it loops from there) and runs of pictures it
+/// repeats on the way.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Anim {
     pub pics: Vec<Pic>,
@@ -568,27 +578,60 @@ pub struct Anim {
     pub fps: Option<f32>,
     pub once: bool,
     pub loop_from: usize,
+    pub repeats: Vec<Repeat>,
 }
 
 impl Anim {
-    /// How long its pictures show together (in pictures).
+    /// Its pictures in the order they play, each run repeated as many
+    /// times as it says.
+    pub fn order(&self) -> Vec<usize> {
+        let n = self.pics.len();
+        let mut out = Vec::with_capacity(n);
+        let mut k = 0;
+        while k < n {
+            match self.repeats.iter().find(|r| r.from == k && r.from <= r.to && r.to < n) {
+                Some(r) => {
+                    for _ in 0..r.times.max(1) {
+                        out.extend(r.from..=r.to);
+                    }
+                    k = r.to + 1;
+                }
+                None => {
+                    out.push(k);
+                    k += 1;
+                }
+            }
+        }
+        out
+    }
+
+    /// How long it plays through (in pictures).
     pub fn length(&self) -> f32 {
-        self.pics.iter().map(|p| p.hold.max(0.01)).sum()
+        self.order().iter().map(|&k| self.pics[k].hold.max(0.01)).sum()
     }
 
     /// Whether it is timed from when the character began doing it (played
-    /// once, or opening before its loop).
+    /// once, opening before its loop, or repeating runs on the way).
     pub fn timed_from_start(&self) -> bool {
-        self.once || self.loop_from > 0
+        self.once || self.loop_from > 0 || !self.repeats.is_empty()
+    }
+
+    /// The run `k` is repeated in, if any.
+    pub fn repeat_of(&self, k: usize) -> Option<Repeat> {
+        self.repeats.iter().copied().find(|r| r.from <= k && k <= r.to)
     }
 
     /// The picture showing `t` pictures in: stopping on the last when
     /// played once, else looping from the loop point (the pictures before
     /// it shown only the first time through).
     pub fn at(&self, t: f32, once: bool) -> usize {
-        let length = self.length();
-        let from = self.loop_from.min(self.pics.len().saturating_sub(1));
-        let opening: f32 = self.pics[..from].iter().map(|p| p.hold.max(0.01)).sum();
+        let order = self.order();
+        let Some(&last) = order.last() else { return 0 };
+        let hold = |k: usize| self.pics[k].hold.max(0.01);
+        let length: f32 = order.iter().map(|&k| hold(k)).sum();
+        let from = self.loop_from.min(self.pics.len() - 1);
+        let start = order.iter().position(|&k| k == from).unwrap_or(0);
+        let opening: f32 = order[..start].iter().map(|&k| hold(k)).sum();
         let t = if once {
             t.clamp(0.0, length)
         } else if (0.0..opening).contains(&t) {
@@ -597,13 +640,32 @@ impl Anim {
             opening + (t - opening).rem_euclid((length - opening).max(0.01))
         };
         let mut end = 0.0;
-        for (k, p) in self.pics.iter().enumerate() {
-            end += p.hold.max(0.01);
+        for &k in &order {
+            end += hold(k);
             if t < end {
                 return k;
             }
         }
-        self.pics.len().saturating_sub(1)
+        last
+    }
+
+    /// After pictures were added or taken away: `map` gives each old
+    /// picture's new place (none: gone). The loop point and the repeated
+    /// runs keep to their pictures (a run gaining any put inside it).
+    pub fn reindex(&mut self, old_len: usize, map: impl Fn(usize) -> Option<usize>) {
+        let last = self.pics.len().saturating_sub(1);
+        if self.loop_from > 0 {
+            self.loop_from = (self.loop_from..old_len).find_map(&map).unwrap_or(last).min(last);
+        }
+        self.repeats = self
+            .repeats
+            .iter()
+            .filter_map(|r| {
+                let from = (r.from..=r.to).find_map(&map)?;
+                let to = (r.from..=r.to).rev().find_map(&map)?;
+                Some(Repeat { from, to, ..*r })
+            })
+            .collect();
     }
 }
 
@@ -1422,6 +1484,40 @@ mod tests {
         let once: Vec<usize> = (0..7).map(|t| a.at(t as f32, true)).collect();
         assert_eq!(once, [0, 1, 1, 2, 2, 2, 2]);
         assert_eq!(Anim::default().at(3.0, false), 0, "no pictures: nothing to pick from");
+    }
+
+    #[test]
+    fn runs_repeat_on_the_way_and_keep_to_their_pictures() {
+        let pics = vec![Pic::new(Rect::new(0.0, 0.0, 8.0, 8.0), vec2(4.0, 4.0)); 6];
+        // Knuckles' wait: a picture, a run of two three times, then the rest
+        // (one held twice as long), and again from the second picture.
+        let mut a = Anim {
+            pics,
+            loop_from: 1,
+            repeats: vec![Repeat { from: 1, to: 2, times: 3 }, Repeat { from: 4, to: 4, times: 2 }],
+            ..Default::default()
+        };
+        a.pics[5].hold = 2.0;
+        assert!(a.timed_from_start());
+        assert_eq!(a.order(), [0, 1, 2, 1, 2, 1, 2, 3, 4, 4, 5]);
+        assert_eq!(a.length(), 12.0);
+        let shown: Vec<usize> = (0..16).map(|t| a.at(t as f32, false)).collect();
+        assert_eq!(shown, [0, 1, 2, 1, 2, 1, 2, 3, 4, 4, 5, 5, 1, 2, 1, 2]);
+        assert_eq!(a.at(30.0, true), 5, "played once: it stops on the last");
+        assert_eq!(a.repeat_of(2), Some(Repeat { from: 1, to: 2, times: 3 }));
+        // A picture put inside the first run widens it; the others move along.
+        a.pics.insert(2, a.pics[0]);
+        a.reindex(6, |i| Some(if i < 2 { i } else { i + 1 }));
+        assert_eq!(a.repeats, [Repeat { from: 1, to: 3, times: 3 }, Repeat { from: 5, to: 5, times: 2 }]);
+        assert_eq!(a.loop_from, 1);
+        // Taking the second run's only picture away takes the run away.
+        a.pics.remove(5);
+        a.reindex(7, |i| match i {
+            5 => None,
+            i if i > 5 => Some(i - 1),
+            i => Some(i),
+        });
+        assert_eq!(a.repeats, [Repeat { from: 1, to: 3, times: 3 }]);
     }
 
     #[test]
