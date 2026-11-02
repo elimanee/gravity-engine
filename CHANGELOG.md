@@ -4,6 +4,12 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [Unreleased]
+
+### Added
+- **Sheet generator** in the sprite region editor (*Generate…*, `G`): makes a sheet laid out the way fans lay theirs out (a banner with the character's name, the pictures' origin, credits and palette; an animation a row, each picture in its own box on a dark page), with its regions beside it so it works as it is. From **the game's drawing** of the character (every animation the game asks of them, two pixels to one of the game's: to play, or to paint over) or from **the pictures its sheet uses**, tidied. Kept with the screenshots; *Use it for … now* makes it the character's sheet at once. Clicking a character with no sheet offers it too
+- *Open…* (formerly *Open a sheet…*) also brings in the regions kept beside a picture (`<name>.regions.json`), so a generated or shared sheet comes in laid out
+
 ## [3.4.2]
 
 ### Added

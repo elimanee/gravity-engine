@@ -1198,7 +1198,8 @@ impl Sheet {
     }
 
     /// Make `src` (any picture file) `c`'s sheet, as a PNG under the
-    /// character's name; the sheet it had goes (Sonic's layout too).
+    /// character's name; the sheet it had goes (Sonic's layout too). The
+    /// regions beside it (`<name>.regions.json`), if any, come too.
     pub fn install_for(src: &Path, c: Character) -> Result<String, String> {
         let dir = dir().ok_or("no config directory")?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -1218,6 +1219,14 @@ impl Sheet {
         }
         let name = file_names(c)[0];
         img.save(dir.join(name)).map_err(|e| e.to_string())?;
+        // Its regions, when they came with it (a generated sheet's).
+        let beside = src.with_extension("regions.json");
+        if let Ok(text) = std::fs::read_to_string(&beside) {
+            let r: Regions = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", beside.display()))?;
+            if r.size == [img.width(), img.height()] {
+                r.save(c)?;
+            }
+        }
         Ok(name.to_string())
     }
 
@@ -1369,7 +1378,7 @@ fn golden_material() -> Option<Material> {
     })
 }
 
-fn upload(img: &image::RgbaImage) -> Texture2D {
+pub fn upload(img: &image::RgbaImage) -> Texture2D {
     let texture = Texture2D::from_rgba8(img.width() as u16, img.height() as u16, img);
     texture.set_filter(FilterMode::Nearest);
     texture

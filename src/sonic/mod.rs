@@ -15,6 +15,7 @@
 //! larger in the world.
 
 pub mod art;
+pub mod maker;
 mod moves;
 pub mod regions;
 pub mod sheet;

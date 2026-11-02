@@ -9,9 +9,9 @@
 
 use super::*;
 use crate::library::acts;
-use crate::sonic::regions;
 use crate::sonic::sheet::{self, detect_sprites, find_sprite, Anim, Editable, Pic, Repeat};
 use crate::sonic::{body_radii, Character};
+use crate::sonic::{maker, regions};
 use crate::ui::theme::*;
 use crate::ui::widgets::clip;
 
@@ -114,6 +114,38 @@ pub(super) enum Ask {
     OpenSheet(Character),
     /// Play the character as edited.
     Try,
+    /// Make a sheet of this character: as the game draws it, or (true)
+    /// from the pictures its sheet uses.
+    Generate(Character, bool),
+    /// Make the sheet just generated this character's.
+    UseGenerated(Character),
+}
+
+/// The sheet generator's window: what to make a sheet from, then what to
+/// do with the sheet made.
+pub(super) enum Maker {
+    Choose(Character),
+    Done(Character, std::path::PathBuf),
+}
+
+/// A button of the generator's window: where, what it says (and under
+/// it), what it does, whether it can.
+struct MakerButton {
+    r: Rect,
+    label: String,
+    about: String,
+    cmd: MakerCmd,
+    enabled: bool,
+}
+
+/// The generator window's buttons.
+#[derive(Clone, Copy, PartialEq)]
+enum MakerCmd {
+    FromDrawing,
+    FromSheet,
+    OpenPicture,
+    UseIt,
+    Close,
 }
 
 /// Something to tell the player.
@@ -152,6 +184,7 @@ enum Handle {
 enum Cmd {
     Character(Character),
     OpenSheet,
+    Generate,
     Try,
     Save,
     Close,
@@ -293,6 +326,8 @@ pub(super) struct RegionEditor {
     /// Back from trying the sprites: the Esc that brought it back is not
     /// for the editor.
     pub fresh: bool,
+    /// The sheet generator's window, when open.
+    pub maker: Option<Maker>,
     pub notes: Vec<Note>,
 }
 
@@ -458,6 +493,7 @@ impl RegionEditor {
             scroll: 0,
             held: HashMap::new(),
             fresh: false,
+            maker: None,
             notes,
         };
         ed.find_sprites();
@@ -1063,7 +1099,9 @@ impl RegionEditor {
             more: Cmd::Bigger,
             enabled: true,
         });
-        push(Rect::new(b.x + 10.0, b.y + 126.0, b.w - 20.0, 26.0), "Open a sheet…", Cmd::OpenSheet, false, true);
+        let half = (b.w - 26.0) / 2.0;
+        push(Rect::new(b.x + 10.0, b.y + 126.0, half, 26.0), "Open…", Cmd::OpenSheet, false, true);
+        push(Rect::new(b.x + 16.0 + half, b.y + 126.0, half, 26.0), "Generate…", Cmd::Generate, false, true);
         // The side, from the bottom up; the preview gets what is left.
         let (w2, w3) = ((side.w - 6.0) / 2.0, (side.w - 12.0) / 3.0);
         let n = self.pics().len();
@@ -1188,6 +1226,13 @@ impl RegionEditor {
         if self.playing {
             self.clock += dt;
         }
+        if self.maker.is_some() {
+            // The generator's window takes the pointer and keys.
+            let ask = self.maker_input(input);
+            self.draw(&self.layout(), input);
+            self.draw_maker(input.mouse);
+            return ask;
+        }
         let l = self.layout();
         let mut ask = self.click(&l, input);
         if ask.is_none() && self.drag.is_none() && !std::mem::take(&mut self.fresh) {
@@ -1196,6 +1241,150 @@ impl RegionEditor {
         self.mouse(input, l.view);
         self.draw(&self.layout(), input);
         ask
+    }
+
+    // ── The sheet generator ─────────────────────────────────────
+
+    /// The animations as the list shows them, those with pictures.
+    pub fn rows(&self) -> Vec<(String, Anim)> {
+        self.names
+            .iter()
+            .filter_map(|(n, _)| self.sheet.anims.get(n).filter(|a| !a.pics.is_empty()).map(|a| (n.clone(), a.clone())))
+            .collect()
+    }
+
+    /// The sheet just generated (to use it).
+    pub fn generated(&self) -> Option<&std::path::Path> {
+        match &self.maker {
+            Some(Maker::Done(_, p)) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// The window and its buttons.
+    fn maker_layout(&self) -> (Rect, Vec<MakerButton>) {
+        let (sw, sh) = (screen_width(), screen_height());
+        let w = 480.0;
+        let mut items: Vec<(String, String, MakerCmd, bool)> = vec![];
+        match &self.maker {
+            Some(Maker::Choose(c)) => {
+                let who = c.label();
+                let here = *c == self.character && !self.rows().is_empty();
+                items.push((
+                    "The game's drawing".into(),
+                    format!("{who} as the game draws them, an animation a row: to play, or to paint over"),
+                    MakerCmd::FromDrawing,
+                    true,
+                ));
+                items.push((
+                    "This sheet's pictures, tidied".into(),
+                    "Only the pictures its animations use, each in its own box".into(),
+                    MakerCmd::FromSheet,
+                    here,
+                ));
+                items.push((
+                    "Open a picture…".into(),
+                    format!("Any PNG, WebP, GIF, BMP or JPEG as {} sheet", whose(*c)),
+                    MakerCmd::OpenPicture,
+                    true,
+                ));
+                items.push(("Cancel".into(), String::new(), MakerCmd::Close, true));
+            }
+            Some(Maker::Done(c, _)) => {
+                items.push((
+                    format!("Use it for {} now", c.label()),
+                    format!("It becomes {} sheet, laid out already", whose(*c)),
+                    MakerCmd::UseIt,
+                    true,
+                ));
+                items.push(("Keep it for later".into(), "Open… brings it in, laid out".into(), MakerCmd::Close, true));
+            }
+            None => {}
+        }
+        let h = 84.0 + items.len() as f32 * 52.0;
+        let panel = Rect::new(((sw - w) / 2.0).round(), ((sh - h) / 2.0).round(), w, h);
+        let buttons = items
+            .into_iter()
+            .enumerate()
+            .map(|(i, (label, about, cmd, enabled))| MakerButton {
+                r: Rect::new(panel.x + 16.0, panel.y + 70.0 + i as f32 * 52.0, w - 32.0, 44.0),
+                label,
+                about,
+                cmd,
+                enabled,
+            })
+            .collect();
+        (panel, buttons)
+    }
+
+    fn maker_input(&mut self, input: &mut Input) -> Option<Ask> {
+        if is_key_pressed(KeyCode::Escape) {
+            self.maker = None;
+            return None;
+        }
+        if !input.left_pressed {
+            return None;
+        }
+        input.consumed = true;
+        let (_, buttons) = self.maker_layout();
+        let b = buttons.iter().find(|b| b.r.contains(input.mouse))?;
+        if !b.enabled {
+            return None;
+        }
+        let cmd = b.cmd;
+        let c = match &self.maker {
+            Some(Maker::Choose(c)) | Some(Maker::Done(c, _)) => *c,
+            None => return None,
+        };
+        match cmd {
+            MakerCmd::FromDrawing => Some(Ask::Generate(c, false)),
+            MakerCmd::FromSheet => Some(Ask::Generate(c, true)),
+            MakerCmd::OpenPicture => {
+                self.maker = None;
+                self.leave(Ask::OpenSheet(c))
+            }
+            MakerCmd::UseIt => self.leave(Ask::UseGenerated(c)),
+            MakerCmd::Close => {
+                self.maker = None;
+                None
+            }
+        }
+    }
+
+    fn draw_maker(&self, m: Vec2) {
+        let (panel, buttons) = self.maker_layout();
+        draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.55));
+        theme::panel(panel, 1.0);
+        let (title, about) = match &self.maker {
+            Some(Maker::Choose(c)) => (
+                format!("A sheet for {}", c.label()),
+                "Laid out like the fans' sheets, with what cuts it up: it works as it is".to_string(),
+            ),
+            Some(Maker::Done(_, p)) => ("Sheet made".to_string(), format!("Saved as {}", tilde(p))),
+            None => return,
+        };
+        text_bold(&title, panel.x + 18.0, panel.y + 30.0, 17.0, TEXT);
+        text(&about, panel.x + 18.0, panel.y + 52.0, 12.0, TEXT_DIM);
+        for b in &buttons {
+            let (r, on) = (b.r, b.enabled);
+            let hovered = on && r.contains(m);
+            let fill = if hovered {
+                SURFACE_HI
+            } else if on {
+                SURFACE_2
+            } else {
+                alpha(SURFACE_2, 0.5)
+            };
+            rrect(r, 8.0, fill);
+            rrect_lines(r, 8.0, 1.0, if hovered { BORDER_HI } else { BORDER });
+            let c = if on { TEXT } else { TEXT_MUTED };
+            if b.about.is_empty() {
+                text_centered(&b.label, r.x + r.w / 2.0, r.y + r.h / 2.0, 13.0, c);
+            } else {
+                text_bold(&b.label, r.x + 14.0, r.y + 18.0, 13.0, c);
+                text(&b.about, r.x + 14.0, r.y + 35.0, 11.0, if on { TEXT_DIM } else { TEXT_MUTED });
+            }
+        }
     }
 
     fn click(&mut self, l: &Layout, input: &mut Input) -> Option<Ask> {
@@ -1258,7 +1447,9 @@ impl RegionEditor {
         match cmd {
             Cmd::Character(c) if c == self.character => {}
             Cmd::Character(c) if self.available.contains(&c) => return self.leave(Ask::Open(c)),
-            Cmd::Character(c) => return self.leave(Ask::OpenSheet(c)),
+            // No sheet yet: open a picture, or let the game draw one.
+            Cmd::Character(c) => self.maker = Some(Maker::Choose(c)),
+            Cmd::Generate => self.maker = Some(Maker::Choose(self.character)),
             Cmd::OpenSheet => return self.leave(Ask::OpenSheet(self.character)),
             Cmd::Try => return Some(Ask::Try),
             Cmd::Save => return Some(Ask::Save),
@@ -1422,6 +1613,7 @@ impl RegionEditor {
             (KeyCode::Space, Cmd::Play),
             (KeyCode::O, Cmd::Onion),
             (KeyCode::I, Cmd::Pick),
+            (KeyCode::G, Cmd::Generate),
             (KeyCode::LeftBracket, Cmd::Previous),
             (KeyCode::Comma, Cmd::Previous),
             (KeyCode::RightBracket, Cmd::Next),
@@ -2306,10 +2498,61 @@ impl App {
             Some(Ask::Open(c)) => self.open_regions(Some(c)),
             Some(Ask::OpenSheet(c)) => self.choose_sheet(c),
             Some(Ask::Try) => self.try_regions(),
+            Some(Ask::Generate(c, from_sheet)) => self.generate_sheet(c, from_sheet),
+            Some(Ask::UseGenerated(c)) => self.use_generated(c),
             None => {}
         }
         self.toasts.update(dt);
         self.toasts.draw(56.0, &self.jobs, dt);
+    }
+
+    /// Make a sheet of `c` (as the game draws it, or from the pictures its
+    /// sheet uses) and keep it with the screenshots, with its regions beside it.
+    fn generate_sheet(&mut self, c: Character, from_sheet: bool) {
+        let Some(ed) = self.regions.as_mut() else { return };
+        let made = if from_sheet {
+            let sh = &ed.sheet;
+            maker::from_sheet(c, &sh.name, &sh.image, &ed.rows(), sh.scale)
+        } else {
+            maker::from_drawing(c)
+        };
+        let Some(dir) = config::screenshot_dir() else {
+            self.toasts.error("No folder to keep the sheet in");
+            return;
+        };
+        let stem = format!("{}-sheet", c.short().to_lowercase());
+        let free = (1..).map(|k| if k == 1 { stem.clone() } else { format!("{stem}-{k}") });
+        let Some(name) = free.take(999).find(|n| !dir.join(format!("{n}.png")).exists()) else { return };
+        let (png, json) = (dir.join(format!("{name}.png")), dir.join(format!("{name}.regions.json")));
+        let saved = std::fs::create_dir_all(&dir)
+            .map_err(|e| e.to_string())
+            .and_then(|_| made.image.save(&png).map_err(|e| e.to_string()))
+            .and_then(|_| std::fs::write(&json, made.regions.to_json()).map_err(|e| e.to_string()));
+        match saved {
+            Ok(()) => {
+                let (w, h) = made.image.dimensions();
+                let n = made.regions.animations.len();
+                self.toasts.success(format!("Sheet made: {w} × {h}, {n} animations  ·  {}", tilde(&png)));
+                if let Some(ed) = self.regions.as_mut() {
+                    ed.maker = Some(Maker::Done(c, png));
+                }
+            }
+            Err(e) => self.toasts.error(format!("Could not save the sheet: {e}")),
+        }
+    }
+
+    /// The sheet just made becomes `c`'s (its regions with it).
+    fn use_generated(&mut self, c: Character) {
+        let Some(path) = self.regions.as_ref().and_then(|ed| ed.generated()).map(|p| p.to_path_buf()) else { return };
+        match sheet::Sheet::install_for(&path, c) {
+            Ok(name) => {
+                self.toasts.success(format!("{} now uses {name}", c.label()));
+                self.sonic_sheet_tried = true;
+                self.load_sonic_sheet();
+                self.open_regions(Some(c));
+            }
+            Err(e) => self.toasts.error(format!("Could not use the sheet: {e}")),
+        }
     }
 
     fn save_regions(&mut self) {
