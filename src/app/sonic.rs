@@ -258,7 +258,7 @@ impl App {
                     b.apply_impulse_at_point(vector![0.0, -MASS * g.max(0.0) / FPS], Point::new(x, y), true);
                 }
                 Event::Break { collider, at } => {
-                    if self.break_game_monitor(collider) {
+                    if self.break_game_monitor(collider) || self.break_game_wall(collider) {
                         continue;
                     }
                     let Some(h) = self.world.colliders.get(collider).and_then(|c| c.parent()) else { continue };

@@ -6,10 +6,11 @@
 use super::theme::*;
 use super::widgets::*;
 use super::{Action, Input, LevelCmd};
+use crate::game::things::Gimmick;
 use crate::game::{BossKind, EnemyKind, MonitorKind};
 use macroquad::prelude::*;
 
-const W: f32 = 820.0;
+const W: f32 = 880.0;
 const H: f32 = 104.0;
 const MAX_NAME: usize = 40;
 
@@ -32,11 +33,14 @@ pub enum Item {
     Ground,
     Platform,
     Loop,
+    /// A bridge, a swinging platform, a crumbling ledge, a breakable wall,
+    /// a spiked log or a rock.
+    Gimmick,
     Erase,
 }
 
 impl Item {
-    pub const ALL: [Item; 16] = [
+    pub const ALL: [Item; 17] = [
         Item::Start,
         Item::Ring,
         Item::Badnik,
@@ -52,6 +56,7 @@ impl Item {
         Item::Ground,
         Item::Platform,
         Item::Loop,
+        Item::Gimmick,
         Item::Erase,
     ];
 
@@ -72,6 +77,7 @@ impl Item {
             Item::Ground => "Ground",
             Item::Platform => "Ledge",
             Item::Loop => "Loop",
+            Item::Gimmick => "Gimmick",
             Item::Erase => "Erase",
         }
     }
@@ -96,6 +102,7 @@ impl Item {
             Item::Ground => "Drag across: solid ground from there down",
             Item::Platform => "Drag across for a ledge",
             Item::Loop => "Click above the ground for a loop",
+            Item::Gimmick => "Bridges, swings, crumbling ledges, walls, spiked logs and rocks",
             Item::Erase => "Click on something to take it away",
         }
     }
@@ -107,6 +114,7 @@ pub struct LevelView {
     pub monitor: MonitorKind,
     pub badnik: EnemyKind,
     pub boss: BossKind,
+    pub gimmick: Gimmick,
     pub hunter: bool,
     pub testing: bool,
     pub has_start: bool,
@@ -232,6 +240,7 @@ impl LevelBar {
             let label = match item {
                 Item::Monitor if on => short(v.monitor),
                 Item::Badnik if on => v.badnik.label(),
+                Item::Gimmick if on => v.gimmick.label(),
                 Item::Boss if on => match v.boss {
                     BossKind::Bomber => "Bomber",
                     BossKind::Anchor => "Crane",
@@ -243,6 +252,7 @@ impl LevelBar {
         }
 
         let (status, colour) = match v.item {
+            Some(Item::Gimmick) => (v.gimmick.hint().to_string(), ACCENT_HI),
             Some(item) => (item.hint().to_string(), ACCENT_HI),
             None if !v.has_start => ("Place the start  ·  build with the items or any tool".to_string(), TEXT_DIM),
             None if !v.has_end => ("Place the goal (or a boss) so the level can end".to_string(), TEXT_DIM),

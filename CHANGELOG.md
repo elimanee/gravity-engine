@@ -16,6 +16,7 @@ described on the [releases page](https://github.com/elimanee/gravity-engine/rele
 - **Paint** (`P`) in the editor: a pencil and an eraser (1 to 16 pixels), a fill and an eyedropper (or Alt-click) on the sheet itself, with a colour picker and the sheet's own colours; strokes undo like any change, and *Save* writes the sheet again in place (as a PNG)
 - **Colours** in the editor: change a character's colours without touching the sheet (pick them from a list of its colours or on the sheet; lossy sheets take the shades close to them), and give them **Super colours** of their own, used by the game when they turn Super instead of the golden glow. Kept with the regions (`recolour`, `super`); undone like any change
 - **Turns** for each animation: with the ground (as before), by 45° as the Mega Drive games drew it, or never (kept as `turn` in the regions)
+- **Zone gimmicks** in the acts and the level editor (*Gimmick*, click again for the next): bridges of logs that dip under the character, platforms swinging on chains (they carry the character along), ledges that crumble once stood on (back a while later), walls broken by rolling into them, logs with spikes going round them, and rocks. In Meadow's acts, and every one of them behind the start of the sprite test track
 - **A layer in front**: besides the pieces drawn behind (Tails' tails), any animation can have pieces drawn in front of the character (dust, sparks…), playing on their own; *Body* / *Behind* / *Front* (`B`) for every character. In the generator's sheets, GIFs and the regions (`front`)
 
 ## [3.4.2]

@@ -11,6 +11,7 @@
 
 pub mod art;
 pub mod sprites;
+pub mod things;
 
 use crate::config::PPM;
 use crate::physics::{to_phys, to_screen, PhysWorld};
@@ -182,6 +183,15 @@ pub struct LevelSpec {
     pub hunter: bool,
     /// Jack-o'-lanterns (lit at night).
     pub pumpkins: Vec<[f32; 2]>,
+    /// The zone's gimmicks: bridges, swinging platforms (where they hang
+    /// from), crumbling ledges, breakable walls and rocks (where they
+    /// stand), and logs with spikes going round them.
+    pub bridges: Vec<things::Span>,
+    pub swings: Vec<[f32; 2]>,
+    pub ledges: Vec<things::Span>,
+    pub walls: Vec<[f32; 2]>,
+    pub spike_logs: Vec<things::Span>,
+    pub rocks: Vec<[f32; 2]>,
 }
 
 impl LevelSpec {
@@ -196,6 +206,12 @@ impl LevelSpec {
             && self.vents.is_empty()
             && !self.hunter
             && self.pumpkins.is_empty()
+            && self.bridges.is_empty()
+            && self.swings.is_empty()
+            && self.ledges.is_empty()
+            && self.walls.is_empty()
+            && self.spike_logs.is_empty()
+            && self.rocks.is_empty()
     }
 }
 
@@ -389,6 +405,9 @@ pub enum Effect {
     Breathe(Vec2),
     /// Out of rings: no longer super.
     SuperEnd(Vec2),
+    /// A ledge began to crumble, a breakable wall was broken.
+    Crumble(Vec2),
+    WallBroken(Vec2),
     /// Sonic.exe appeared (static), and caught the player (his laugh).
     HunterAppears(Vec2),
     HunterCaught(Vec2),
@@ -493,6 +512,7 @@ pub struct Game {
     super_drain: f32,
     pub hunter: Option<Hunter>,
     pub pumpkins: Vec<Vec2>,
+    pub things: things::Things,
 }
 
 impl Game {
@@ -555,6 +575,7 @@ impl Game {
                 hunting: 0.0,
             }),
             pumpkins: spec.pumpkins.iter().map(|&p| px(p)).collect(),
+            things: things::Things::new(spec, world),
         };
         // With a boss, the goal only shows once it is beaten.
         if g.boss.is_some() {
@@ -591,6 +612,7 @@ impl Game {
 
     /// Take the level's bodies out of the world.
     pub fn remove(&self, world: &mut PhysWorld) {
+        self.things.remove(world);
         for m in &self.monitors {
             if let Some(b) = m.body {
                 world.remove_body(b);
@@ -658,6 +680,7 @@ impl Game {
         if let Some(h) = &mut self.hunter {
             h.pos -= d;
         }
+        self.things.shift(dx);
         if let Some(g) = &mut self.goal {
             *g -= d;
         }
@@ -680,7 +703,18 @@ impl Game {
             .filter_map(|m| m.collider)
             .map(|c| (c, Ground { breakable: true, friction: 0.6, ..Ground::default() }));
         let spikes = self.spikes.iter().map(|s| (s.collider, Ground { friction: 0.6, ..Ground::default() }));
-        monitors.chain(spikes).collect()
+        monitors.chain(spikes).chain(self.things.grounds()).collect()
+    }
+
+    /// The gimmicks move (before the physics step): bridges dip, platforms
+    /// swing, ledges crumble.
+    pub fn step_things(&mut self, world: &mut PhysWorld, sonic: &Sonic, dt: f32) -> Vec<Effect> {
+        self.things.step(world, sonic, dt).into_iter().map(Effect::Crumble).collect()
+    }
+
+    /// The breakable wall `collider` broken (Sonic rolled into it).
+    pub fn break_wall(&mut self, world: &mut PhysWorld, collider: ColliderHandle) -> Vec<Effect> {
+        self.things.break_wall(world, collider).map(Effect::WallBroken).into_iter().collect()
     }
 
     /// The boss's arena (left, right world x) while Sonic is shut in it.
@@ -907,9 +941,11 @@ impl Game {
         } else {
             self.super_drain = 1.0;
         }
-        // Spikes hurt when stood on.
+        // Spikes hurt when stood on (those going round a log when up).
         if let Some(s) = self.spikes.iter().find(|s| sonic.grounded && sonic.on == Some(s.collider)) {
             let from = vec2(s.pos.x - sonic.facing, s.pos.y);
+            self.hurt(sonic, from, &mut out);
+        } else if let Some(from) = self.things.spiked(sonic) {
             self.hurt(sonic, from, &mut out);
         }
         // The boss's arena closes behind him.
