@@ -1078,6 +1078,9 @@ pub struct Editable {
     pub anims: HashMap<String, Anim>,
     /// Why the regions kept could not be read (the editor starts over).
     pub warning: Option<String>,
+    /// Pictures were added below it: saving writes the sheet itself again,
+    /// a sheet of its own then (its regions hold everything).
+    pub extended: bool,
 }
 
 impl Editable {
@@ -1096,6 +1099,7 @@ impl Editable {
             scale: p.scale,
             name: p.name,
             known: p.known,
+            extended: false,
             anims: p.anims.clone(),
             defaults: p.anims,
             warning: None,
@@ -1125,13 +1129,52 @@ impl Editable {
         self.image = img;
     }
 
-    /// The regions to keep: what changed from the layout.
+    /// The regions to keep: what changed from the layout; everything, the
+    /// layout's backgrounds too, for a sheet pictures were added to.
     pub fn regions(&self) -> Regions {
+        if self.extended {
+            let mut r = Regions::changes(self.image.dimensions(), &HashMap::new(), &self.anims);
+            r.background = self.layout_background.iter().chain(&self.background).copied().collect();
+            r.soft = self.soft || self.layout_soft;
+            r.scale = (self.scale != 1.0).then_some(self.scale);
+            return r;
+        }
         let mut r = Regions::changes(self.image.dimensions(), &self.defaults, &self.anims);
         r.background = self.background.clone();
         r.soft = self.soft;
         r.scale = (self.scale != self.layout_scale).then_some(self.scale);
         r
+    }
+
+    /// Put `pictures` below the sheet, in rows; returns where each went.
+    pub fn extend(&mut self, pictures: &[image::RgbaImage]) -> Vec<Rect> {
+        const GAP: u32 = 4;
+        let (w0, h0) = self.original.dimensions();
+        let width = pictures.iter().map(|p| p.width()).fold(w0, u32::max);
+        let (mut x, mut y, mut row_h) = (0, h0 + GAP * 2, 0);
+        let mut places = vec![];
+        for p in pictures {
+            if x > 0 && x + p.width() > width {
+                (x, y, row_h) = (0, y + row_h + GAP, 0);
+            }
+            places.push((x, y));
+            x += p.width() + GAP;
+            row_h = row_h.max(p.height());
+        }
+        let height = y + row_h;
+        let mut grown = image::RgbaImage::new(width, height);
+        image::imageops::replace(&mut grown, &self.original, 0, 0);
+        for (p, &(x, y)) in pictures.iter().zip(&places) {
+            image::imageops::replace(&mut grown, p, x as i64, y as i64);
+        }
+        self.original = grown;
+        self.extended = true;
+        self.recolour();
+        pictures
+            .iter()
+            .zip(places)
+            .map(|(p, (x, y))| Rect::new(x as f32, y as f32, p.width() as f32, p.height() as f32))
+            .collect()
     }
 
     /// The sheet as edited, to play with before it is saved.
@@ -1197,6 +1240,29 @@ impl Sheet {
         Ok("sheet.png".into())
     }
 
+    /// Make `img` `c`'s sheet, as a PNG under the character's name, in place
+    /// of the one it had (Sonic's layout too). Returns the file it became.
+    pub fn write_for(img: &image::RgbaImage, c: Character) -> Result<String, String> {
+        let dir = dir().ok_or("no config directory")?;
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        if c == Character::Sonic {
+            for old in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+                let p = old.path();
+                let theirs = p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png") || e == "json");
+                if theirs && !is_not_sonics(&p) {
+                    let _ = std::fs::remove_file(p);
+                }
+            }
+        } else {
+            for n in file_names(c) {
+                let _ = std::fs::remove_file(dir.join(n));
+            }
+        }
+        let name = file_names(c)[0];
+        img.save(dir.join(name)).map_err(|e| e.to_string())?;
+        Ok(name.to_string())
+    }
+
     /// Make `src` (any picture file) `c`'s sheet, as a PNG under the
     /// character's name; the sheet it had goes (Sonic's layout too). The
     /// regions beside it (`<name>.regions.json`), if any, come too.
@@ -1234,8 +1300,8 @@ impl Sheet {
         self.anims.get(name).filter(|a| !a.pics.is_empty())
     }
 
-    /// The animation for his state, and which of its pictures.
-    fn pick(&self, s: &Sonic) -> Option<(&Anim, usize)> {
+    /// The animation for his state, which of its pictures, and its name.
+    fn pick(&self, s: &Sonic) -> Option<(&Anim, usize, &'static str)> {
         let name = s.poses().into_iter().chain(["walk", "idle"]).find(|n| self.anim(n).is_some())?;
         let anim = self.anim(name)?;
         let length = anim.length();
@@ -1250,11 +1316,11 @@ impl Sheet {
             (None, "climb_up") => (s.climb_up.map_or(0.0, |(t, _, _)| t as f32 / 18.0) * length, true),
             (None, _) => (anim_t, anim.once),
         };
-        Some((anim, anim.at(t, once)))
+        Some((anim, anim.at(t, once), name))
     }
 
-    fn blit(&self, pic: Pic, s: &Sonic, angle: f32) {
-        self.blit_at(pic, s.pos, s.facing, angle, WHITE);
+    fn blit(&self, pic: Pic, s: &Sonic, facing: f32, angle: f32) {
+        self.blit_at(pic, s.pos, facing, angle, WHITE);
     }
 
     fn blit_at(&self, pic: Pic, pos: Vec2, facing: f32, angle: f32, tint: Color) {
@@ -1292,7 +1358,9 @@ impl Sheet {
 
     /// Draw him from the sheet (world pass); golden when super.
     pub fn draw(&self, s: &Sonic) {
-        let Some((anim, k)) = self.pick(s) else { return };
+        let Some((anim, k, name)) = self.pick(s) else { return };
+        // Balancing, he faces the drop.
+        let facing = if name == "balance" { s.balancing.unwrap_or(s.facing) } else { s.facing };
         let upright = !s.grounded || (s.gsp == 0.0 && super::mode_down(s.angle).y > 0.5 && s.angle.sin().abs() < 0.4);
         let angle = if upright && s.grounded { 0.0 } else { s.angle };
         let golden = if s.super_form { golden_material() } else { None };
@@ -1305,9 +1373,9 @@ impl Sheet {
         if !anim.behind.is_empty() {
             // Tails' tails swish on their own clock.
             let t = (get_time() * if s.flying.is_some() { 20.0 } else { 8.0 }) as usize;
-            self.blit(anim.behind[t % anim.behind.len()], s, angle);
+            self.blit(anim.behind[t % anim.behind.len()], s, facing, angle);
         }
-        self.blit(anim.pics[k], s, angle);
+        self.blit(anim.pics[k], s, facing, angle);
         if golden.is_some() {
             gl_use_default_material();
         }

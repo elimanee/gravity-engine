@@ -441,6 +441,139 @@ pub fn from_sheet(c: Character, name: &str, image: &image::RgbaImage, anims: &[(
     Made { image: draw_sheet(&layout, &texture, &banner), regions: layout.regions }
 }
 
+/// An animation as a GIF: its pictures (runs repeated, held as long as
+/// they say) at `fps` (its own pace when it has one), each `zoom` times as
+/// big, on a see-through background, the character's centre still. It
+/// loops, unless played once. Returns how many frames it has.
+pub fn animation_gif(
+    image: &image::RgbaImage,
+    anim: &Anim,
+    fps: f32,
+    zoom: u32,
+    out: impl std::io::Write,
+) -> Result<usize, String> {
+    use gif::{DisposalMethod, Encoder, Frame, Repeat};
+    let order = anim.order();
+    if order.is_empty() {
+        return Err("no pictures".into());
+    }
+    let fps = anim.fps.unwrap_or(fps).max(0.1);
+    // Room around the centre for every picture (mirrored ones turned round).
+    let centre_of = |p: &Pic| vec2(if p.flip { p.src.w - p.centre.x } else { p.centre.x }, p.centre.y);
+    let all = anim.pics.iter().chain(&anim.behind);
+    let (mut left, mut up, mut right, mut down) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    for p in all {
+        let c = centre_of(p);
+        (left, up, right, down) = (left.max(c.x), up.max(c.y), right.max(p.src.w - c.x), down.max(p.src.h - c.y));
+    }
+    let z = zoom.max(1);
+    let (w, h) = (((left + right).ceil() as u32 + 2) * z, ((up + down).ceil() as u32 + 2) * z);
+    if w > u16::MAX as u32 || h > u16::MAX as u32 {
+        return Err("too big for a GIF".into());
+    }
+    let mut enc = Encoder::new(out, w as u16, h as u16, &[]).map_err(|e| e.to_string())?;
+    if !anim.once {
+        enc.set_repeat(Repeat::Infinite).map_err(|e| e.to_string())?;
+    }
+    let origin = vec2(left.ceil() + 1.0, up.ceil() + 1.0);
+    // Paint picture `p` with its centre at `origin` (canvas px, before zoom).
+    let paint = |canvas: &mut image::RgbaImage, p: &Pic| {
+        let c = centre_of(p);
+        let (x0, y0) = ((origin.x - c.x).round() as i64, (origin.y - c.y).round() as i64);
+        let (sx, sy, sw, sh) = (p.src.x as i64, p.src.y as i64, p.src.w as i64, p.src.h as i64);
+        for y in 0..sh {
+            for x in 0..sw {
+                let (ix, iy) = (sx + if p.flip { sw - 1 - x } else { x }, sy + y);
+                if ix < 0 || iy < 0 || ix >= image.width() as i64 || iy >= image.height() as i64 {
+                    continue;
+                }
+                let px = *image.get_pixel(ix as u32, iy as u32);
+                if px[3] < 128 {
+                    continue;
+                }
+                let solid = image::Rgba([px[0], px[1], px[2], 255]);
+                for dy in 0..z as i64 {
+                    for dx in 0..z as i64 {
+                        let (ox, oy) = ((x0 + x) * z as i64 + dx, (y0 + y) * z as i64 + dy);
+                        if ox >= 0 && oy >= 0 && (ox as u32) < canvas.width() && (oy as u32) < canvas.height() {
+                            canvas.put_pixel(ox as u32, oy as u32, solid);
+                        }
+                    }
+                }
+            }
+        }
+    };
+    for (i, &k) in order.iter().enumerate() {
+        let mut canvas = image::RgbaImage::new(w, h);
+        // The pieces behind go round on their own, a picture a frame.
+        if !anim.behind.is_empty() {
+            paint(&mut canvas, &anim.behind[i % anim.behind.len()]);
+        }
+        let p = &anim.pics[k];
+        paint(&mut canvas, p);
+        let mut rgba = canvas.into_raw();
+        let mut frame = Frame::from_rgba_speed(w as u16, h as u16, &mut rgba, 10);
+        frame.delay = ((p.hold.max(0.01) / fps * 100.0).round() as u16).max(2);
+        frame.dispose = DisposalMethod::Background;
+        enc.write_frame(&frame).map_err(|e| e.to_string())?;
+    }
+    Ok(order.len())
+}
+
+/// A picture read from a file, with how long it shows (s) when it was a
+/// frame of an animated GIF.
+pub type Picture = (image::RgbaImage, Option<f32>);
+
+/// The pictures of an image file: each frame of an animated GIF, or the one
+/// picture of any other.
+pub fn read_frames(path: &std::path::Path) -> Result<Vec<Picture>, String> {
+    frames_from(&std::fs::read(path).map_err(|e| e.to_string())?)
+}
+
+/// [`read_frames`] of a file's bytes.
+pub fn frames_from(bytes: &[u8]) -> Result<Vec<Picture>, String> {
+    use image::AnimationDecoder;
+    if bytes.starts_with(b"GIF8") {
+        let decoder = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
+        let frames = decoder.into_frames().collect_frames().map_err(|e| e.to_string())?;
+        if !frames.is_empty() {
+            return Ok(frames
+                .into_iter()
+                .map(|f| {
+                    let (n, d) = f.delay().numer_denom_ms();
+                    let s = n as f32 / d.max(1) as f32 / 1000.0;
+                    (f.into_buffer(), (s > 0.0).then_some(s))
+                })
+                .collect());
+        }
+    }
+    let img = image::load_from_memory(bytes).map_err(|e| e.to_string())?.to_rgba8();
+    Ok(vec![(img, None)])
+}
+
+/// Imported pictures, all of one size or not: the centre they share (the
+/// middle of everything drawn on them, and above its bottom by `feet` when
+/// standing, else its middle), from each one's top-left.
+pub fn shared_centre(frames: &[image::RgbaImage], feet: Option<f32>) -> Vec2 {
+    let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0, 0);
+    for f in frames {
+        for (x, y, p) in f.enumerate_pixels() {
+            if p[3] > 96 {
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
+            }
+        }
+    }
+    if x0 == u32::MAX {
+        let (w, h) = frames.first().map_or((0, 0), |f| f.dimensions());
+        return vec2(w as f32, h as f32) / 2.0;
+    }
+    let mid = (x0 + x1) as f32 / 2.0;
+    match feet {
+        Some(hr) => vec2(mid, y1 as f32 - hr),
+        None => vec2(mid, (y0 + y1) as f32 / 2.0),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -509,6 +642,53 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn animations_become_gifs_and_gifs_come_back_as_pictures() {
+        // Two 4 × 6 figures, the second red and mirrored, held twice as long.
+        let mut img = image::RgbaImage::new(12, 6);
+        for y in 0..6 {
+            for x in 0..4 {
+                img.put_pixel(x, y, image::Rgba([0, 0, 255, 255]));
+                img.put_pixel(6 + x, y, image::Rgba([255, 0, 0, if x == 0 { 255 } else { 40 }]));
+            }
+        }
+        let a = Rect::new(0.0, 0.0, 4.0, 6.0);
+        let b = Pic { flip: true, hold: 2.0, ..Pic::new(Rect::new(6.0, 0.0, 4.0, 6.0), vec2(1.0, 3.0)) };
+        let anim = Anim {
+            pics: vec![Pic::new(a, vec2(2.0, 3.0)), b],
+            repeats: vec![Repeat { from: 0, to: 0, times: 2 }],
+            ..Default::default()
+        };
+        let mut gif = vec![];
+        assert_eq!(animation_gif(&img, &anim, 10.0, 2, &mut gif), Ok(3));
+        let dir = std::env::temp_dir().join(format!("ge-gif-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("walk.gif");
+        std::fs::write(&path, &gif).unwrap();
+        let frames = read_frames(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        // The run played twice, then the held picture: 10, 10, then 20 hundredths.
+        assert_eq!(frames.len(), 3);
+        let delays: Vec<u32> = frames.iter().map(|(_, d)| (d.unwrap() * 100.0).round() as u32).collect();
+        assert_eq!(delays, [10, 10, 20]);
+        // Room for both around the shared centre (mirrored: its centre at 3, 3), twice as big.
+        let (w, h) = frames[0].0.dimensions();
+        assert_eq!((w, h), ((3 + 2 + 2) * 2, (3 + 3 + 2) * 2));
+        let (f0, f2) = (&frames[0].0, &frames[2].0);
+        let blue = f0.pixels().filter(|p| p[3] == 255 && p[2] > 200).count();
+        assert_eq!(blue, 4 * 6 * 4, "the whole blue figure, each pixel 2 × 2");
+        // The red one's faint pixels are left out; mirrored, its solid left
+        // column is its right one: x = 1 + 3 on the canvas, 8 and 9 at ×2.
+        let red: Vec<(u32, u32)> =
+            f2.enumerate_pixels().filter(|(_, _, p)| p[3] == 255 && p[0] > 200).map(|(x, y, _)| (x, y)).collect();
+        assert_eq!(red.len(), 6 * 4);
+        assert!(red.iter().all(|&(x, _)| x == 8 || x == 9), "{red:?}");
+        // The centre imported pictures share: under the middle of what is
+        // solid (x 0 to 7: the faint red is not), above the feet, or the middle.
+        assert_eq!(shared_centre(&[img.clone()], Some(2.0)), vec2(3.5, 4.0));
+        assert_eq!(shared_centre(&[img], None), vec2(3.5, 3.0));
     }
 
     #[test]

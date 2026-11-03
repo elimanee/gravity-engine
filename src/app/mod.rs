@@ -2385,6 +2385,11 @@ fn tilde(p: &std::path::Path) -> String {
     }
 }
 
+/// A file's name, for telling about it.
+fn file_name(p: &std::path::Path) -> String {
+    p.file_name().map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned())
+}
+
 impl Drop for App {
     fn drop(&mut self) {
         self.save_settings();

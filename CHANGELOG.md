@@ -9,6 +9,10 @@ described on the [releases page](https://github.com/elimanee/gravity-engine/rele
 ### Added
 - **Sheet generator** in the sprite region editor (*Generate…*, `G`): makes a sheet laid out the way fans lay theirs out (a banner with the character's name, the pictures' origin, credits and palette; an animation a row, each picture in its own box on a dark page), with its regions beside it so it works as it is. From **the game's drawing** of the character (every animation the game asks of them, two pixels to one of the game's: to play, or to paint over) or from **the pictures its sheet uses**, tidied. Kept with the screenshots; *Use it for … now* makes it the character's sheet at once. Clicking a character with no sheet offers it too
 - *Open…* (formerly *Open a sheet…*) also brings in the regions kept beside a picture (`<name>.regions.json`), so a generated or shared sheet comes in laid out
+- **New animations** a sheet can have, played by the game when it has them (else the character does what it did before): `full_speed` (flat out on the ground, faster than running), `fall` (falling without being curled up), `land` (a moment on touching down from a fall), `balance` (teetering at the edge of a drop, facing it), `breathe` (catching an air bubble), `drown`, `transform` (turning super) and `victory` (past the goal post). In the editor's list with what each is, and in the game's drawing for the generator
+- **GIF** (`E`) in the editor: the animation shown as an animated GIF, three times as big on a transparent background, at its pace, kept with the screenshots
+- **Grid** (`R`) in the editor: drag a box over pictures laid out in rows and columns; their columns and rows are counted and the box fits itself around them (Alt: as drawn), then *Add* (`Enter`) adds every cell with a sprite in it, with the character at the same place in each, so the animation does not wobble
+- **Import…** in the editor: pictures from files (PNG, WebP, BMP, JPEG, or every frame of an animated GIF, its timing kept as holds and pace) added to the animation, below the sheet; *Save* writes the sheet again with them. Dropping pictures on the editor does the same
 
 ## [3.4.2]
 

@@ -78,6 +78,13 @@ const PUSH: f32 = 10.0;
 const STAND: (f32, f32) = (9.0, 19.0);
 const BALL: (f32, f32) = (7.0, 14.0);
 
+/// How long (frames) landing on his feet, catching a breath and turning
+/// super show on a sprite sheet; the speed from which he runs flat out.
+const LANDING: u32 = 10;
+const BREATH: u32 = 24;
+const TRANSFORMING: u32 = 30;
+const FULL_SPEED: f32 = 10.0;
+
 /// A character's half width and half height (guide px), standing or
 /// curled up.
 pub fn body_radii(c: Character, ball: bool) -> (f32, f32) {
@@ -262,6 +269,19 @@ pub struct Sonic {
     /// this jump's teleport is used.
     pub warp: Option<u32>,
     pub warped: bool,
+    /// Standing still at the edge of what he stands on: the side the drop
+    /// is on (sheets have him balance, facing it).
+    pub balancing: Option<f32>,
+    /// Frames since he landed on his feet from a fall (not curled up).
+    pub landing: Option<u32>,
+    /// Frames since he caught a breath from a big bubble.
+    pub breath: Option<u32>,
+    /// Frames into turning super.
+    pub transforming: Option<u32>,
+    /// He lost his life to the water.
+    pub drowned: bool,
+    /// The act is cleared: standing still, he cheers.
+    pub cheering: bool,
 }
 
 /// Unit vector "down" for his feet in each ground mode.
@@ -336,6 +356,12 @@ impl Sonic {
             climb_up: None,
             hammer: None,
             hammer_air: false,
+            balancing: None,
+            landing: None,
+            breath: None,
+            transforming: None,
+            drowned: false,
+            cheering: false,
             warp: None,
             warped: false,
         }
@@ -490,6 +516,25 @@ impl Sonic {
         })
     }
 
+    /// Standing at the edge of what he stands on: nothing under his middle,
+    /// but under one foot. Returns the side the drop is on.
+    fn edge(&self, world: &PhysWorld, env: Env) -> Option<f32> {
+        let (wr, hr) = self.radii();
+        let down = vec2(0.0, 1.0);
+        let back = self.pos - down * LIFT * SCALE;
+        let reach = hr + LIFT + 6.0;
+        let floor_at =
+            |dx: f32| self.cast_past(world, env, back + vec2(dx, 0.0), down, reach).is_some_and(|h| h.dist > 0.0);
+        if floor_at(0.0) {
+            return None;
+        }
+        match (floor_at(-wr * SCALE), floor_at(wr * SCALE)) {
+            (true, false) => Some(1.0),
+            (false, true) => Some(-1.0),
+            _ => None,
+        }
+    }
+
     /// The nearer of the two floor sensors (A and B) along `down`, reaching
     /// `extra` guide px past his feet; its distance is measured from his feet.
     /// Sensors start this far behind his centre, so that sunk a little
@@ -541,6 +586,7 @@ impl Sonic {
         };
         let grv = if self.hurt { 0.1875 } else { c.grv } * gravity.max(0.0);
         let input = if self.hurt { Input::default() } else { input };
+        let (was_grounded, was_ball) = (self.grounded, self.is_ball());
         if self.climbing.is_some() || self.climb_up.is_some() {
             self.climb_frame(world, env, input, &mut events);
         } else if self.grounded {
@@ -562,6 +608,13 @@ impl Sonic {
         };
         self.anim += 1.0 / (hold + 1.0);
         let still = self.grounded && self.gsp == 0.0 && !self.crouching && !self.looking_up && !self.is_ball();
+        // What sprite sheets may show: landing, a breath, turning super, a ledge.
+        let landed = !was_grounded && self.grounded && !was_ball && self.climbing.is_none();
+        self.landing =
+            if landed { Some(0) } else { self.landing.map(|t| t + 1).filter(|&t| t < LANDING && self.grounded) };
+        self.breath = self.breath.map(|t| t + 1).filter(|&t| t < BREATH);
+        self.transforming = self.transforming.map(|t| t + 1).filter(|&t| t < TRANSFORMING);
+        self.balancing = if still && self.angle.sin().abs() < 0.2 { self.edge(world, env) } else { None };
         self.idle = if still { self.idle + 1 } else { 0 };
         self.spin += if self.grounded { self.gsp } else { self.xsp.abs().max(4.0) * self.facing } * 0.12;
         let pose = self.poses()[0];
@@ -578,8 +631,11 @@ impl Sonic {
     pub fn poses(&self) -> Vec<&'static str> {
         let mut out = Vec::with_capacity(4);
         for (when, name) in [
+            (self.dead && self.drowned, "drown"),
             (self.dead, "dead"),
             (self.hurt || self.dead, "hurt"),
+            (self.transforming.is_some(), "transform"),
+            (self.breath.is_some(), "breathe"),
             (self.climb_up.is_some(), "climb_up"),
             (self.climbing.is_some(), "climb"),
             (self.gliding.is_some(), "glide"),
@@ -599,9 +655,18 @@ impl Sonic {
         let speed = if self.grounded { self.gsp.abs() } else { self.xsp.abs() };
         if self.is_ball() {
             out.push("roll");
-        } else if !self.grounded && self.ysp < 0.0 {
+            return out;
+        }
+        if !self.grounded && self.ysp < 0.0 {
             out.push("spring");
-        } else if self.skidding {
+            return out;
+        }
+        if !self.grounded {
+            out.push("fall");
+        } else if self.landing.is_some() {
+            out.push("land");
+        }
+        if self.skidding {
             out.push("skid");
         } else if self.pushing {
             out.push("push");
@@ -610,11 +675,18 @@ impl Sonic {
         } else if self.looking_up {
             out.push("look_up");
         } else if self.grounded && speed == 0.0 {
-            if self.idle > 180 {
-                out.push("bored");
+            for (when, name) in
+                [(self.cheering, "victory"), (self.balancing.is_some(), "balance"), (self.idle > 180, "bored")]
+            {
+                if when {
+                    out.push(name);
+                }
             }
             out.push("idle");
         } else {
+            if self.grounded && speed >= FULL_SPEED {
+                out.push("full_speed");
+            }
             if speed >= 6.0 {
                 out.push("run");
             }
@@ -1097,6 +1169,66 @@ mod tests {
         assert_eq!(s.poses(), ["spindash", "roll"]);
         assert_eq!((s.pose, s.pose_frames), ("spindash", 0), "a new pose starts its clock again");
         assert_eq!(s.pose_anim, s.anim);
+    }
+
+    #[test]
+    fn sheets_get_falls_landings_ledges_and_the_rest() {
+        let mut w = world();
+        // A platform whose right edge is at x = 700, its top at y = 680.
+        let ground = w.bodies.insert(RigidBodyBuilder::fixed());
+        let (cx, cy) = to_phys(500.0, 700.0);
+        let plat = ColliderBuilder::cuboid(200.0 / PPM, 20.0 / PPM).translation(vector![cx, cy]);
+        w.colliders.insert_with_parent(plat, ground, &mut w.bodies);
+        w.refresh_queries();
+        // Standing over its edge: he balances, facing the drop.
+        let mut s = Sonic::new(vec2(706.0, 680.0 - 19.0 * SCALE));
+        s.grounded = true;
+        run(&mut s, &w, &walls, Input::default(), 2);
+        assert!(s.grounded);
+        assert_eq!(s.balancing, Some(1.0));
+        assert_eq!(s.poses(), ["balance", "idle"]);
+        // Away from the edge he just stands.
+        let mut s = Sonic::new(vec2(500.0, 680.0 - 19.0 * SCALE));
+        s.grounded = true;
+        run(&mut s, &w, &walls, Input::default(), 2);
+        assert_eq!((s.balancing, s.poses()), (None, vec!["idle"]));
+        // Walking off a ledge: falling, then landing on his feet for a moment.
+        let mut s = standing(300.0);
+        (s.grounded, s.pos.y) = (false, floor_y() - 120.0);
+        run(&mut s, &w, &walls, Input::default(), 1);
+        assert_eq!(s.poses()[0], "fall");
+        let mut frames = 0;
+        while !s.grounded && frames < 120 {
+            run(&mut s, &w, &walls, Input::default(), 1);
+            frames += 1;
+        }
+        assert_eq!((s.landing, s.poses()[0]), (Some(0), "land"));
+        run(&mut s, &w, &walls, Input::default(), LANDING as usize);
+        assert_eq!((s.landing, s.poses()[0]), (None, "idle"));
+        // Landing from a jump (curled up) is no landing on his feet.
+        run(&mut s, &w, &walls, Input { jump: true, jump_pressed: true, ..Input::default() }, 1);
+        let mut frames = 0;
+        while !s.grounded && frames < 120 {
+            run(&mut s, &w, &walls, Input::default(), 1);
+            frames += 1;
+        }
+        assert_eq!(s.landing, None);
+        // Flat out, a breath, turning super, drowned, cheering.
+        let mut s = standing(300.0);
+        s.gsp = 11.0;
+        assert_eq!(s.poses(), ["full_speed", "run", "walk"]);
+        s.gsp = 0.0;
+        s.breath = Some(0);
+        assert_eq!(s.poses()[0], "breathe");
+        run(&mut s, &w, &walls, Input::default(), BREATH as usize);
+        assert_eq!(s.breath, None, "a breath is short");
+        s.transforming = Some(0);
+        assert_eq!(s.poses()[0], "transform");
+        s.transforming = None;
+        s.cheering = true;
+        assert_eq!(s.poses(), ["victory", "idle"]);
+        (s.dead, s.drowned) = (true, true);
+        assert_eq!(&s.poses()[..3], ["drown", "dead", "hurt"]);
     }
 
     #[test]

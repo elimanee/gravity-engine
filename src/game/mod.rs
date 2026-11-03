@@ -942,6 +942,7 @@ impl Game {
         if let (Some(g), None) = (self.goal, self.goal_passed) {
             if sonic.pos.x > g.x - 12.0 && (g.y - sonic.pos.y).abs() < 160.0 {
                 self.goal_passed = Some(0.0);
+                sonic.cheering = true;
                 out.push(Effect::Goal(g));
                 if self.emeralds_missing && self.rings >= SPECIAL_RINGS {
                     self.giant_ring = true;
@@ -1051,6 +1052,7 @@ impl Game {
             out.push(Effect::Drowning);
         }
         if self.air <= 0.0 {
+            sonic.drowned = true;
             self.die(sonic, out);
         }
     }
@@ -1320,6 +1322,7 @@ impl Game {
             sonic.xsp = 0.0;
             sonic.gsp = 0.0;
             sonic.ysp = 0.0;
+            sonic.breath = Some(0);
             out.push(Effect::Breathe(me));
         }
 

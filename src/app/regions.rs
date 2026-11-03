@@ -20,17 +20,25 @@ use crate::ui::widgets::clip;
 const COMMON: &[(&str, &str)] = &[
     ("idle", "Standing still"),
     ("bored", "Waiting a while (after 3 s)"),
+    ("balance", "Standing at the edge of a drop (facing it)"),
     ("look_up", "Holding Up"),
     ("crouch", "Holding Down"),
     ("walk", "Walking, below running speed"),
     ("run", "Running fast"),
+    ("full_speed", "Flat out (dash panels, slopes, Super): from speed 10"),
     ("skid", "Braking hard"),
     ("push", "Pushing against a wall"),
     ("roll", "Curled up: jumping and rolling"),
     ("spindash", "Charging a spin dash (Down + Jump)"),
     ("spring", "Rising, off a spring"),
+    ("fall", "Falling, not curled up"),
+    ("land", "Landing on the feet from a fall"),
     ("hurt", "Knocked back"),
     ("dead", "Losing a life"),
+    ("drown", "Out of air underwater"),
+    ("breathe", "Catching a big air bubble"),
+    ("transform", "Turning super (50 rings, every emerald)"),
+    ("victory", "Past the goal, standing still"),
 ];
 
 /// Each character's own animations.
@@ -60,8 +68,12 @@ const MIDDLE: &[&str] = &[
     "roll",
     "spindash",
     "spring",
+    "fall",
     "hurt",
     "dead",
+    "drown",
+    "breathe",
+    "transform",
     "glide",
     "drop",
     "climb",
@@ -101,7 +113,11 @@ const THUMB: f32 = 48.0;
 const THUMB_GAP: f32 = 6.0;
 
 /// The left panel's sheet settings, under the animations.
-const SHEET_BOX: f32 = 160.0;
+const SHEET_BOX: f32 = 192.0;
+
+/// GIFs of an animation: its pictures this many times as big, and the pace
+/// when it follows the games' (the preview's).
+const GIF_ZOOM: u32 = 3;
 
 /// What the editor asks of the app.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -119,6 +135,16 @@ pub(super) enum Ask {
     Generate(Character, bool),
     /// Make the sheet just generated this character's.
     UseGenerated(Character),
+    /// Choose pictures (or an animated GIF) to add to the sheet.
+    Import,
+}
+
+/// Cutting a box of the sheet into equal cells, a picture each: the box
+/// (none: being drawn), and how many columns and rows.
+struct Grid {
+    area: Option<Rect>,
+    cols: u32,
+    rows: u32,
 }
 
 /// The sheet generator's window: what to make a sheet from, then what to
@@ -159,6 +185,8 @@ pub(super) enum Note {
 enum Drag {
     /// A new picture, from this sheet point.
     New(Vec2),
+    /// The grid's box, from this sheet point.
+    GridArea(Vec2),
     /// Every sprite found in a box (Shift), from this sheet point.
     Gather(Vec2),
     /// Moving the chosen pictures, their centres with them, from this
@@ -185,6 +213,15 @@ enum Cmd {
     Character(Character),
     OpenSheet,
     Generate,
+    Grid,
+    Import,
+    ExportGif,
+    FewerCols,
+    MoreCols,
+    FewerRows,
+    MoreRows,
+    GridAdd,
+    GridCancel,
     Try,
     Save,
     Close,
@@ -328,6 +365,8 @@ pub(super) struct RegionEditor {
     pub fresh: bool,
     /// The sheet generator's window, when open.
     pub maker: Option<Maker>,
+    /// The grid tool, while in use.
+    grid: Option<Grid>,
     pub notes: Vec<Note>,
 }
 
@@ -374,6 +413,46 @@ fn rect_between(a: Vec2, b: Vec2, size: Vec2) -> Rect {
     let lo = a.min(b).floor().max(Vec2::ZERO);
     let hi = a.max(b).ceil().min(size);
     Rect::new(lo.x, lo.y, (hi.x - lo.x).max(0.0), (hi.y - lo.y).max(0.0))
+}
+
+/// A box cut into `cols` × `rows` cells (whole pixels), row by row.
+fn grid_cells(area: Rect, cols: u32, rows: u32) -> Vec<Rect> {
+    let (cols, rows) = (cols.max(1), rows.max(1));
+    let edge = |from: f32, len: f32, n: u32, k: u32| (from + len * k as f32 / n as f32).round();
+    let mut out = Vec::with_capacity((cols * rows) as usize);
+    for r in 0..rows {
+        for c in 0..cols {
+            let (x0, x1) = (edge(area.x, area.w, cols, c), edge(area.x, area.w, cols, c + 1));
+            let (y0, y1) = (edge(area.y, area.h, rows, r), edge(area.y, area.h, rows, r + 1));
+            out.push(Rect::new(x0, y0, x1 - x0, y1 - y0));
+        }
+    }
+    out
+}
+
+/// The lines (columns or rows) things spanning `spans` (start, length) are
+/// in, each as where it starts and ends: a new one wherever the next thing
+/// overlaps those before it by less than a quarter of itself.
+fn lines(mut spans: Vec<(f32, f32)>) -> Vec<(f32, f32)> {
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out: Vec<(f32, f32)> = vec![];
+    for (start, len) in spans {
+        match out.last_mut() {
+            Some(l) if start < l.1 - len / 4.0 => l.1 = l.1.max(start + len),
+            _ => out.push((start, start + len)),
+        }
+    }
+    out
+}
+
+/// Where a grid over `lines` starts and how long it is: cells as far apart
+/// as the lines' middles, each line in the middle of its own.
+fn fit_lines(lines: &[(f32, f32)]) -> (f32, f32) {
+    let mid = |l: &(f32, f32)| (l.0 + l.1) / 2.0;
+    let (first, last) = (&lines[0], &lines[lines.len() - 1]);
+    let n = lines.len() as f32;
+    let pitch = if lines.len() > 1 { (mid(last) - mid(first)) / (n - 1.0) } else { first.1 - first.0 + 4.0 };
+    ((mid(first) - pitch / 2.0).round(), (pitch * n).round())
 }
 
 /// Boxes in reading order: row by row (a box whose middle is level with
@@ -494,6 +573,7 @@ impl RegionEditor {
             held: HashMap::new(),
             fresh: false,
             maker: None,
+            grid: None,
             notes,
         };
         ed.find_sprites();
@@ -920,6 +1000,127 @@ impl RegionEditor {
         self.selected = Some(k);
     }
 
+    /// The columns and rows of the sprites in `area` (one cell when none),
+    /// and the box fitted to them, with as much room around each.
+    fn guess_grid(&self, area: Rect) -> (Rect, u32, u32) {
+        let inside: Vec<Rect> =
+            self.sprites.iter().copied().filter(|s| area.contains(s.point() + s.size() / 2.0)).collect();
+        // Specks, labels and loose bits are not pictures of their own.
+        let biggest = inside.iter().map(|s| s.w * s.h).fold(0.0, f32::max);
+        let big: Vec<Rect> = inside.into_iter().filter(|s| s.w * s.h >= biggest * 0.2).collect();
+        if big.is_empty() {
+            return (area, 1, 1);
+        }
+        let (xs, ys) =
+            (lines(big.iter().map(|s| (s.x, s.w)).collect()), lines(big.iter().map(|s| (s.y, s.h)).collect()));
+        let ((x, w), (y, h)) = (fit_lines(&xs), fit_lines(&ys));
+        (Rect::new(x, y, w, h), xs.len().min(64) as u32, ys.len().min(64) as u32)
+    }
+
+    /// The grid's cells with a sprite in them become pictures, in reading
+    /// order, all with the character at the same place in its cell (as
+    /// boxed sheets keep it, so the animation does not wobble).
+    fn grid_add(&mut self) {
+        let Some(Grid { area: Some(area), cols, rows }) = self.grid.take() else { return };
+        let feet = self.feet();
+        // Each cell's sprite: the biggest bit whose middle is in it, whole,
+        // with the bits touching it (not a label beside it).
+        let found: Vec<(Rect, Pic)> = grid_cells(area, cols, rows)
+            .into_iter()
+            .filter_map(|cell| {
+                let bits: Vec<Rect> =
+                    self.sprites.iter().copied().filter(|s| cell.contains(s.point() + s.size() / 2.0)).collect();
+                let main = bits.iter().copied().max_by(|a, b| (a.w * a.h).total_cmp(&(b.w * b.h)));
+                let whole = main.map(|m| {
+                    let near = Rect::new(m.x - 2.0, m.y - 2.0, m.w + 4.0, m.h + 4.0);
+                    bits.iter().filter(|b| b.overlaps(&near)).fold(m, |u, b| u.combine_with(*b))
+                });
+                Some((cell, find_sprite(&self.sheet.image, whole.unwrap_or(cell), 0.0, feet)?))
+            })
+            .collect();
+        if found.is_empty() {
+            self.notes.push(Note::Info("No sprites in those cells".into()));
+            return;
+        }
+        let median = |mut v: Vec<f32>| {
+            v.sort_by(f32::total_cmp);
+            v[v.len() / 2]
+        };
+        let at: Vec<Vec2> = found.iter().map(|(cell, p)| p.src.point() + p.centre - cell.point()).collect();
+        let centre = vec2(median(at.iter().map(|a| a.x).collect()), median(at.iter().map(|a| a.y).collect()));
+        let pics: Vec<Pic> =
+            found.iter().map(|(cell, p)| Pic::new(p.src, cell.point() + centre - p.src.point())).collect();
+        let n = pics.len();
+        self.change(|ed| ed.add(pics));
+        self.notes.push(Note::Info(format!("Added {} from the grid", plural(n, "picture"))));
+    }
+
+    /// The animation shown, as a GIF kept with the screenshots.
+    fn export_gif(&mut self) {
+        let Some(a) = self.current().filter(|a| !a.pics.is_empty()).cloned() else {
+            self.notes.push(Note::Info("No pictures to make a GIF of".into()));
+            return;
+        };
+        let Some(dir) = config::screenshot_dir() else {
+            self.notes.push(Note::Warn("No folder to keep the GIF in".into()));
+            return;
+        };
+        let stem = format!("{}-{}", self.character.short().to_lowercase(), self.name());
+        let free = (1..).map(|k| if k == 1 { stem.clone() } else { format!("{stem}-{k}") });
+        let Some(path) = free.take(999).map(|n| dir.join(format!("{n}.gif"))).find(|p| !p.exists()) else { return };
+        let made = std::fs::create_dir_all(&dir)
+            .map_err(|e| e.to_string())
+            .and_then(|_| std::fs::File::create(&path).map_err(|e| e.to_string()))
+            .and_then(|f| {
+                maker::animation_gif(&self.sheet.image, &a, PREVIEW_FPS, GIF_ZOOM, std::io::BufWriter::new(f))
+            });
+        match made {
+            Ok(n) => self.notes.push(Note::Info(format!("GIF made ({}): {}", plural(n, "frame"), tilde(&path)))),
+            Err(e) => {
+                let _ = std::fs::remove_file(&path);
+                self.notes.push(Note::Warn(format!("Could not make the GIF: {e}")));
+            }
+        }
+    }
+
+    /// Pictures from files (each frame of an animated GIF) put below the
+    /// sheet and added to the animation, sharing one place for the
+    /// character. A GIF's timing sets an empty animation's pace and the
+    /// pictures' holds.
+    pub fn import(&mut self, frames: Vec<maker::Picture>) {
+        if frames.is_empty() {
+            return;
+        }
+        let pictures: Vec<image::RgbaImage> = frames.iter().map(|f| f.0.clone()).collect();
+        let centre = maker::shared_centre(&pictures, self.feet());
+        let places = self.sheet.extend(&pictures);
+        self.find_sprites();
+        let delays: Vec<f32> = frames.iter().filter_map(|f| f.1).collect();
+        let shortest = delays.iter().copied().fold(f32::INFINITY, f32::min);
+        let timed = delays.len() == frames.len() && shortest.is_finite();
+        let pics: Vec<Pic> = places
+            .iter()
+            .zip(&frames)
+            .map(|(&src, f)| {
+                let hold = if timed { (f.1.unwrap_or(shortest) / shortest * 2.0).round() / 2.0 } else { 1.0 };
+                Pic { hold: hold.clamp(1.0, MOST_HOLD), ..Pic::new(src, centre) }
+            })
+            .collect();
+        let n = pics.len();
+        let empty = self.pics().is_empty() && !self.behind;
+        self.change(|ed| {
+            ed.add(pics);
+            if timed && empty {
+                ed.current_mut().fps = Some((1.0 / shortest).clamp(1.0, 60.0).round());
+            }
+        });
+        self.frame_view(layout_parts().1);
+        self.notes.push(Note::Info(format!(
+            "Added {} below the sheet: Save writes the sheet again with them",
+            plural(n, "picture")
+        )));
+    }
+
     /// Loop from the selected picture (again: the whole animation loops).
     fn loop_here(&mut self) {
         let Some(k) = self.selected.filter(|_| !self.behind) else { return };
@@ -1031,6 +1232,10 @@ impl RegionEditor {
             return Err("\"idle\" needs a picture at least".into());
         }
         let r = self.sheet.regions();
+        // Pictures were added below it: the sheet is written again, whole.
+        if self.sheet.extended {
+            self.sheet.name = sheet::Sheet::write_for(&self.sheet.original, self.character)?;
+        }
         r.save(self.character)?;
         self.saved = self.sheet.anims.clone();
         self.saved_settings = self.settings();
@@ -1102,6 +1307,8 @@ impl RegionEditor {
         let half = (b.w - 26.0) / 2.0;
         push(Rect::new(b.x + 10.0, b.y + 126.0, half, 26.0), "Open…", Cmd::OpenSheet, false, true);
         push(Rect::new(b.x + 16.0 + half, b.y + 126.0, half, 26.0), "Generate…", Cmd::Generate, false, true);
+        push(Rect::new(b.x + 10.0, b.y + 158.0, half, 26.0), "Grid", Cmd::Grid, self.grid.is_some(), true);
+        push(Rect::new(b.x + 16.0 + half, b.y + 158.0, half, 26.0), "Import…", Cmd::Import, false, true);
         // The side, from the bottom up; the preview gets what is left.
         let (w2, w3) = ((side.w - 6.0) / 2.0, (side.w - 12.0) / 3.0);
         let n = self.pics().len();
@@ -1177,12 +1384,13 @@ impl RegionEditor {
             (info - 4.0 - side.y - fixed - thumb_rows as f32 * (THUMB + THUMB_GAP) - 8.0).clamp(110.0, 200.0);
         let preview = Rect::new(side.x, t, side.w, preview_h);
         t += preview_h + 8.0;
-        let w4 = (side.w - 18.0) / 4.0;
+        let w4 = (side.w - 24.0) / 5.0;
         for (i, (label, cmd, on)) in [
             ("←", Cmd::Previous, false),
             (if self.playing { "Pause" } else { "Play" }, Cmd::Play, self.playing),
             ("→", Cmd::Next, false),
             ("Onion", Cmd::Onion, self.onion),
+            ("GIF", Cmd::ExportGif, false),
         ]
         .into_iter()
         .enumerate()
@@ -1213,6 +1421,35 @@ impl RegionEditor {
                 Rect::new(side.x + c * (THUMB + THUMB_GAP), t + r * (THUMB + THUMB_GAP), THUMB, THUMB)
             })
             .collect();
+        // The grid's settings, along the bottom of the sheet view.
+        if let Some(g) = self.grid.as_ref().filter(|g| g.area.is_some()) {
+            let y = view.bottom() - 40.0;
+            let mut x = view.x + 10.0;
+            for (label, value, less, more) in
+                [("Columns", g.cols, Cmd::FewerCols, Cmd::MoreCols), ("Rows", g.rows, Cmd::FewerRows, Cmd::MoreRows)]
+            {
+                steppers.push(Stepper {
+                    r: Rect::new(x, y, 130.0, 30.0),
+                    label,
+                    value: value.to_string(),
+                    less,
+                    more,
+                    enabled: true,
+                });
+                x += 136.0;
+            }
+            let n = g.cols * g.rows;
+            let add = format!("Add {}", plural(n as usize, "picture"));
+            buttons.push(Button {
+                r: Rect::new(x, y, 130.0, 30.0),
+                label: add,
+                cmd: Cmd::GridAdd,
+                on: true,
+                enabled: true,
+            });
+            let r = Rect::new(x + 136.0, y, 76.0, 30.0);
+            buttons.push(Button { r, label: "Cancel".into(), cmd: Cmd::GridCancel, on: false, enabled: true });
+        }
         Layout { list, sheet_box, view, side, preview, thumbs, unshown: n - shown, info, buttons, steppers, swatches }
     }
 
@@ -1450,6 +1687,26 @@ impl RegionEditor {
             // No sheet yet: open a picture, or let the game draw one.
             Cmd::Character(c) => self.maker = Some(Maker::Choose(c)),
             Cmd::Generate => self.maker = Some(Maker::Choose(self.character)),
+            Cmd::Grid => {
+                self.grid = match self.grid {
+                    Some(_) => None,
+                    None => Some(Grid { area: None, cols: 1, rows: 1 }),
+                };
+                self.picking = false;
+            }
+            Cmd::Import => return Some(Ask::Import),
+            Cmd::ExportGif => self.export_gif(),
+            Cmd::FewerCols | Cmd::MoreCols | Cmd::FewerRows | Cmd::MoreRows => {
+                if let Some(g) = self.grid.as_mut() {
+                    let step = |v: u32, more: bool| if more { (v + 1).min(64) } else { v.saturating_sub(1).max(1) };
+                    match cmd {
+                        Cmd::FewerCols | Cmd::MoreCols => g.cols = step(g.cols, cmd == Cmd::MoreCols),
+                        _ => g.rows = step(g.rows, cmd == Cmd::MoreRows),
+                    }
+                }
+            }
+            Cmd::GridAdd => self.grid_add(),
+            Cmd::GridCancel => self.grid = None,
             Cmd::OpenSheet => return self.leave(Ask::OpenSheet(self.character)),
             Cmd::Try => return Some(Ask::Try),
             Cmd::Save => return Some(Ask::Save),
@@ -1550,7 +1807,14 @@ impl RegionEditor {
                 self.picking = false;
                 return None;
             }
+            if self.grid.take().is_some() {
+                return None;
+            }
             return self.leave(Ask::Close);
+        }
+        if self.grid.as_ref().is_some_and(|g| g.area.is_some()) && pressed(KeyCode::Enter) {
+            self.grid_add();
+            return None;
         }
         if ctrl {
             if pressed(KeyCode::S) {
@@ -1614,6 +1878,8 @@ impl RegionEditor {
             (KeyCode::O, Cmd::Onion),
             (KeyCode::I, Cmd::Pick),
             (KeyCode::G, Cmd::Generate),
+            (KeyCode::R, Cmd::Grid),
+            (KeyCode::E, Cmd::ExportGif),
             (KeyCode::LeftBracket, Cmd::Previous),
             (KeyCode::Comma, Cmd::Previous),
             (KeyCode::RightBracket, Cmd::Next),
@@ -1695,6 +1961,9 @@ impl RegionEditor {
         if self.picking {
             self.pick(p);
             return None;
+        }
+        if self.grid.is_some() {
+            return Some(Drag::GridArea(p));
         }
         let under = self.pics().iter().rposition(|q| q.src.contains(p));
         if input.shift || input.ctrl {
@@ -1864,6 +2133,15 @@ impl RegionEditor {
             Some(Drag::Gather(from)) => {
                 let r = rect_between(from, p, size);
                 self.gather(r);
+            }
+            Some(Drag::GridArea(from)) => {
+                let r = rect_between(from, p, size);
+                if r.w >= 2.0 && r.h >= 2.0 {
+                    let (fitted, cols, rows) = self.guess_grid(r);
+                    // Alt keeps the box as drawn.
+                    let alt = is_key_down(KeyCode::LeftAlt) || is_key_down(KeyCode::RightAlt);
+                    self.grid = Some(Grid { area: Some(if alt { r } else { fitted }), cols, rows });
+                }
             }
             _ => {}
         }
@@ -2122,7 +2400,16 @@ impl RegionEditor {
             Some(Drag::Gather(from)) => {
                 dashed_rect(self.screen_rect(rect_between(from, self.to_sheet(m), size)), SUCCESS)
             }
+            Some(Drag::GridArea(from)) => {
+                dashed_rect(self.screen_rect(rect_between(from, self.to_sheet(m), size)), WARNING)
+            }
             _ => {}
+        }
+        if let Some(Grid { area: Some(a), cols, rows }) = &self.grid {
+            for cell in grid_cells(*a, *cols, *rows) {
+                let r = self.screen_rect(cell);
+                draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, alpha(WARNING, 0.9));
+            }
         }
         clip(None);
         rrect_lines(v, RADIUS, 1.0, BORDER);
@@ -2132,16 +2419,26 @@ impl RegionEditor {
         let layer = if self.behind { "  ·  behind" } else { "" };
         let caption = if self.picking {
             "Click the sheet's background colour to cut it out  ·  Esc: never mind".to_string()
+        } else if self.grid.as_ref().is_some_and(|g| g.area.is_none()) {
+            "Grid: drag a box over pictures laid out in rows and columns (Alt: as drawn)  ·  Esc: never mind"
+                .to_string()
+        } else if self.grid.is_some() {
+            "Grid: set the columns and rows, then Add (Enter)  ·  drag again for another box".to_string()
         } else {
             format!("{name}  —  {what}  ·  {}{layer}", plural(n, "picture"))
         };
         let bar = Rect::new(v.x + 1.0, v.y + 1.0, v.w - 2.0, 28.0);
         draw_rectangle(bar.x, bar.y, bar.w, bar.h, alpha(SURFACE, 0.92));
-        text_left(bar, 12.0, &caption, 13.0, if self.picking { WARNING } else { TEXT });
+        text_left(bar, 12.0, &caption, 13.0, if self.picking || self.grid.is_some() { WARNING } else { TEXT });
         let z = format!("×{}", self.zoom);
         text(&z, bar.right() - 12.0 - measure(&z, 12.0), baseline(bar.y + 14.0, 12.0), 12.0, TEXT_MUTED);
+        // Behind the grid's settings.
+        if self.grid.as_ref().is_some_and(|g| g.area.is_some()) {
+            let r = Rect::new(v.x + 1.0, v.bottom() - 48.0, v.w - 2.0, 47.0);
+            draw_rectangle(r.x, r.y, r.w, r.h, alpha(SURFACE, 0.92));
+        }
         // A sheet with nothing cut out yet.
-        if !self.clear && !self.picking {
+        if !self.clear && !self.picking && self.grid.is_none() {
             let tip = "Nothing is see-through on this sheet yet: Pick (left, under SHEET), then click its background";
             let tw = measure(tip, 12.0) + 20.0;
             let r = Rect::new(v.x + (v.w - tw) / 2.0, v.bottom() - 40.0, tw, 26.0);
@@ -2475,6 +2772,47 @@ impl App {
         }
     }
 
+    /// Pictures from files (every frame of a GIF) added to the animation shown.
+    fn import_pictures(&mut self) {
+        let types = ["png", "PNG", "gif", "GIF", "webp", "WEBP", "bmp", "BMP", "jpg", "JPG", "jpeg", "JPEG"];
+        let Some(paths) = FileDialog::new().add_filter("Pictures", &types).pick_files() else { return };
+        let read = paths.iter().map(|p| (file_name(p), maker::read_frames(p))).collect();
+        self.import_read(read);
+    }
+
+    /// Pictures dropped on the editor: as with Import….
+    fn import_dropped(&mut self, files: Vec<macroquad::DroppedFile>) {
+        let read = files
+            .into_iter()
+            .map(|f| {
+                let name = f.path.as_deref().map_or_else(|| "the file dropped".into(), file_name);
+                let frames = match (f.bytes, f.path) {
+                    (Some(bytes), _) => maker::frames_from(&bytes),
+                    (None, Some(p)) => maker::read_frames(&p),
+                    (None, None) => Err("nothing came with it".into()),
+                };
+                (name, frames)
+            })
+            .collect();
+        self.import_read(read);
+    }
+
+    fn import_read(&mut self, read: Vec<(String, Result<Vec<maker::Picture>, String>)>) {
+        let mut frames = vec![];
+        for (name, r) in read {
+            match r {
+                Ok(f) => frames.extend(f),
+                Err(e) => {
+                    self.toasts.error(format!("Could not read {name}: {e}"));
+                    return;
+                }
+            }
+        }
+        if let Some(ed) = self.regions.as_mut() {
+            ed.import(frames);
+        }
+    }
+
     /// Into the editor from the command line (`--sprite-regions`).
     pub fn edit_regions(&mut self, c: Option<Character>) {
         self.open_regions(c);
@@ -2486,6 +2824,7 @@ impl App {
         let mut input = Input::gather();
         let Some(ed) = self.regions.as_mut() else { return };
         let ask = ed.frame(dt, &mut input);
+        let dropped = get_dropped_files();
         for n in ed.notes.drain(..) {
             match n {
                 Note::Info(t) => self.toasts.info(t),
@@ -2500,7 +2839,11 @@ impl App {
             Some(Ask::Try) => self.try_regions(),
             Some(Ask::Generate(c, from_sheet)) => self.generate_sheet(c, from_sheet),
             Some(Ask::UseGenerated(c)) => self.use_generated(c),
+            Some(Ask::Import) => self.import_pictures(),
             None => {}
+        }
+        if !dropped.is_empty() && self.regions.is_some() {
+            self.import_dropped(dropped);
         }
         self.toasts.update(dt);
         self.toasts.draw(56.0, &self.jobs, dt);
@@ -2673,5 +3016,24 @@ mod tests {
         ];
         let order: Vec<(f32, f32)> = reading_order(boxes).iter().map(|b| (b.x, b.y)).collect();
         assert_eq!(order, [(0.0, 10.0), (40.0, 0.0), (90.0, 22.0), (30.0, 100.0), (60.0, 104.0)]);
+    }
+
+    #[test]
+    fn grids_fit_the_sprites_they_are_drawn_over() {
+        // Two rows of four, with a tail drawn apart from its body.
+        let bodies: Vec<(f32, f32)> = [10.0, 105.0, 199.0, 292.0].iter().map(|&x| (x, 90.0)).collect();
+        let mut rows: Vec<(f32, f32)> = [(929.0, 64.0); 4].into_iter().chain([(1017.0, 64.0); 4]).collect();
+        rows.push((960.0, 20.0));
+        let (xs, ys) = (lines(bodies.iter().chain(&bodies).copied().collect()), lines(rows));
+        assert_eq!(xs.len(), 4);
+        assert_eq!(ys, [(929.0, 993.0), (1017.0, 1081.0)]);
+        // Cells as far apart as the sprites, each in the middle of its own.
+        assert_eq!(fit_lines(&xs), (8.0, 376.0));
+        assert_eq!(fit_lines(&ys), (917.0, 176.0));
+        // One row: just room for it.
+        assert_eq!(fit_lines(&[(583.0, 675.0)]), (581.0, 96.0));
+        let cells = grid_cells(Rect::new(8.0, 917.0, 376.0, 176.0), 4, 2);
+        assert_eq!(cells.len(), 8);
+        assert_eq!((cells[1].x, cells[1].w, cells[4].y, cells[4].h), (102.0, 94.0, 1005.0, 88.0));
     }
 }
