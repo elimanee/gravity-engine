@@ -232,6 +232,13 @@ pub fn dips(n: usize, on: Option<usize>) -> Vec<f32> {
 impl Things {
     pub fn new(spec: &LevelSpec, world: &mut PhysWorld) -> Things {
         let mut th = Things::default();
+        th.add(spec, world);
+        th
+    }
+
+    /// Those of `spec` too (an endless run's, as it is made).
+    pub fn add(&mut self, spec: &LevelSpec, world: &mut PhysWorld) {
+        let th = self;
         for s in &spec.bridges {
             let (x0, x1, top) = s.px();
             let n = ((x1 - x0) / LOG).round().clamp(2.0, 60.0) as usize;
@@ -279,7 +286,56 @@ impl Things {
             let (body, collider) = fixed_box(world, pos, ROCK);
             th.rocks.push(Rock { pos, body, collider });
         }
-        th
+    }
+
+    /// Forget those wholly behind `x` (endless runs), their bodies too.
+    pub fn forget_before(&mut self, world: &mut PhysWorld, x: f32) {
+        let mut gone = vec![];
+        self.bridges.retain(|b| {
+            let keep = b.logs.last().is_some_and(|l| l.2.x > x);
+            if !keep {
+                gone.extend(b.logs.iter().map(|l| l.0));
+            }
+            keep
+        });
+        self.swings.retain(|s| {
+            let keep = s.anchor.x + CHAIN > x;
+            if !keep {
+                gone.push(s.body);
+            }
+            keep
+        });
+        self.ledges.retain(|l| {
+            let keep = l.columns.last().is_some_and(|c| c.home.x > x);
+            if !keep {
+                gone.extend(l.columns.iter().filter_map(|c| c.body.map(|b| b.0)));
+            }
+            keep
+        });
+        self.walls.retain(|w| {
+            let keep = w.pos.x + WALL.x > x;
+            if !keep {
+                gone.push(w.body);
+            }
+            keep
+        });
+        self.spike_logs.retain(|s| {
+            let keep = s.x1 > x;
+            if !keep {
+                gone.push(s.body);
+            }
+            keep
+        });
+        self.rocks.retain(|r| {
+            let keep = r.pos.x + ROCK.x > x;
+            if !keep {
+                gone.push(r.body);
+            }
+            keep
+        });
+        for b in gone {
+            world.remove_body(b);
+        }
     }
 
     fn bodies(&self) -> impl Iterator<Item = RigidBodyHandle> + '_ {

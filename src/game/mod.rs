@@ -623,9 +623,15 @@ impl Game {
         }
     }
 
+    /// The gimmicks of `spec` too (an endless run's stretch, as it is made).
+    pub fn add_things(&mut self, world: &mut PhysWorld, spec: &LevelSpec) {
+        self.things.add(spec, world);
+    }
+
     /// Forget what lies far behind `x` (endless runs).
     #[allow(dead_code)]
     pub fn forget_before(&mut self, world: &mut PhysWorld, x: f32) {
+        self.things.forget_before(world, x);
         self.enemies.retain(|e| e.pos.x > x);
         self.shots.retain(|s| s.pos.x > x);
         self.vents.retain(|v| v.pos.x > x);

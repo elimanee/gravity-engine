@@ -148,7 +148,7 @@ While someone plays, `X` is the action button (the Winamp player is on `X` other
 
 ![The Twilight zone at night: Sonic lit up among crates, the best run's ghost glowing beside him and rings gleaming](docs/screenshots/endless-twilight.png)
 
-The *Endless run* example (Sonic in the infinite world, with hills, loops, ramps, springs, platforms, crates and rings made ahead of him) now goes through **five zones** — Meadow, Twilight (at night: Sonic carries a light and the rings gleam), Snowfield (snow), Lagoon (water) and Storm peak (rain and lightning) — each with its own colours and sky, and round again. The further you go, the more **badniks, flyers, crabs and spikes**, with the odd monitor.
+The *Endless run* example (Sonic in the infinite world, with hills, loops, ramps, springs, platforms, walls to roll through and rings made ahead of him) now goes through **five zones** — Meadow, Twilight (at night: Sonic carries a light and the rings gleam), Snowfield (snow), Lagoon (water) and Storm peak (rain and lightning) — each with its own colours and sky, and round again. The further you go, the more **badniks, flyers, crabs and spikes**, with the odd monitor.
 
 One life: at the first fall the run is over and starts again. The best run is kept as a **ghost** that races you on the same course next time (`ghost.json`); the distance, your best and the zone are shown under the counters.
 
