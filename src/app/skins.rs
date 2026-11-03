@@ -61,7 +61,7 @@ fn spans_at(poly: &[Vec2], y: f32) -> Vec<(f32, f32)> {
         })
         .collect();
     xs.sort_by(f32::total_cmp);
-    xs.chunks_exact(2).map(|p| (p[0], p[1])).collect()
+    xs.as_chunks::<2>().0.iter().map(|p| (p[0], p[1])).collect()
 }
 
 /// A piece of ground (its outline, world px) filled with `ground`, `grass`
