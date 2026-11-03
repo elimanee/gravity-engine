@@ -71,6 +71,7 @@ mod ragdoll;
 mod regions;
 mod rewind;
 mod select;
+mod skins;
 mod soft;
 mod sonic;
 mod special;
@@ -166,6 +167,8 @@ pub struct App {
     pad: crate::gamepad::Gamepad,
     /// The user's Sonic sprite sheet (loaded when he first appears).
     sonic_sheet: crate::sonic::sheet::Sheets,
+    /// Changes whenever the zone's sheet does (the ground is drawn again).
+    zone_version: u32,
     sonic_sheet_tried: bool,
     rings: Vec<Vec2>,
     /// Sonic's endless run (terrain made as he goes).
@@ -312,6 +315,7 @@ impl App {
             sonic: None,
             pad: Default::default(),
             sonic_sheet: Default::default(),
+            zone_version: 1,
             sonic_sheet_tried: false,
             rings: Vec::new(),
             endless: None,
@@ -455,6 +459,7 @@ impl App {
         }
 
         self.recentre();
+        self.update_skins();
         self.poll_pad();
         let mut input = Input::gather();
         input.world = self.view().to_world(input.mouse);

@@ -17,7 +17,7 @@ use crate::game::{self, BossKind, EnemyKind, LevelSpec, MonitorKind, Placed};
 use crate::physics::borders::BorderMode;
 use crate::physics::gadgets::{GadgetKind, GadgetSpec, Trigger};
 use crate::physics::links::LinkKind;
-use crate::physics::object::Material;
+use crate::physics::object::{Material, Skin};
 use crate::physics::zones::{self, Zone, ZoneKind};
 use crate::scene::{SceneFile, SceneGadget, SceneLink, SceneObject, SceneSource, SceneWater};
 use crate::shapes::Shape;
@@ -381,8 +381,8 @@ impl Builder {
             outline.push((b.0, self.bottom));
             outline.push((a.0, self.bottom));
             outline.push(a);
-            self.stroke(&outline, 4.0, rgb, true, m);
-            self.stroke(&dense(piece), 10.0, edge, true, m);
+            self.stroke(&outline, 4.0, rgb, true, Material { skin: Skin::Ground, ..m });
+            self.stroke(&dense(piece), 10.0, edge, true, Material { skin: Skin::Grass, ..m });
         }
     }
 
@@ -393,14 +393,15 @@ impl Builder {
         let n = ((x1 - x0) / 600.0).ceil().max(1.0) as usize;
         for k in 0..n {
             let (a, b) = (x0 + (x1 - x0) * k as f32 / n as f32, x0 + (x1 - x0) * (k + 1) as f32 / n as f32);
-            self.stroke(&[(a, top), (b, top), (b, bottom), (a, bottom), (a, top)], 4.0, rgb, true, m);
-            self.stroke(&dense(&[(a, top), (b, top)]), 10.0, edge, true, m);
+            let ground = Material { skin: Skin::Ground, ..m };
+            self.stroke(&[(a, top), (b, top), (b, bottom), (a, bottom), (a, top)], 4.0, rgb, true, ground);
+            self.stroke(&dense(&[(a, top), (b, top)]), 10.0, edge, true, Material { skin: Skin::Grass, ..m });
         }
     }
 
     /// A floating platform plank from x0 to x1 at height y.
     pub fn platform(&mut self, x0: f32, x1: f32, y: f32, rgb: [u8; 3]) {
-        let m = Material { flammable: false, friction: 0.6, bounce: 0.05, ..Material::DEFAULT };
+        let m = Material { flammable: false, friction: 0.6, bounce: 0.05, skin: Skin::Platform, ..Material::DEFAULT };
         self.stroke(&dense(&[(x0, y), (x1, y)]), 16.0, rgb, true, m);
     }
 

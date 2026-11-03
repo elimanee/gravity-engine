@@ -499,7 +499,7 @@ impl App {
         let Some(ed) = self.level_editor.as_ref().filter(|e| e.testing.is_none()) else { return };
         let t = get_time() as f32;
         if let Some(g) = &ed.preview {
-            game_art::draw(g, t, self.game_sprites.as_ref());
+            game_art::draw(g, t, self.game_sprites.as_ref(), self.sonic_sheet.zone.as_ref());
         }
         // A boss guards its arena.
         if let Some(b) = ed.spec.boss {

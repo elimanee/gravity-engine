@@ -182,9 +182,18 @@ Each frame is the top-left corner of a `cell`-sized box whose centre is Sonic's 
 
 Tails, Knuckles and Amy can have theirs as well, recognised by their size and kept as `tails.png`, `knuckles.png` and `amy.png` / `amy.webp`: the Sonic 3 Tails sheet (1174 × 1820) and the Sonic 3 & Knuckles Knuckles sheet (1131 × 1862) from The Spriters Resource, and for Amy either CartoonsAnimate22's sheet (1274 × 2000, its Sonic Mania style) or DeltaConduit's custom sheet in the style of Sonic 1 (583 × 570; original sprites by Sega and Sonic Team). Sonic.exe's is a sheet in the style of Sonic 1 (691 × 677), kept as `exe.png`. Where each character's centre sits in a picture is worked out from its pixels.
 
+#### The zone's sheet
+
+The levels can be drawn from a sheet too, kept as `zone.png`: the ground of the acts and of your levels, the ledges in the air, and the zone's gimmicks (bridges, swinging platforms, crumbling ledges, walls, spiked logs, rocks). The Green Hill Zone objects sheet from The Spriters Resource (864 × 707) is recognised as it is (*Sonic sprites…* puts it in place by its size); any other is laid out in the sprite region editor, under **Zone** (`--sprite-regions=zone`), where its tiles are listed instead of animations:
+
+- `grass`: the ground's top, repeated along it, its cross on the line the character runs on (the blades above it are drawn over the sky); `ground`: what is inside, repeated all over the world, so the pieces of ground meet; `platform`: the ledges in the air, along them (the cross on their top).
+- `log` (a bridge's), `post_left` / `post_right` (its ends), `swing`, `chain` and `anchor` (a swinging platform), `ledge` (a crumbling ledge's columns, one picture after the other), `wall`, `spike_log` (eight pictures, an eighth of a turn each: the spikes going round the log) and `rock`.
+
+Without a zone sheet (or a tile it has no picture for), they are drawn as before. *Try* on the zone plays the test track drawn with the tiles as edited, its gimmicks behind the start (run left). The regions go in `zone.regions.json`.
+
 #### Editing the regions
 
-*Edit sprite regions…* in the settings (or `--sprite-regions[=CHARACTER]`) opens a character's sheet over the whole window, to change which pictures each animation uses, where the character stands in them, how long each shows and at what pace the animation plays: for a built-in layout that is a little off, or **any sheet at all**. The buttons along the top switch between the characters (one without a sheet asks for a picture).
+*Edit sprite regions…* in the settings (or `--sprite-regions[=CHARACTER]`) opens a character's sheet over the whole window, to change which pictures each animation uses, where the character stands in them, how long each shows and at what pace the animation plays: for a built-in layout that is a little off, or **any sheet at all**. The buttons along the top switch between the characters (one without a sheet asks for a picture) and **Zone**, the zone's tiles (see *The zone's sheet*).
 
 **Any picture as a sheet.** *Open…* (bottom left, under SHEET) makes any picture (PNG, WebP, GIF, BMP or JPEG) the character's sheet: it is kept as a PNG under the character's name (`sheet.png` for Sonic, `tails.png`…), and a sheet the game does not know opens empty. *Pick* (`I`) is an eyedropper: click the sheet's background and that colour is cut out (pick several if it has more; click a swatch to put one back). *Soft edges* cuts them out by closeness, for lossy pictures such as JPEGs, and *Scale* tells how many sheet pixels make one of the game's (2 for sprites drawn twice as big). A checkerboard shows through what is cut out. Once the background is gone, the sheet's sprites are found by themselves: hold Shift to see them.
 
@@ -514,7 +523,7 @@ sudo apt install pkg-config libopenmpt-dev libasound2-dev libx11-dev libxi-dev \
 cargo run --release
 ```
 
-Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins. `--act=N` and `--special-stage=N` go straight into Sonic act N (1–7) or special stage N (1–7), and `--sprite-regions[=CHARACTER]` into the sprite region editor (`sonic`, `tails`, `knuckles`, `amy` or `exe`).
+Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins. `--act=N` and `--special-stage=N` go straight into Sonic act N (1–7) or special stage N (1–7), and `--sprite-regions[=CHARACTER]` into the sprite region editor (`sonic`, `tails`, `knuckles`, `amy` or `exe`, or `zone` for the zone's tiles).
 
 `gravity_engine --benchmark` runs five stress scenes for a few seconds each at a fixed 60 Hz and prints the frame times (average, 95th percentile, worst), the bodies still moving, the time spent waiting for the screen and where each frame's time goes, then quits without saving anything.
 
@@ -540,7 +549,7 @@ Everything lives in `~/.config/gravity_engine/` (or `$XDG_CONFIG_HOME/gravity_en
 | `scenes/` | Default folder for saved scenes |
 | `challenges/` | Challenges made in the editor (`.gchallenge`), listed in Library → *My challenges* |
 | `levels/` | Sonic levels made in the level editor (`.gscene`), listed in Library → *Sonic* |
-| `sonic/` | Your sprite sheets for Sonic, Tails, Knuckles, Amy, Sonic.exe and the game's objects, and the regions edited on them (`<character>.regions.json`; see *Sonic sprite sheets*) |
+| `sonic/` | Your sprite sheets for Sonic, Tails, Knuckles, Amy, Sonic.exe, the game's objects and the zone (`zone.png`), and the regions edited on them (`<character>.regions.json`, `zone.regions.json`; see *Sonic sprite sheets*) |
 | `ghost.json` | The endless run's best run, raced as a ghost |
 | `skins/` | Extra Winamp / Audacious skins (`.wsz` files or folders) for the classic player |
 | `sgdb_key` | SteamGridDB API key for the logo fetcher (or set `SGDB_API_KEY`) |

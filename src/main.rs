@@ -87,7 +87,7 @@ async fn main() {
             "--sprite-regions" => regions = Some(None),
             a if a.starts_with("--sprite-regions=") => {
                 let name = a[17..].to_lowercase();
-                regions = Some(sonic::Character::ALL.into_iter().find(|c| c.short().to_lowercase() == name));
+                regions = Some(sonic::sheet::Owner::ALL.into_iter().find(|o| o.short().to_lowercase() == name));
             }
             "-h" | "--help" => {
                 println!(
@@ -97,7 +97,7 @@ async fn main() {
                      --act=N            play Sonic act N (1-7)\n  \
                      --special-stage=N  play special stage N (1-7)\n  \
                      --sprite-regions   edit the characters' sprite sheet regions (sonic, tails,\n                     \
-                     knuckles, amy or exe)\n\n\
+                     knuckles, amy or exe) or the zone's tiles (zone)\n\n\
                      Press F1 in the app for controls."
                 );
                 return;

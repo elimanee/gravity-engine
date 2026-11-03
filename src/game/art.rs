@@ -6,15 +6,17 @@
 
 use super::sprites::Sprites;
 use super::*;
+use crate::sonic::sheet::Sheet;
 use macroquad::prelude::*;
 
 const STEEL: Color = Color::new(0.74, 0.76, 0.84, 1.0);
 const STEEL_DARK: Color = Color::new(0.36, 0.38, 0.48, 1.0);
 const INK: Color = Color::new(0.06, 0.06, 0.1, 1.0);
 
-/// Everything of the level (world pass), behind and around Sonic.
-pub fn draw(g: &Game, t: f32, sp: Option<&Sprites>) {
-    things(&g.things);
+/// Everything of the level (world pass), behind and around Sonic; the
+/// gimmicks from the zone's sheet when there is one.
+pub fn draw(g: &Game, t: f32, sp: Option<&Sprites>, zone: Option<&Sheet>) {
+    things(&g.things, zone);
     for s in &g.spikes {
         if !sp.is_some_and(|sp| sp.spikes(s.pos)) {
             spikes(s.pos);
@@ -585,9 +587,13 @@ fn checker(r: Rect, cell: f32) {
     }
 }
 
-fn things(th: &things::Things) {
+fn things(th: &things::Things, zone: Option<&Sheet>) {
     use things::*;
-    for b in &th.bridges {
+    if let Some(z) = zone {
+        zone_things(th, z);
+    }
+    let has = |name: &str| zone.is_some_and(|z| z.pics(name).is_some());
+    for b in th.bridges.iter().filter(|_| !has("log")) {
         let tops: Vec<Vec2> = b.logs.iter().map(|l| l.2 + vec2(0.0, l.3)).collect();
         // The ropes they hang on, then the logs, posts at the ends.
         for w in tops.windows(2) {
@@ -606,7 +612,7 @@ fn things(th: &things::Things) {
             }
         }
     }
-    for s in &th.swings {
+    for s in th.swings.iter().filter(|_| !has("swing")) {
         let top = s.pos - vec2(0.0, SWING_PLATFORM.y / 2.0);
         let links = 6;
         for k in 0..=links {
@@ -624,7 +630,7 @@ fn things(th: &things::Things) {
         }
         draw_rectangle(r.x + 4.0, r.y + 3.0, r.w - 8.0, 3.0, LOG_RING);
     }
-    for l in &th.ledges {
+    for l in th.ledges.iter().filter(|_| !has("ledge")) {
         let w = l.columns.get(1).zip(l.columns.first()).map_or(LEDGE_COLUMN, |(b, a)| b.home.x - a.home.x);
         for c in &l.columns {
             let Some(at) = (if c.falling.is_some() { Things::falling_at(c) } else { Some(c.home) }) else { continue };
@@ -637,7 +643,7 @@ fn things(th: &things::Things) {
             }
         }
     }
-    for w in &th.walls {
+    for w in th.walls.iter().filter(|_| !has("wall")) {
         let r = Rect::new(w.pos.x - WALL.x / 2.0, w.pos.y - WALL.y / 2.0, WALL.x, WALL.y);
         checker(r, 24.0);
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, DIRT_DARK);
@@ -646,7 +652,7 @@ fn things(th: &things::Things) {
         draw_line(r.x + 22.0, r.y + 40.0, r.x + 14.0, r.y + 62.0, 1.5, INK);
         draw_line(r.right() - 10.0, r.y + 70.0, r.right() - 24.0, r.y + 86.0, 1.5, INK);
     }
-    for s in &th.spike_logs {
+    for s in th.spike_logs.iter().filter(|_| !has("spike_log")) {
         let n = ((s.x1 - s.x0) / SPIKE_LOG).ceil().max(1.0) as usize;
         let mid = s.top + SPIKE_LOG / 2.0;
         // The spikes behind the log first, then the log, then those in front.
@@ -672,7 +678,7 @@ fn things(th: &things::Things) {
             }
         }
     }
-    for r in &th.rocks {
+    for r in th.rocks.iter().filter(|_| !has("rock")) {
         let (c, h) = (r.pos, ROCK / 2.0);
         let rock = Color::new(0.6, 0.5, 0.78, 1.0);
         let light = Color::new(0.82, 0.76, 0.95, 1.0);
@@ -687,6 +693,80 @@ fn things(th: &things::Things) {
         draw_triangle(pts[4], pts[5], c + vec2(0.3, 0.4) * h, dark);
         for w in pts.windows(2) {
             draw_line(w[0].x, w[0].y, w[1].x, w[1].y, 1.5, dark);
+        }
+    }
+}
+
+/// The gimmicks the zone's sheet has pictures of.
+fn zone_things(th: &things::Things, z: &Sheet) {
+    use things::*;
+    let k = z.k();
+    let first = |name: &str| z.pics(name).and_then(|p| p.first().copied());
+    if let Some(log) = first("log") {
+        for b in &th.bridges {
+            for l in &b.logs {
+                // The logs' tops are where the character walks.
+                z.put(log, l.2 + vec2(0.0, l.3 - LOG / 4.0 + log.centre.y * k));
+            }
+            let (Some(a), Some(e)) = (b.logs.first(), b.logs.last()) else { continue };
+            let half = (b.logs.get(1).map_or(LOG, |n| n.2.x - a.2.x)) / 2.0;
+            for (name, at, side) in [("post_left", a, -1.0), ("post_right", e, 1.0)] {
+                if let Some(p) = first(name) {
+                    let top = at.2.y - LOG / 4.0 + at.3;
+                    z.put(p, vec2(at.2.x + side * (half + 8.0 * k), top + 8.0 * k));
+                }
+            }
+        }
+    }
+    if let Some(platform) = first("swing") {
+        let (chain, anchor) = (first("chain"), first("anchor"));
+        for s in &th.swings {
+            let top = s.pos - vec2(0.0, SWING_PLATFORM.y / 2.0);
+            if let Some(c) = chain {
+                let step = c.src.h * k;
+                let n = (s.anchor.distance(top) / step).floor() as usize;
+                for i in 1..=n {
+                    z.put(c, s.anchor.lerp(top, i as f32 / (n + 1) as f32));
+                }
+            }
+            if let Some(a) = anchor {
+                z.put(a, s.anchor);
+            }
+            z.put(platform, s.pos);
+        }
+    }
+    if let Some(columns) = z.pics("ledge") {
+        for l in &th.ledges {
+            for (i, c) in l.columns.iter().enumerate() {
+                let at = if c.falling.is_some() { Things::falling_at(c) } else { Some(c.home) };
+                if let Some(at) = at {
+                    z.put(columns[i % columns.len()], at);
+                }
+            }
+        }
+    }
+    if let Some(wall) = first("wall") {
+        for w in &th.walls {
+            z.put(wall, w.pos);
+        }
+    }
+    if let Some(frames) = z.pics("spike_log") {
+        let f = frames[spin_picture(th.t) % frames.len()];
+        for s in &th.spike_logs {
+            // The picture along the log, as many times as it takes.
+            let (w, mid) = (f.src.w * k, s.top + SPIKE_LOG / 2.0);
+            let mut x = s.x0;
+            while x < s.x1 - 0.5 {
+                let part = ((s.x1 - x) / k).min(f.src.w);
+                let src = Rect::new(f.src.x, f.src.y, part, f.src.h);
+                z.put_part(src, vec2(x, mid - f.centre.y * k));
+                x += w;
+            }
+        }
+    }
+    if let Some(rock) = first("rock") {
+        for r in &th.rocks {
+            z.put(rock, r.pos);
         }
     }
 }

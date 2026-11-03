@@ -199,10 +199,17 @@ fn swing_angle(t: f32) -> f32 {
     SWING_AMPLITUDE * (t * std::f32::consts::TAU / SWING_PERIOD).sin()
 }
 
-/// How far round (0 ‥ 1, 0 on top) the spikes of the `k`-th piece of a
-/// spiked log are at `t`.
+/// How far round (0 ‥ 1, 0 on top, a quarter towards the front) the spikes
+/// of the `k`-th piece of a spiked log are at `t`: they come up and over
+/// towards the front, the pattern moving along the log (as the zone
+/// sheet's eight pictures show it: the second piece up in the first).
 pub fn spin(t: f32, k: usize) -> f32 {
-    (t / SPIN_PERIOD + k as f32 * SPIN_STAGGER).rem_euclid(1.0)
+    (k as f32 * SPIN_STAGGER - SPIN_STAGGER - t / SPIN_PERIOD).rem_euclid(1.0)
+}
+
+/// Which of a spiked log's eight pictures shows at `t`.
+pub fn spin_picture(t: f32) -> usize {
+    ((t / SPIN_PERIOD * 8.0).floor() as i64).rem_euclid(8) as usize
 }
 
 /// Whether spikes `turn` round (0 ‥ 1) point up out of the log.
@@ -496,10 +503,14 @@ mod tests {
         assert!((swing_angle(3.0 * quarter) + SWING_AMPLITUDE).abs() < 1e-4);
         assert!(swing_at(anchor, swing_angle(quarter)).x > anchor.x + CHAIN * 0.8);
         // Up, then round under the log, then up again.
-        assert!(spikes_up(spin(0.0, 0)));
-        assert!(!spikes_up(spin(SPIN_PERIOD / 2.0, 0)));
-        assert!(spikes_up(spin(SPIN_PERIOD, 0)));
-        // The next log is a little behind.
-        assert!((spin(0.0, 1) - SPIN_STAGGER).abs() < 1e-5);
+        assert!(spikes_up(spin(0.0, 1)));
+        assert!(!spikes_up(spin(SPIN_PERIOD / 2.0, 1)));
+        assert!(spikes_up(spin(SPIN_PERIOD, 1)));
+        // Each piece an eighth of a turn on from the one before; a picture
+        // later, the pattern has moved one piece along.
+        assert!(((spin(0.0, 2) - spin(0.0, 1)).rem_euclid(1.0) - SPIN_STAGGER).abs() < 1e-5);
+        let next = SPIN_PERIOD / 8.0;
+        assert!((spin(next, 2) - spin(0.0, 1)).abs() < 1e-4);
+        assert_eq!((spin_picture(0.0), spin_picture(next * 1.01), spin_picture(SPIN_PERIOD * 1.001)), (0, 1, 0));
     }
 }

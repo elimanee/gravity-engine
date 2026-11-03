@@ -515,22 +515,72 @@ const EXE: Builtin = Builtin {
 const BUILTINS: [&Builtin; 5] = [&TAILS, &KNUCKLES, &AMY, &AMY_S1, &EXE];
 
 /// The file a character's sheet is kept in (Sonic: any other PNG).
-fn file_names(c: Character) -> &'static [&'static str] {
-    match c {
-        Character::Sonic => &["sheet.png"],
-        Character::Tails => &["tails.png"],
-        Character::Knuckles => &["knuckles.png"],
-        Character::Amy => &["amy.png", "amy.webp"],
-        Character::Exe => &["exe.png"],
+/// Whose a sheet is: a character's, or the zone's (the pictures of its
+/// ground and gimmicks).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Owner {
+    Char(Character),
+    Zone,
+}
+
+impl From<Character> for Owner {
+    fn from(c: Character) -> Owner {
+        Owner::Char(c)
     }
 }
 
-/// Whether `c` has a sheet in the Sonic folder (usable or not).
-pub fn has_sheet(c: Character) -> bool {
+impl Owner {
+    pub const ALL: [Owner; 6] = [
+        Owner::Char(Character::Sonic),
+        Owner::Char(Character::Tails),
+        Owner::Char(Character::Knuckles),
+        Owner::Char(Character::Amy),
+        Owner::Char(Character::Exe),
+        Owner::Zone,
+    ];
+
+    pub fn character(self) -> Option<Character> {
+        match self {
+            Owner::Char(c) => Some(c),
+            Owner::Zone => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Owner::Char(c) => c.label(),
+            Owner::Zone => "Zone",
+        }
+    }
+
+    pub fn short(self) -> &'static str {
+        match self {
+            Owner::Char(c) => c.short(),
+            Owner::Zone => "Zone",
+        }
+    }
+}
+
+fn file_names(o: Owner) -> &'static [&'static str] {
+    match o {
+        Owner::Char(Character::Sonic) => &["sheet.png"],
+        Owner::Char(Character::Tails) => &["tails.png"],
+        Owner::Char(Character::Knuckles) => &["knuckles.png"],
+        Owner::Char(Character::Amy) => &["amy.png", "amy.webp"],
+        Owner::Char(Character::Exe) => &["exe.png"],
+        Owner::Zone => &[ZONE_FILE, "zone.webp"],
+    }
+}
+
+/// The zone's sheet.
+pub const ZONE_FILE: &str = "zone.png";
+
+/// Whether `o` has a sheet in the Sonic folder (usable or not).
+pub fn has_sheet(o: impl Into<Owner>) -> bool {
     let Some(dir) = dir().filter(|d| d.is_dir()) else { return false };
-    match c {
-        Character::Sonic => find(&dir).is_ok(),
-        c => file_names(c).iter().any(|n| dir.join(n).is_file()),
+    match o.into() {
+        Owner::Char(Character::Sonic) => find(&dir).is_ok(),
+        o => file_names(o).iter().any(|n| dir.join(n).is_file()),
     }
 }
 
@@ -719,12 +769,15 @@ pub struct Sheet {
     anims: HashMap<String, Anim>,
     scale: f32,
     pub name: String,
+    /// The zone's picture as drawn, for its ground (none for a character).
+    pub image: Option<std::rc::Rc<image::RgbaImage>>,
 }
 
-/// The sheets of all the characters (each one optional).
+/// The sheets of all the characters (each one optional), and the zone's.
 #[derive(Default)]
 pub struct Sheets {
     sheets: Vec<(Character, Sheet)>,
+    pub zone: Option<Sheet>,
 }
 
 impl Sheets {
@@ -750,6 +803,10 @@ impl Sheets {
                 Err(e) => errors.push(format!("{}: {e}", c.label())),
             }
         }
+        match Sheet::load(Owner::Zone) {
+            Ok(z) => out.zone = z,
+            Err(e) => errors.push(format!("Zone: {e}")),
+        }
         (out, errors)
     }
 }
@@ -758,7 +815,7 @@ impl Sheets {
 /// regions edited on a sheet)?
 fn is_not_sonics(p: &Path) -> bool {
     use crate::game::sprites::{MONITORS, OBJECTS};
-    let others = Character::ALL.iter().skip(1).flat_map(|&c| file_names(c).iter().copied());
+    let others = Owner::ALL.iter().skip(1).flat_map(|&o| file_names(o).iter().copied());
     p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
         n == OBJECTS || n == MONITORS || n.ends_with(".regions.json") || others.clone().any(|o| o == n)
     })
@@ -1071,13 +1128,15 @@ struct Prepared {
     known: bool,
 }
 
-/// `c`'s sheet in the Sonic folder, if there is one, cut by its layout.
-fn prepare(c: Character) -> Result<Option<Prepared>, String> {
+/// `o`'s sheet in the Sonic folder, if there is one, cut by its layout.
+fn prepare(o: Owner) -> Result<Option<Prepared>, String> {
     let Some(dir) = dir().filter(|d| d.is_dir()) else { return Ok(None) };
-    if c == Character::Sonic {
-        return prepare_sonic(&dir);
-    }
-    let Some(path) = file_names(c).iter().map(|n| dir.join(n)).find(|p| p.is_file()) else { return Ok(None) };
+    let c = match o {
+        Owner::Char(Character::Sonic) => return prepare_sonic(&dir),
+        Owner::Char(c) => c,
+        Owner::Zone => return prepare_zone(&dir),
+    };
+    let Some(path) = file_names(o).iter().map(|n| dir.join(n)).find(|p| p.is_file()) else { return Ok(None) };
     let original = image::open(&path).map_err(|e| e.to_string())?.to_rgba8();
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     let mut img = original.clone();
@@ -1099,6 +1158,24 @@ fn prepare(c: Character) -> Result<Option<Prepared>, String> {
     let anims = b.specs.iter().map(|s| (s.name.to_string(), cut(&img, b, s))).collect();
     let background = b.background.to_vec();
     Ok(Some(Prepared { original, image: img, background, soft: b.lossy, scale: 1.0, name, anims, known: true }))
+}
+
+/// The zone's sheet: cut by its built-in layout when it is one the game
+/// knows (by its size), else only by the regions edited on it.
+fn prepare_zone(dir: &Path) -> Result<Option<Prepared>, String> {
+    let o = Owner::Zone;
+    let Some(path) = file_names(o).iter().map(|n| dir.join(n)).find(|p| p.is_file()) else { return Ok(None) };
+    let original = image::open(&path).map_err(|e| e.to_string())?.to_rgba8();
+    let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let mut img = original.clone();
+    let known = img.dimensions() == super::zone::GHZ_SIZE;
+    let (background, anims) = if known {
+        clear_background(&mut img, &super::zone::GHZ_BACKGROUND);
+        (super::zone::GHZ_BACKGROUND.to_vec(), super::zone::ghz())
+    } else {
+        (vec![], HashMap::new())
+    };
+    Ok(Some(Prepared { original, image: img, background, soft: false, scale: 1.0, name, anims, known }))
 }
 
 fn prepare_sonic(dir: &Path) -> Result<Option<Prepared>, String> {
@@ -1171,6 +1248,8 @@ pub struct Editable {
     pub extended: bool,
     /// Its pixels were painted on: saving writes it again, in place.
     pub painted: bool,
+    /// Whose it is.
+    pub owner: Owner,
     /// Its colours swapped for others, always and when Super.
     pub recolour: Vec<Swap>,
     pub super_colours: Vec<Swap>,
@@ -1179,8 +1258,9 @@ pub struct Editable {
 }
 
 impl Editable {
-    /// `c`'s sheet, if there is one.
-    pub fn open(c: Character) -> Result<Option<Editable>, String> {
+    /// `o`'s sheet, if there is one.
+    pub fn open(o: impl Into<Owner>) -> Result<Option<Editable>, String> {
+        let c = o.into();
         let Some(p) = prepare(c)? else { return Ok(None) };
         let mut ed = Editable {
             texture: upload(&p.image),
@@ -1196,6 +1276,7 @@ impl Editable {
             known: p.known,
             extended: false,
             painted: false,
+            owner: c,
             recolour: vec![],
             super_colours: vec![],
             super_texture: None,
@@ -1346,14 +1427,16 @@ impl Editable {
             anims: self.anims.clone(),
             scale: self.scale,
             name: self.name.clone(),
+            image: (self.owner == Owner::Zone).then(|| std::rc::Rc::new(self.drawn(false))),
         }
     }
 }
 
 impl Sheet {
-    /// `c`'s sheet in the Sonic folder, if there is one, with the regions
+    /// `o`'s sheet in the Sonic folder, if there is one, with the regions
     /// edited on it.
-    pub fn load(c: Character) -> Result<Option<Sheet>, String> {
+    pub fn load(o: impl Into<Owner>) -> Result<Option<Sheet>, String> {
+        let c = o.into();
         let Some(mut p) = prepare(c)? else { return Ok(None) };
         let (w, h) = p.image.dimensions();
         let regions = Regions::read(c, (w, h))?;
@@ -1374,10 +1457,13 @@ impl Sheet {
             }
             swap_colours(&mut p.image, &r.recolour, soft);
         }
-        if p.anims.get("idle").is_none_or(|a| a.pics.is_empty()) {
+        let zone = c == Owner::Zone;
+        if !zone && p.anims.get("idle").is_none_or(|a| a.pics.is_empty()) {
             return Err("no \"idle\" picture: give it one with Edit sprite regions…".into());
         }
-        Ok(Some(Sheet { texture: upload(&p.image), super_texture, anims: p.anims, scale, name: p.name }))
+        let texture = upload(&p.image);
+        let image = zone.then(|| std::rc::Rc::new(p.image));
+        Ok(Some(Sheet { texture, super_texture, anims: p.anims, scale, name: p.name, image }))
     }
 
     /// Copy a chosen sheet into the Sonic folder: as the character or the
@@ -1391,7 +1477,12 @@ impl Sheet {
             std::fs::copy(png, dir.join(name)).map_err(|e| e.to_string())?;
             return Ok(name.to_string());
         }
+        if size == super::zone::GHZ_SIZE {
+            std::fs::copy(png, dir.join(ZONE_FILE)).map_err(|e| e.to_string())?;
+            return Ok(ZONE_FILE.to_string());
+        }
         if let Some(c) = character_of(size) {
+            let c = Owner::Char(c);
             for n in file_names(c) {
                 let _ = std::fs::remove_file(dir.join(n));
             }
@@ -1417,10 +1508,11 @@ impl Sheet {
 
     /// Make `img` `c`'s sheet, as a PNG under the character's name, in place
     /// of the one it had (Sonic's layout too). Returns the file it became.
-    pub fn write_for(img: &image::RgbaImage, c: Character) -> Result<String, String> {
+    pub fn write_for(img: &image::RgbaImage, c: impl Into<Owner>) -> Result<String, String> {
+        let c = c.into();
         let dir = dir().ok_or("no config directory")?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        if c == Character::Sonic {
+        if c == Owner::Char(Character::Sonic) {
             for old in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
                 let p = old.path();
                 let theirs = p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png") || e == "json");
@@ -1440,12 +1532,13 @@ impl Sheet {
 
     /// Write `img` over `c`'s sheet `name`, as a PNG (one in another format
     /// gives way to it). Returns the file it became.
-    pub fn rewrite(img: &image::RgbaImage, c: Character, name: &str) -> Result<String, String> {
+    pub fn rewrite(img: &image::RgbaImage, c: impl Into<Owner>, name: &str) -> Result<String, String> {
+        let c = c.into();
         let dir = dir().ok_or("no config directory")?;
         let was = dir.join(name);
         let png = if name.to_lowercase().ends_with(".png") {
             was.clone()
-        } else if c == Character::Sonic {
+        } else if c == Owner::Char(Character::Sonic) {
             was.with_extension("png")
         } else {
             dir.join(file_names(c)[0])
@@ -1460,11 +1553,12 @@ impl Sheet {
     /// Make `src` (any picture file) `c`'s sheet, as a PNG under the
     /// character's name; the sheet it had goes (Sonic's layout too). The
     /// regions beside it (`<name>.regions.json`), if any, come too.
-    pub fn install_for(src: &Path, c: Character) -> Result<String, String> {
+    pub fn install_for(src: &Path, c: impl Into<Owner>) -> Result<String, String> {
+        let c = c.into();
         let dir = dir().ok_or("no config directory")?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let img = image::open(src).map_err(|e| e.to_string())?;
-        if c == Character::Sonic {
+        if c == Owner::Char(Character::Sonic) {
             for old in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
                 let p = old.path();
                 let theirs = p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png") || e == "json");
@@ -1492,6 +1586,28 @@ impl Sheet {
 
     fn anim(&self, name: &str) -> Option<&Anim> {
         self.anims.get(name).filter(|a| !a.pics.is_empty())
+    }
+
+    /// The pictures of `name`, when the sheet has some.
+    pub fn pics(&self, name: &str) -> Option<&[Pic]> {
+        self.anim(name).map(|a| a.pics.as_slice())
+    }
+
+    /// World px per sheet px.
+    pub fn k(&self) -> f32 {
+        super::SCALE / self.scale.max(0.01)
+    }
+
+    /// Picture `pic` with its centre at `at` (world px).
+    pub fn put(&self, pic: Pic, at: Vec2) {
+        self.blit_with(&self.texture, pic, at, 1.0, 0.0, WHITE);
+    }
+
+    /// The part `src` of the sheet, its top-left at `at` (world px).
+    pub fn put_part(&self, src: Rect, at: Vec2) {
+        let params =
+            DrawTextureParams { source: Some(src), dest_size: Some(src.size() * self.k()), ..Default::default() };
+        draw_texture_ex(&self.texture, at.x, at.y, WHITE, params);
     }
 
     /// The animation for his state, which of its pictures, and its name.

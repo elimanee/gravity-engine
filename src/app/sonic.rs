@@ -71,6 +71,7 @@ impl App {
     pub(super) fn load_sonic_sheet(&mut self) {
         let (sheets, errors) = Sheets::load();
         self.sonic_sheet = sheets;
+        self.zone_version += 1;
         for e in errors {
             self.toasts.warn(format!("Sprite sheet not used: {e}"));
         }

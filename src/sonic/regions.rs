@@ -7,8 +7,7 @@
 //! same names, and only count for a sheet of the size they were made on
 //! (another sheet of that character ignores them).
 
-use super::sheet::{Anim, Pic, Repeat, Swap, Turn};
-use super::Character;
+use super::sheet::{Anim, Owner, Pic, Repeat, Swap, Turn};
 use macroquad::prelude::{vec2, Rect};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -135,13 +134,13 @@ fn to_pic(r: &Region) -> Pic {
     Pic { src: Rect::new(x, y, w, h), centre: vec2(r.centre[0], r.centre[1]), flip: r.flip, hold: r.hold }
 }
 
-/// The file `c`'s regions are kept in.
-pub fn file_name(c: Character) -> String {
-    format!("{}.regions.json", c.short().to_lowercase())
+/// The file `o`'s regions are kept in.
+pub fn file_name(o: impl Into<Owner>) -> String {
+    format!("{}.regions.json", o.into().short().to_lowercase())
 }
 
-fn path(c: Character) -> Option<PathBuf> {
-    super::sheet::dir().map(|d| d.join(file_name(c)))
+fn path(o: Owner) -> Option<PathBuf> {
+    super::sheet::dir().map(|d| d.join(file_name(o)))
 }
 
 impl Regions {
@@ -177,15 +176,16 @@ impl Regions {
 
     /// `c`'s regions for a sheet of this size (none: no file, or one made
     /// on another sheet).
-    pub fn read(c: Character, size: (u32, u32)) -> Result<Option<Regions>, String> {
+    pub fn read(c: impl Into<Owner>, size: (u32, u32)) -> Result<Option<Regions>, String> {
+        let c = c.into();
         let Some(text) = path(c).and_then(|p| std::fs::read_to_string(p).ok()) else { return Ok(None) };
         let r: Regions = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", file_name(c)))?;
         Ok((r.size == [size.0, size.1]).then_some(r))
     }
 
     /// Keep them as `c`'s (no change left: the file goes).
-    pub fn save(&self, c: Character) -> Result<(), String> {
-        let p = path(c).ok_or("no config directory")?;
+    pub fn save(&self, c: impl Into<Owner>) -> Result<(), String> {
+        let p = path(c.into()).ok_or("no config directory")?;
         if self.is_empty() {
             return match std::fs::remove_file(&p) {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
@@ -294,6 +294,7 @@ impl Regions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sonic::Character;
 
     fn pic(x: f32, cx: f32) -> Pic {
         Pic::new(Rect::new(x, 2.0, 30.0, 40.0), vec2(cx, 21.0))
@@ -364,6 +365,7 @@ mod tests {
     fn regions_files_are_named_after_the_character_and_older_ones_still_read() {
         assert_eq!(file_name(Character::Exe), "exe.regions.json");
         assert_eq!(file_name(Character::Knuckles), "knuckles.regions.json");
+        assert_eq!(file_name(Owner::Zone), "zone.regions.json");
         let older =
             r#"{"size": [10, 10], "animations": {"idle": {"frames": [{"rect": [0, 0, 5, 5], "centre": [2.5, 3]}]}}}"#;
         let r: Regions = serde_json::from_str(older).unwrap();

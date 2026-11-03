@@ -317,7 +317,7 @@ impl App {
     pub(super) fn draw_game(&self) {
         let Some(g) = &self.game else { return };
         let t = get_time() as f32;
-        game_art::draw(g, t, self.game_sprites.as_ref());
+        game_art::draw(g, t, self.game_sprites.as_ref(), self.sonic_sheet.zone.as_ref());
         self.draw_hunter(g, t);
     }
 

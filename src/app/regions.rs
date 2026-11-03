@@ -9,9 +9,9 @@
 
 use super::*;
 use crate::library::acts;
-use crate::sonic::sheet::{self, detect_sprites, find_sprite, Anim, Editable, Pic, Repeat, Turn, FRONT_FPS};
+use crate::sonic::sheet::{self, detect_sprites, find_sprite, Anim, Editable, Owner, Pic, Repeat, Turn, FRONT_FPS};
 use crate::sonic::{body_radii, Character};
-use crate::sonic::{maker, regions};
+use crate::sonic::{maker, regions, zone};
 use crate::ui::theme::*;
 use crate::ui::widgets::clip;
 
@@ -127,10 +127,10 @@ const GIF_ZOOM: u32 = 3;
 pub(super) enum Ask {
     Close,
     Save,
-    /// Edit this character's sheet instead.
-    Open(Character),
-    /// Choose a picture to be this character's sheet.
-    OpenSheet(Character),
+    /// Edit this character's (or the zone's) sheet instead.
+    Open(Owner),
+    /// Choose a picture to be this character's (or the zone's) sheet.
+    OpenSheet(Owner),
     /// Play the character as edited.
     Try,
     /// Make a sheet of this character: as the game draws it, or (true)
@@ -218,7 +218,7 @@ enum Handle {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Cmd {
-    Character(Character),
+    Owner(Owner),
     OpenSheet,
     Generate,
     Grid,
@@ -370,9 +370,10 @@ impl Step {
 const UNDO_PIXELS: usize = 256 << 20;
 
 pub(super) struct RegionEditor {
-    pub character: Character,
-    /// The characters with a sheet.
-    available: Vec<Character>,
+    /// Whose sheet: a character's, or the zone's.
+    pub owner: Owner,
+    /// The characters (and zone) with a sheet.
+    available: Vec<Owner>,
     pub sheet: Editable,
     /// The sprites found on the sheet, and whether it has any transparency.
     sprites: Vec<Rect>,
@@ -452,9 +453,9 @@ fn num(v: f32) -> String {
     }
 }
 
-/// "Sonic's", "Tails'".
-fn whose(c: Character) -> String {
-    let name = c.label();
+/// "Sonic's", "Tails'", "Zone's".
+fn whose(c: impl Into<Owner>) -> String {
+    let name = c.into().label();
     if name.ends_with('s') {
         format!("{name}'")
     } else {
@@ -597,9 +598,14 @@ fn pace(fps: Option<f32>) -> String {
 }
 
 impl RegionEditor {
-    pub fn new(character: Character, available: Vec<Character>, mut sheet: Editable) -> Self {
+    pub fn new(owner: Owner, available: Vec<Owner>, mut sheet: Editable) -> Self {
+        let own: &[(&str, &str)] = match owner {
+            Owner::Char(c) => extras(c),
+            Owner::Zone => &[],
+        };
+        let listed = if owner == Owner::Zone { zone::TILES } else { COMMON };
         let mut names: Vec<(String, &'static str)> =
-            COMMON.iter().chain(extras(character)).map(|&(n, what)| (n.to_string(), what)).collect();
+            listed.iter().chain(own).map(|&(n, what)| (n.to_string(), what)).collect();
         let mut more: Vec<String> =
             sheet.anims.keys().filter(|k| !names.iter().any(|(n, _)| n == *k)).cloned().collect();
         more.sort();
@@ -623,7 +629,7 @@ impl RegionEditor {
             super_colours: sheet.super_colours.clone(),
         };
         let mut ed = RegionEditor {
-            character,
+            owner,
             available,
             sheet,
             sprites: vec![],
@@ -725,15 +731,23 @@ impl RegionEditor {
         }
     }
 
-    /// How far below the centre the feet are (sheet px), for a standing
-    /// animation; none for one centred in the middle.
-    fn feet(&self) -> Option<f32> {
-        (!MIDDLE.contains(&self.name())).then(|| body_radii(self.character, false).1 * self.sheet.scale)
+    /// The character's: none for the zone's tiles.
+    fn character(&self) -> Option<Character> {
+        self.owner.character()
     }
 
-    /// The character's half width and half height in this animation (sheet px).
+    /// How far below the centre the feet are (sheet px), for a standing
+    /// animation; none for one centred in the middle (and the zone's tiles).
+    fn feet(&self) -> Option<f32> {
+        let c = self.character()?;
+        (!MIDDLE.contains(&self.name())).then(|| body_radii(c, false).1 * self.sheet.scale)
+    }
+
+    /// The character's half width and half height in this animation (sheet
+    /// px; nothing for the zone's tiles).
     fn radii(&self) -> Vec2 {
-        let (w, h) = body_radii(self.character, CURLED.contains(&self.name()));
+        let Some(c) = self.character() else { return Vec2::ZERO };
+        let (w, h) = body_radii(c, CURLED.contains(&self.name()));
         vec2(w, h) * self.sheet.scale
     }
 
@@ -949,7 +963,7 @@ impl RegionEditor {
         if self.chosen().is_empty() {
             return;
         }
-        let hr = body_radii(self.character, false).1 * self.sheet.scale;
+        let hr = self.character().map_or(0.0, |c| body_radii(c, false).1 * self.sheet.scale);
         let mut missed = 0;
         let chosen = self.chosen();
         let fitted: Vec<(usize, Option<Pic>)> = chosen
@@ -1196,7 +1210,7 @@ impl RegionEditor {
             self.notes.push(Note::Warn("No folder to keep the GIF in".into()));
             return;
         };
-        let stem = format!("{}-{}", self.character.short().to_lowercase(), self.name());
+        let stem = format!("{}-{}", self.owner.short().to_lowercase(), self.name());
         let free = (1..).map(|k| if k == 1 { stem.clone() } else { format!("{stem}-{k}") });
         let Some(path) = free.take(999).map(|n| dir.join(format!("{n}.gif"))).find(|p| !p.exists()) else { return };
         let made = std::fs::create_dir_all(&dir)
@@ -1368,18 +1382,18 @@ impl RegionEditor {
         // Pictures were added below it: the sheet is written again, whole;
         // painted on, it is written again in place.
         if self.sheet.extended {
-            self.sheet.name = sheet::Sheet::write_for(&self.sheet.original, self.character)?;
+            self.sheet.name = sheet::Sheet::write_for(&self.sheet.original, self.owner)?;
         } else if self.sheet.painted {
-            self.sheet.name = sheet::Sheet::rewrite(&self.sheet.original, self.character, &self.sheet.name)?;
+            self.sheet.name = sheet::Sheet::rewrite(&self.sheet.original, self.owner, &self.sheet.name)?;
         }
         self.sheet.painted = false;
-        r.save(self.character)?;
+        r.save(self.owner)?;
         self.saved = self.sheet.anims.clone();
         self.saved_settings = self.settings();
         self.leaving = None;
-        let file = regions::file_name(self.character);
+        let file = regions::file_name(self.owner);
         Ok(if r.is_empty() {
-            format!("{} sheet is back to its own layout", whose(self.character))
+            format!("{} sheet is back to its own layout", whose(self.owner))
         } else if no_idle {
             format!("Saved {file}: the game will use it once \"idle\" has a picture")
         } else {
@@ -1403,9 +1417,9 @@ impl RegionEditor {
         };
         // The characters, after the title.
         let mut x = 16.0 + measure_bold("Sprite regions", 18.0) + 24.0;
-        for c in Character::ALL {
-            push(Rect::new(x, 10.0, 74.0, 32.0), c.short(), Cmd::Character(c), c == self.character, true);
-            x += 80.0;
+        for o in Owner::ALL {
+            push(Rect::new(x, 10.0, 70.0, 32.0), o.short(), Cmd::Owner(o), o == self.owner, true);
+            x += 75.0;
         }
         let mut x = top.w - 16.0;
         let dirty = self.dirty();
@@ -1443,7 +1457,8 @@ impl RegionEditor {
         });
         let half = (b.w - 26.0) / 2.0;
         push(Rect::new(b.x + 10.0, b.y + 126.0, half, 26.0), "Open…", Cmd::OpenSheet, false, true);
-        push(Rect::new(b.x + 16.0 + half, b.y + 126.0, half, 26.0), "Generate…", Cmd::Generate, false, true);
+        let generates = self.character().is_some();
+        push(Rect::new(b.x + 16.0 + half, b.y + 126.0, half, 26.0), "Generate…", Cmd::Generate, false, generates);
         push(Rect::new(b.x + 10.0, b.y + 158.0, half, 26.0), "Grid", Cmd::Grid, self.grid.is_some(), true);
         push(Rect::new(b.x + 16.0 + half, b.y + 158.0, half, 26.0), "Import…", Cmd::Import, false, true);
         push(Rect::new(b.x + 10.0, b.y + 190.0, half, 26.0), "Paint", Cmd::Paint, self.paint.is_some(), true);
@@ -1679,7 +1694,7 @@ impl RegionEditor {
         match &self.maker {
             Some(Maker::Choose(c)) => {
                 let who = c.label();
-                let here = *c == self.character && !self.rows().is_empty();
+                let here = Owner::Char(*c) == self.owner && !self.rows().is_empty();
                 items.push((
                     "The game's drawing".into(),
                     format!("{who} as the game draws them, an animation a row: to play, or to paint over"),
@@ -1751,7 +1766,7 @@ impl RegionEditor {
             MakerCmd::FromSheet => Some(Ask::Generate(c, true)),
             MakerCmd::OpenPicture => {
                 self.maker = None;
-                self.leave(Ask::OpenSheet(c))
+                self.leave(Ask::OpenSheet(Owner::Char(c)))
             }
             MakerCmd::UseIt => self.leave(Ask::UseGenerated(c)),
             MakerCmd::Close => {
@@ -1865,11 +1880,17 @@ impl RegionEditor {
 
     fn command(&mut self, cmd: Cmd) -> Option<Ask> {
         match cmd {
-            Cmd::Character(c) if c == self.character => {}
-            Cmd::Character(c) if self.available.contains(&c) => return self.leave(Ask::Open(c)),
+            Cmd::Owner(o) if o == self.owner => {}
+            Cmd::Owner(o) if self.available.contains(&o) => return self.leave(Ask::Open(o)),
+            // No zone sheet yet: choose a picture for it.
+            Cmd::Owner(Owner::Zone) => return self.leave(Ask::OpenSheet(Owner::Zone)),
             // No sheet yet: open a picture, or let the game draw one.
-            Cmd::Character(c) => self.maker = Some(Maker::Choose(c)),
-            Cmd::Generate => self.maker = Some(Maker::Choose(self.character)),
+            Cmd::Owner(Owner::Char(c)) => self.maker = Some(Maker::Choose(c)),
+            Cmd::Generate => {
+                if let Some(c) = self.character() {
+                    self.maker = Some(Maker::Choose(c));
+                }
+            }
             Cmd::Grid => {
                 self.grid = match self.grid {
                     Some(_) => None,
@@ -1890,7 +1911,7 @@ impl RegionEditor {
             }
             Cmd::GridAdd => self.grid_add(),
             Cmd::GridCancel => self.grid = None,
-            Cmd::OpenSheet => return self.leave(Ask::OpenSheet(self.character)),
+            Cmd::OpenSheet => return self.leave(Ask::OpenSheet(self.owner)),
             Cmd::Try => return Some(Ask::Try),
             Cmd::Save => return Some(Ask::Save),
             Cmd::Close => return self.leave(Ask::Close),
@@ -2460,7 +2481,8 @@ impl RegionEditor {
     fn draw_list(&self, list: Rect, m: Vec2) {
         rrect(list, RADIUS, SURFACE);
         rrect_lines(list, RADIUS, 1.0, BORDER);
-        text_bold("ANIMATIONS", list.x + 12.0, list.y + 20.0, 11.0, TEXT_MUTED);
+        let title = if self.owner == Owner::Zone { "TILES" } else { "ANIMATIONS" };
+        text_bold(title, list.x + 12.0, list.y + 20.0, 11.0, TEXT_MUTED);
         let none = Anim::default();
         for (row, i) in (self.scroll..self.names.len()).take(self.list_rows(list)).enumerate() {
             let name = &self.names[i].0;
@@ -2748,7 +2770,7 @@ impl RegionEditor {
     /// The preview's zoom: the same for every animation of the sheet, so
     /// they compare.
     fn preview_zoom(&self, pv: Rect) -> f32 {
-        let stand = body_radii(self.character, false).1 * self.sheet.scale;
+        let stand = self.character().map_or(0.0, |c| body_radii(c, false).1 * self.sheet.scale);
         let all = self.sheet.anims.values().flat_map(all_pics);
         let (half, up) =
             all.fold((0.0f32, 0.0f32), |(h, u), p| (h.max(p.centre.x).max(p.src.w - p.centre.x), u.max(p.centre.y)));
@@ -2981,9 +3003,9 @@ pub(super) struct RegionTest {
 impl App {
     /// Open the sprite region editor on `c`'s sheet (else the character
     /// played, else the first with a sheet; with none, ask for one).
-    pub(super) fn open_regions(&mut self, c: Option<Character>) {
-        let available: Vec<Character> = Character::ALL.into_iter().filter(|&c| sheet::has_sheet(c)).collect();
-        let wanted = c.unwrap_or(self.s.character);
+    pub(super) fn open_regions(&mut self, c: Option<Owner>) {
+        let available: Vec<Owner> = Owner::ALL.into_iter().filter(|&o| sheet::has_sheet(o)).collect();
+        let wanted = c.unwrap_or(Owner::Char(self.s.character));
         let c = if available.contains(&wanted) {
             wanted
         } else if let (None, Some(&first)) = (c, available.first()) {
@@ -3000,7 +3022,7 @@ impl App {
     }
 
     /// Choose any picture to be `c`'s sheet, then edit it.
-    fn choose_sheet(&mut self, c: Character) {
+    fn choose_sheet(&mut self, c: Owner) {
         let types = ["png", "PNG", "webp", "WEBP", "gif", "GIF", "bmp", "BMP", "jpg", "JPG", "jpeg", "JPEG"];
         let Some(path) = FileDialog::new().add_filter("Sprite sheet", &types).pick_file() else { return };
         match sheet::Sheet::install_for(&path, c) {
@@ -3056,7 +3078,7 @@ impl App {
     }
 
     /// Into the editor from the command line (`--sprite-regions`).
-    pub fn edit_regions(&mut self, c: Option<Character>) {
+    pub fn edit_regions(&mut self, c: Option<Owner>) {
         self.open_regions(c);
     }
 
@@ -3136,7 +3158,7 @@ impl App {
                 self.toasts.success(format!("{} now uses {name}", c.label()));
                 self.sonic_sheet_tried = true;
                 self.load_sonic_sheet();
-                self.open_regions(Some(c));
+                self.open_regions(Some(Owner::Char(c)));
             }
             Err(e) => self.toasts.error(format!("Could not use the sheet: {e}")),
         }
@@ -3159,11 +3181,12 @@ impl App {
     /// comes back to the editor, and to the scene as it was.
     fn try_regions(&mut self) {
         let Some(ed) = self.regions.as_ref() else { return };
-        if ed.sheet.anims.get("idle").is_none_or(|a| a.pics.is_empty()) {
+        let zone = ed.owner == Owner::Zone;
+        if !zone && ed.sheet.anims.get("idle").is_none_or(|a| a.pics.is_empty()) {
             self.toasts.warn("Give \"idle\" a picture first");
             return;
         }
-        let (c, edited) = (ed.character, ed.sheet.sheet());
+        let (owner, edited) = (ed.owner, ed.sheet.sheet());
         let water =
             self.s.water.then_some(scene::SceneWater { level: self.s.water_level, density: self.s.water_density });
         let mut sc = scene::capture(&self.world, &self.objects, &self.links, &self.zones, water);
@@ -3186,8 +3209,16 @@ impl App {
             self.sonic_sheet_tried = true;
             self.load_sonic_sheet();
         }
-        self.sonic_sheet.set(c, edited);
-        self.s.character = c;
+        match owner {
+            Owner::Char(c) => {
+                self.sonic_sheet.set(c, edited);
+                self.s.character = c;
+            }
+            Owner::Zone => {
+                self.sonic_sheet.zone = Some(edited);
+                self.zone_version += 1;
+            }
+        }
         self.challenge = None;
         if !self.infinite() {
             self.set_world_size(4);
@@ -3197,7 +3228,9 @@ impl App {
         self.camera.zoom = 1.0;
         self.paused = false;
         self.library.fader.open = false;
-        self.toasts.info(format!("Trying {} sprites as edited  ·  Esc: back to the editor", whose(c)));
+        let what = if zone { "Trying the zone's tiles as edited (its gimmicks: run left)" } else { "Trying" };
+        let whom = if zone { String::new() } else { format!(" {} sprites as edited", whose(owner)) };
+        self.toasts.info(format!("{what}{whom}  ·  Esc: back to the editor"));
     }
 
     /// Esc while trying: back to the editor and the scene as it was.
@@ -3233,8 +3266,11 @@ impl App {
         if self.region_test.is_none() {
             return;
         }
-        let c = self.regions.as_ref().map_or(self.s.character, |ed| ed.character);
-        let s = format!("Trying {} sprites as edited  ·  Esc: back to the editor", whose(c));
+        let c = self.regions.as_ref().map_or(Owner::Char(self.s.character), |ed| ed.owner);
+        let s = match c {
+            Owner::Zone => "Trying the zone's tiles as edited  ·  Esc: back to the editor".to_string(),
+            c => format!("Trying {} sprites as edited  ·  Esc: back to the editor", whose(c)),
+        };
         let w = measure(&s, 13.0) + 28.0;
         let r = Rect::new((screen_width() - w) / 2.0, screen_height() - 52.0, w, 32.0);
         rrect(r, 10.0, alpha(SURFACE, 0.92));

@@ -19,6 +19,7 @@ pub mod maker;
 mod moves;
 pub mod regions;
 pub mod sheet;
+pub mod zone;
 
 pub use moves::Character;
 
