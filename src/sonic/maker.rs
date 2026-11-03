@@ -71,7 +71,8 @@ pub fn lay_out(rows: &[(String, Anim)], scale: f32) -> Layout {
         .flat_map(|(name, a)| {
             let body = (!a.pics.is_empty()).then(|| (name.clone(), unique(&a.pics)));
             let behind = (!a.behind.is_empty()).then(|| (format!("{name}  ·  behind"), unique(&a.behind)));
-            body.into_iter().chain(behind)
+            let front = (!a.front.is_empty()).then(|| (format!("{name}  ·  front"), unique(&a.front)));
+            body.into_iter().chain(behind).chain(front)
         })
         .collect();
     let natural = |pics: &[Pic]| pics.iter().map(|p| p.src.w + 2.0 * PAD + GAP).sum::<f32>() - GAP;
@@ -122,11 +123,12 @@ pub fn lay_out(rows: &[(String, Anim)], scale: f32) -> Layout {
         };
         let frames = if a.pics.is_empty() { vec![] } else { to_regions(&a.pics) };
         let behind = if a.behind.is_empty() { vec![] } else { to_regions(&a.behind) };
-        if frames.is_empty() && behind.is_empty() {
+        let front = if a.front.is_empty() { vec![] } else { to_regions(&a.front) };
+        if frames.is_empty() && behind.is_empty() && front.is_empty() {
             continue;
         }
-        let (fps, once, loop_from, repeats) = (a.fps, a.once, a.loop_from, a.repeats.clone());
-        animations.insert(name.clone(), AnimRegions { frames, behind, fps, once, loop_from, repeats });
+        let (fps, once, loop_from, repeats, turn) = (a.fps, a.once, a.loop_from, a.repeats.clone(), a.turn);
+        animations.insert(name.clone(), AnimRegions { frames, behind, front, fps, once, loop_from, repeats, turn });
     }
     let size = (width as u32, height as u32);
     let regions = Regions {
@@ -135,6 +137,7 @@ pub fn lay_out(rows: &[(String, Anim)], scale: f32) -> Layout {
         soft: false,
         scale: (scale != 1.0).then_some(scale),
         animations,
+        ..Default::default()
     };
     Layout { size, labels, boxes, regions }
 }
@@ -423,7 +426,7 @@ pub fn from_sheet(c: Character, name: &str, image: &image::RgbaImage, anims: &[(
     }
     let texture = upload(&image);
     let layout = lay_out(anims, scale);
-    let rects = anims.iter().flat_map(|(_, a)| a.pics.iter().chain(&a.behind).map(|p| p.src));
+    let rects = anims.iter().flat_map(|(_, a)| a.pics.iter().chain(&a.behind).chain(&a.front).map(|p| p.src));
     let banner = Banner {
         title: c.label().to_uppercase(),
         lines: vec![
@@ -460,7 +463,7 @@ pub fn animation_gif(
     let fps = anim.fps.unwrap_or(fps).max(0.1);
     // Room around the centre for every picture (mirrored ones turned round).
     let centre_of = |p: &Pic| vec2(if p.flip { p.src.w - p.centre.x } else { p.centre.x }, p.centre.y);
-    let all = anim.pics.iter().chain(&anim.behind);
+    let all = anim.pics.iter().chain(&anim.behind).chain(&anim.front);
     let (mut left, mut up, mut right, mut down) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
     for p in all {
         let c = centre_of(p);
@@ -511,6 +514,10 @@ pub fn animation_gif(
         }
         let p = &anim.pics[k];
         paint(&mut canvas, p);
+        // And those in front.
+        if !anim.front.is_empty() {
+            paint(&mut canvas, &anim.front[i % anim.front.len()]);
+        }
         let mut rgba = canvas.into_raw();
         let mut frame = Frame::from_rgba_speed(w as u16, h as u16, &mut rgba, 10);
         frame.delay = ((p.hold.max(0.01) / fps * 100.0).round() as u16).max(2);

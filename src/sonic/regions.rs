@@ -1,12 +1,13 @@
 //! What a player has made of a character's sheet with the sprite region
 //! editor: pictures moved, resized, recentred, added, removed, mirrored or
-//! held longer, animations' pace, and for a sheet the game does not know,
-//! its background colours and scale. They are kept beside the sheet in
+//! held longer, animations' pace, pieces in front and behind and how they
+//! turn, the character's colours changed (always, and when Super), and for
+//! a sheet the game does not know, its background colours and scale. They are kept beside the sheet in
 //! `<character>.regions.json`, replace the layout's own animations of the
 //! same names, and only count for a sheet of the size they were made on
 //! (another sheet of that character ignores them).
 
-use super::sheet::{Anim, Pic, Repeat};
+use super::sheet::{Anim, Pic, Repeat, Swap, Turn};
 use super::Character;
 use macroquad::prelude::{vec2, Rect};
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,10 @@ fn is_one(v: &f32) -> bool {
     *v == 1.0
 }
 
+fn is_ground(t: &Turn) -> bool {
+    *t == Turn::Ground
+}
+
 /// A picture: where it is on the sheet, where the character's centre is
 /// in it, whether it is mirrored and how long it shows.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -45,14 +50,17 @@ pub struct Region {
 }
 
 /// An animation's pictures in order, the pieces drawn behind them (Tails'
-/// tails), its pace (pictures a second; none: the games'), whether it
-/// plays once, and the picture it loops back to (from 0, the first: the
-/// ones before it open the animation once).
+/// tails) and in front, its pace (pictures a second; none: the games'),
+/// whether it plays once, the picture it loops back to (from 0, the first:
+/// the ones before it open the animation once), and how it turns with the
+/// ground.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AnimRegions {
     pub frames: Vec<Region>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub behind: Vec<Region>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub front: Vec<Region>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fps: Option<f32>,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -62,6 +70,36 @@ pub struct AnimRegions {
     /// Runs of pictures played several times over on the way.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repeats: Vec<Repeat>,
+    #[serde(default, skip_serializing_if = "is_ground")]
+    pub turn: Turn,
+}
+
+impl AnimRegions {
+    fn of(a: &Anim) -> AnimRegions {
+        AnimRegions {
+            frames: a.pics.iter().map(to_region).collect(),
+            behind: a.behind.iter().map(to_region).collect(),
+            front: a.front.iter().map(to_region).collect(),
+            fps: a.fps,
+            once: a.once,
+            loop_from: a.loop_from,
+            repeats: a.repeats.clone(),
+            turn: a.turn,
+        }
+    }
+
+    fn anim(&self) -> Anim {
+        Anim {
+            pics: self.frames.iter().map(to_pic).collect(),
+            behind: self.behind.iter().map(to_pic).collect(),
+            front: self.front.iter().map(to_pic).collect(),
+            fps: self.fps,
+            once: self.once,
+            loop_from: self.loop_from,
+            repeats: self.repeats.clone(),
+            turn: self.turn,
+        }
+    }
 }
 
 /// A `<character>.regions.json`.
@@ -78,6 +116,11 @@ pub struct Regions {
     /// Sheet pixels per guide pixel, when not the layout's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale: Option<f32>,
+    /// Colours of the sheet drawn as others: always, and when Super.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recolour: Vec<Swap>,
+    #[serde(default, rename = "super", skip_serializing_if = "Vec::is_empty")]
+    pub super_colours: Vec<Swap>,
     /// The animations changed (an empty one: the sheet has none of it).
     #[serde(default)]
     pub animations: BTreeMap<String, AnimRegions>,
@@ -109,10 +152,7 @@ impl Regions {
         for name in defaults.keys().chain(anims.keys()) {
             let (was, now) = (defaults.get(name).unwrap_or(&none), anims.get(name).unwrap_or(&none));
             if was != now {
-                let frames = now.pics.iter().map(to_region).collect();
-                let behind = now.behind.iter().map(to_region).collect();
-                let (fps, once, loop_from, repeats) = (now.fps, now.once, now.loop_from, now.repeats.clone());
-                animations.insert(name.clone(), AnimRegions { frames, behind, fps, once, loop_from, repeats });
+                animations.insert(name.clone(), AnimRegions::of(now));
             }
         }
         Regions { size: [size.0, size.1], animations, ..Default::default() }
@@ -120,16 +160,18 @@ impl Regions {
 
     /// Nothing differs from the sheet's own layout.
     pub fn is_empty(&self) -> bool {
-        self.animations.is_empty() && self.background.is_empty() && !self.soft && self.scale.is_none()
+        self.animations.is_empty()
+            && self.background.is_empty()
+            && !self.soft
+            && self.scale.is_none()
+            && self.recolour.is_empty()
+            && self.super_colours.is_empty()
     }
 
     /// Put these in place of the layout's animations of the same names.
     pub fn apply(&self, anims: &mut HashMap<String, Anim>) {
         for (name, a) in &self.animations {
-            let pics = a.frames.iter().map(to_pic).collect();
-            let behind = a.behind.iter().map(to_pic).collect();
-            let (fps, once, loop_from, repeats) = (a.fps, a.once, a.loop_from, a.repeats.clone());
-            anims.insert(name.clone(), Anim { pics, behind, fps, once, loop_from, repeats });
+            anims.insert(name.clone(), a.anim());
         }
     }
 
@@ -196,6 +238,9 @@ impl Regions {
                 if !a.behind.is_empty() {
                     fields.push(format!("\"behind\": {}", regions(&a.behind)));
                 }
+                if !a.front.is_empty() {
+                    fields.push(format!("\"front\": {}", regions(&a.front)));
+                }
                 if let Some(fps) = a.fps {
                     fields.push(format!("\"fps\": {}", num(fps)));
                 }
@@ -213,6 +258,9 @@ impl Regions {
                         .collect();
                     fields.push(format!("\"repeats\": [{}]", runs.join(", ")));
                 }
+                if a.turn != Turn::Ground {
+                    fields.push(format!("\"turn\": {}", serde_json::to_string(&a.turn).unwrap_or_default()));
+                }
                 format!("    {name}: {{\n      {}\n    }}", fields.join(",\n      "))
             })
             .collect();
@@ -226,6 +274,17 @@ impl Regions {
         }
         if let Some(scale) = self.scale {
             top.push(format!("\"scale\": {}", num(scale)));
+        }
+        let swaps = |ss: &[Swap]| {
+            let pairs: Vec<String> =
+                ss.iter().map(|[[a, b, c], [d, e, f]]| format!("[[{a}, {b}, {c}], [{d}, {e}, {f}]]")).collect();
+            format!("[\n    {}\n  ]", pairs.join(",\n    "))
+        };
+        if !self.recolour.is_empty() {
+            top.push(format!("\"recolour\": {}", swaps(&self.recolour)));
+        }
+        if !self.super_colours.is_empty() {
+            top.push(format!("\"super\": {}", swaps(&self.super_colours)));
         }
         top.push(format!("\"animations\": {{\n{}\n  }}", anims.join(",\n")));
         format!("{{\n  {}\n}}\n", top.join(",\n  "))
@@ -254,7 +313,13 @@ mod tests {
         let mut anims = defaults.clone();
         anims.get_mut("walk").unwrap().pics[1].centre.x = 16.5;
         anims.get_mut("bored").unwrap().pics.clear();
-        let dash = Anim { pics: vec![pic(160.0, 15.0)], behind: vec![pic(200.0, 9.0)], ..Default::default() };
+        let dash = Anim {
+            pics: vec![pic(160.0, 15.0)],
+            behind: vec![pic(200.0, 9.0)],
+            front: vec![pic(240.0, 5.0)],
+            turn: Turn::Steps,
+            ..Default::default()
+        };
         anims.insert("spindash".to_string(), dash);
         // Paced, played once, a picture mirrored and held twice as long.
         anims.get_mut("walk").unwrap().loop_from = 1;
@@ -266,6 +331,7 @@ mod tests {
         assert_eq!(r.animations.keys().collect::<Vec<_>>(), ["bored", "run", "spindash", "walk"]);
         assert!(r.animations["bored"].frames.is_empty(), "a cleared animation is kept as empty");
         (r.background, r.soft, r.scale) = (vec![[0, 128, 128]], true, Some(2.0));
+        (r.recolour, r.super_colours) = (vec![[[0, 0, 255], [200, 0, 0]]], vec![[[0, 0, 255], [255, 220, 0]]]);
         // Through the file's text and back over the layout.
         let text = r.to_json();
         assert!(text.contains(r#"{"rect": [160, 2, 30, 40], "centre": [15, 21]}"#), "{text}");
@@ -275,6 +341,16 @@ mod tests {
         assert!(text.contains(r#""loop_from": 1"#), "{text}");
         assert!(text.contains(r#""repeats": [{"from": 0, "to": 1, "times": 8}]"#), "{text}");
         assert!(text.contains(r#""background": [[0, 128, 128]]"#) && text.contains(r#""scale": 2"#), "{text}");
+        assert!(text.contains(r#""front": ["#) && text.contains(r#""turn": "steps""#), "{text}");
+        assert!(
+            text.contains(
+                r#""recolour": [
+    [[0, 0, 255], [200, 0, 0]]
+  ]"#
+            ),
+            "{text}"
+        );
+        assert!(text.contains(r#""super": ["#), "{text}");
         let back: Regions = serde_json::from_str(&text).unwrap();
         assert_eq!(back, r);
         let mut applied = defaults.clone();
@@ -293,8 +369,9 @@ mod tests {
         let r: Regions = serde_json::from_str(older).unwrap();
         let idle = &r.animations["idle"];
         assert!(idle.behind.is_empty() && idle.fps.is_none() && !idle.once && idle.loop_from == 0);
-        assert!(idle.repeats.is_empty());
+        assert!(idle.repeats.is_empty() && idle.front.is_empty() && idle.turn == Turn::Ground);
         assert_eq!((idle.frames[0].flip, idle.frames[0].hold), (false, 1.0));
         assert!(r.background.is_empty() && !r.soft && r.scale.is_none());
+        assert!(r.recolour.is_empty() && r.super_colours.is_empty());
     }
 }

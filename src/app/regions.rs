@@ -9,11 +9,14 @@
 
 use super::*;
 use crate::library::acts;
-use crate::sonic::sheet::{self, detect_sprites, find_sprite, Anim, Editable, Pic, Repeat};
+use crate::sonic::sheet::{self, detect_sprites, find_sprite, Anim, Editable, Pic, Repeat, Turn, FRONT_FPS};
 use crate::sonic::{body_radii, Character};
 use crate::sonic::{maker, regions};
 use crate::ui::theme::*;
 use crate::ui::widgets::clip;
+
+mod paint;
+use paint::{Paint, Palette};
 
 /// The animations every sheet can have, in the order listed, and when the
 /// game shows each.
@@ -113,7 +116,7 @@ const THUMB: f32 = 48.0;
 const THUMB_GAP: f32 = 6.0;
 
 /// The left panel's sheet settings, under the animations.
-const SHEET_BOX: f32 = 192.0;
+const SHEET_BOX: f32 = 224.0;
 
 /// GIFs of an animation: its pictures this many times as big, and the pace
 /// when it follows the games' (the preview's).
@@ -198,6 +201,11 @@ enum Drag {
     Centre(Vec2, Pic),
     /// The view, from this screen point and sheet origin.
     Pan(Vec2, Vec2),
+    /// Painting on the sheet.
+    Paint,
+    /// Choosing a colour: its shade (saturation and value) or its hue.
+    Shade,
+    Hue,
 }
 
 /// What of the selected picture is under the pointer.
@@ -235,6 +243,19 @@ enum Cmd {
     Onion,
     Body,
     Behind,
+    Front,
+    TurnLess,
+    TurnMore,
+    Paint,
+    Brush(paint::Brush),
+    ColourPicker,
+    SizeLess,
+    SizeMore,
+    Colours,
+    ColoursUsual,
+    ColoursSuper,
+    PutBack,
+    ToolDone,
     Slower,
     Faster,
     Once,
@@ -296,6 +317,9 @@ struct Layout {
     /// The background colours: where, which, and the index of a picked one
     /// (the layout's own cannot be taken away).
     swatches: Vec<(Rect, [u8; 3], Option<usize>)>,
+    /// The paint and colour tools' swatches, and the colour picker.
+    tool_swatches: Vec<(Rect, paint::Swatch)>,
+    picker: Option<Rect>,
 }
 
 /// Nudging the chosen pictures with the arrow keys.
@@ -312,7 +336,38 @@ struct Settings {
     background: Vec<[u8; 3]>,
     soft: bool,
     scale: f32,
+    recolour: Vec<sheet::Swap>,
+    super_colours: Vec<sheet::Swap>,
 }
+
+/// Which pictures of an animation are edited: the character's, or the
+/// pieces drawn behind (Tails' tails) or in front (dust, sparks…).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Layer {
+    Body,
+    Behind,
+    Front,
+}
+
+/// What an undo puts back: the animations, the sheet's pixels in a box
+/// (from its top-left), or its colours (usual and Super).
+enum Step {
+    Anims(HashMap<String, Anim>),
+    Pixels((u32, u32), image::RgbaImage),
+    Colours(Vec<sheet::Swap>, Vec<sheet::Swap>),
+}
+
+impl Step {
+    fn bytes(&self) -> usize {
+        match self {
+            Step::Pixels(_, img) => img.as_raw().len(),
+            _ => 0,
+        }
+    }
+}
+
+/// The most memory the pixels kept to undo may take.
+const UNDO_PIXELS: usize = 256 << 20;
 
 pub(super) struct RegionEditor {
     pub character: Character,
@@ -325,8 +380,8 @@ pub(super) struct RegionEditor {
     /// The animations listed, and when the game shows each.
     names: Vec<(String, &'static str)>,
     anim: usize,
-    /// Editing the pieces drawn behind (Tails' tails).
-    behind: bool,
+    /// The pictures edited: the character's, or the pieces behind or in front.
+    layer: Layer,
     /// The picture handles are on, and every picture chosen with it
     /// (sorted; it is one of them).
     selected: Option<usize>,
@@ -341,8 +396,8 @@ pub(super) struct RegionEditor {
     grabbed: Vec<(usize, Pic)>,
     /// The animations before the drag (to undo it).
     before: Option<HashMap<String, Anim>>,
-    undo: Vec<HashMap<String, Anim>>,
-    redo: Vec<HashMap<String, Anim>>,
+    undo: Vec<Step>,
+    redo: Vec<Step>,
     /// What was last saved (or found), to tell unsaved changes.
     saved: HashMap<String, Anim>,
     saved_settings: Settings,
@@ -367,6 +422,12 @@ pub(super) struct RegionEditor {
     pub maker: Option<Maker>,
     /// The grid tool, while in use.
     grid: Option<Grid>,
+    /// Painting on the sheet, and changing its colours, while in use.
+    paint: Option<Paint>,
+    palette: Option<Palette>,
+    /// The colours changed: the sheet is drawn again soon (not every frame
+    /// while a colour is dragged), then.
+    retexture: Option<f64>,
     pub notes: Vec<Note>,
 }
 
@@ -497,6 +558,20 @@ fn dashed_rect(r: Rect, color: Color) {
     }
 }
 
+/// An animation's pictures in `layer`.
+fn layer_of(a: &Anim, layer: Layer) -> &[Pic] {
+    match layer {
+        Layer::Body => &a.pics,
+        Layer::Behind => &a.behind,
+        Layer::Front => &a.front,
+    }
+}
+
+/// Every picture of an animation, its pieces behind and in front too.
+fn all_pics(a: &Anim) -> impl Iterator<Item = &Pic> {
+    a.pics.iter().chain(&a.behind).chain(&a.front)
+}
+
 /// Picture `pic` with the character's centre at `at` (screen), `zoom`
 /// screen px per sheet px; mirrored when it is.
 fn draw_pic(texture: &Texture2D, pic: Pic, at: Vec2, zoom: f32, tint: Color) {
@@ -540,7 +615,13 @@ impl RegionEditor {
             )));
         }
         let saved = sheet.anims.clone();
-        let saved_settings = Settings { background: sheet.background.clone(), soft: sheet.soft, scale: sheet.scale };
+        let saved_settings = Settings {
+            background: sheet.background.clone(),
+            soft: sheet.soft,
+            scale: sheet.scale,
+            recolour: sheet.recolour.clone(),
+            super_colours: sheet.super_colours.clone(),
+        };
         let mut ed = RegionEditor {
             character,
             available,
@@ -549,7 +630,7 @@ impl RegionEditor {
             clear: true,
             names,
             anim: 0,
-            behind: false,
+            layer: Layer::Body,
             selected: None,
             marked: vec![],
             origin: Vec2::ZERO,
@@ -574,6 +655,9 @@ impl RegionEditor {
             fresh: false,
             maker: None,
             grid: None,
+            paint: None,
+            palette: None,
+            retexture: None,
             notes,
         };
         ed.find_sprites();
@@ -600,30 +684,45 @@ impl RegionEditor {
     }
 
     fn pics(&self) -> &[Pic] {
-        self.current().map_or(&[], |a| if self.behind { &a.behind } else { &a.pics })
+        self.current().map_or(&[], |a| layer_of(a, self.layer))
     }
 
     fn pics_mut(&mut self) -> &mut Vec<Pic> {
-        let behind = self.behind;
+        let layer = self.layer;
         let a = self.current_mut();
-        if behind {
-            &mut a.behind
-        } else {
-            &mut a.pics
+        match layer {
+            Layer::Body => &mut a.pics,
+            Layer::Behind => &mut a.behind,
+            Layer::Front => &mut a.front,
         }
     }
 
+    /// Editing the character's own pictures (the loop point and repeated
+    /// runs are theirs).
+    fn body(&self) -> bool {
+        self.layer == Layer::Body
+    }
+
     fn settings(&self) -> Settings {
-        Settings { background: self.sheet.background.clone(), soft: self.sheet.soft, scale: self.sheet.scale }
+        Settings {
+            background: self.sheet.background.clone(),
+            soft: self.sheet.soft,
+            scale: self.sheet.scale,
+            recolour: self.sheet.recolour.clone(),
+            super_colours: self.sheet.super_colours.clone(),
+        }
     }
 
     fn dirty(&self) -> bool {
-        differ(&self.sheet.anims, &self.saved) || self.settings() != self.saved_settings
+        differ(&self.sheet.anims, &self.saved) || self.settings() != self.saved_settings || self.sheet.painted
     }
 
-    /// The pieces drawn behind are shown (Tails, or a sheet that has some).
-    fn layered(&self) -> bool {
-        self.character == Character::Tails || self.current().is_some_and(|a| !a.behind.is_empty())
+    /// The sheet's texture as shown: in its Super colours while they are edited.
+    fn texture(&self) -> &Texture2D {
+        match (&self.sheet.super_texture, &self.palette) {
+            (Some(t), Some(p)) if p.sup => t,
+            _ => &self.sheet.texture,
+        }
     }
 
     /// How far below the centre the feet are (sheet px), for a standing
@@ -646,7 +745,10 @@ impl RegionEditor {
 
     fn select_anim(&mut self, i: usize) {
         self.anim = i.min(self.names.len() - 1);
-        self.behind = self.behind && self.layered();
+        // Back to the character, unless this animation has pieces there too.
+        if self.pics().is_empty() {
+            self.layer = Layer::Body;
+        }
         self.select_only((!self.pics().is_empty()).then_some(0));
         self.clock = 0.0;
         if self.placed {
@@ -657,8 +759,7 @@ impl RegionEditor {
     /// Fit the view around the animation's pictures (the whole sheet when
     /// it has none).
     fn frame_view(&mut self, view: Rect) {
-        let rects: Vec<Rect> =
-            self.current().map(|a| a.pics.iter().chain(&a.behind).map(|p| p.src).collect()).unwrap_or_default();
+        let rects: Vec<Rect> = self.current().map(|a| all_pics(a).map(|p| p.src).collect()).unwrap_or_default();
         let size = self.size();
         let (area, most) = match rects.split_first() {
             Some((first, rest)) => (rest.iter().fold(*first, |acc, r| acc.combine_with(*r)), 6.0),
@@ -738,25 +839,55 @@ impl RegionEditor {
 
     fn keep(&mut self, before: HashMap<String, Anim>) {
         if before != self.sheet.anims {
-            self.undo.push(before);
-            if self.undo.len() > 300 {
-                self.undo.remove(0);
+            self.push_step(Step::Anims(before));
+        }
+    }
+
+    /// Keep `step` to undo (the oldest go past 300, or when the pixels kept
+    /// take too much room).
+    fn push_step(&mut self, step: Step) {
+        self.undo.push(step);
+        while self.undo.len() > 300
+            || (self.undo.len() > 1 && self.undo.iter().map(Step::bytes).sum::<usize>() > UNDO_PIXELS)
+        {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+        self.leaving = None;
+    }
+
+    /// Put `step` back; returns what undoes that.
+    fn swap_step(&mut self, step: Step) -> Step {
+        match step {
+            Step::Anims(a) => Step::Anims(std::mem::replace(&mut self.sheet.anims, a)),
+            Step::Pixels(at, img) => {
+                let was = self.put_pixels(at, &img);
+                self.find_sprites();
+                Step::Pixels(at, was)
             }
-            self.redo.clear();
-            self.leaving = None;
+            Step::Colours(usual, sup) => {
+                let was = Step::Colours(
+                    std::mem::replace(&mut self.sheet.recolour, usual),
+                    std::mem::replace(&mut self.sheet.super_colours, sup),
+                );
+                self.retexture = Some(0.0);
+                was
+            }
         }
     }
 
     fn undo(&mut self) {
-        if let Some(a) = self.undo.pop() {
-            self.redo.push(std::mem::replace(&mut self.sheet.anims, a));
+        if let Some(step) = self.undo.pop() {
+            let back = self.swap_step(step);
+            self.redo.push(back);
             self.fix_selection();
         }
     }
 
     fn redo(&mut self) {
-        if let Some(a) = self.redo.pop() {
-            self.undo.push(std::mem::replace(&mut self.sheet.anims, a));
+        if let Some(step) = self.redo.pop() {
+            let back = self.swap_step(step);
+            self.undo.push(back);
             self.fix_selection();
         }
     }
@@ -771,7 +902,7 @@ impl RegionEditor {
         let count = new.len();
         self.pics_mut().splice(at..at, new);
         // The loop point and repeated runs keep to their pictures.
-        if !self.behind {
+        if self.body() {
             self.current_mut().reindex(n, |i| Some(if i < at { i } else { i + count }));
         }
         self.selected = Some(at + count - 1);
@@ -885,7 +1016,7 @@ impl RegionEditor {
             }
             // The loop point and repeated runs keep to their pictures (or
             // the ones after them).
-            if !ed.behind {
+            if ed.body() {
                 let gone = |i: usize| chosen.binary_search(&i).is_ok();
                 ed.current_mut().reindex(n, |i| (!gone(i)).then(|| i - chosen.iter().filter(|&&k| k < i).count()));
             }
@@ -934,7 +1065,7 @@ impl RegionEditor {
         self.change(|ed| {
             ed.pics_mut().swap(k, to);
             // The loop point goes with its picture.
-            if !ed.behind {
+            if ed.body() {
                 let a = ed.current_mut();
                 if a.loop_from > 0 && (a.loop_from == k || a.loop_from == to) {
                     a.loop_from = if a.loop_from == k { to } else { k };
@@ -948,7 +1079,7 @@ impl RegionEditor {
     /// before it (and loops: not played once).
     fn loop_point(&self) -> Option<usize> {
         let a = self.current()?;
-        (!self.behind && !a.once && a.loop_from > 0 && a.loop_from < a.pics.len()).then_some(a.loop_from)
+        (self.body() && !a.once && a.loop_from > 0 && a.loop_from < a.pics.len()).then_some(a.loop_from)
     }
 
     /// The chosen pictures, when they follow one another: (first, last).
@@ -969,7 +1100,7 @@ impl RegionEditor {
     /// run already, that run changes; otherwise the chosen pictures become
     /// one, in place of any they cut across.
     fn step_repeat(&mut self, by: i32) {
-        if self.behind {
+        if !self.body() {
             return;
         }
         let Some((a, b)) = self.chosen_run() else {
@@ -1072,7 +1203,9 @@ impl RegionEditor {
             .map_err(|e| e.to_string())
             .and_then(|_| std::fs::File::create(&path).map_err(|e| e.to_string()))
             .and_then(|f| {
-                maker::animation_gif(&self.sheet.image, &a, PREVIEW_FPS, GIF_ZOOM, std::io::BufWriter::new(f))
+                let sup = self.palette.as_ref().is_some_and(|p| p.sup);
+                let drawn = self.sheet.drawn(sup);
+                maker::animation_gif(&drawn, &a, PREVIEW_FPS, GIF_ZOOM, std::io::BufWriter::new(f))
             });
         match made {
             Ok(n) => self.notes.push(Note::Info(format!("GIF made ({}): {}", plural(n, "frame"), tilde(&path)))),
@@ -1107,7 +1240,7 @@ impl RegionEditor {
             })
             .collect();
         let n = pics.len();
-        let empty = self.pics().is_empty() && !self.behind;
+        let empty = self.pics().is_empty() && self.body();
         self.change(|ed| {
             ed.add(pics);
             if timed && empty {
@@ -1123,7 +1256,7 @@ impl RegionEditor {
 
     /// Loop from the selected picture (again: the whole animation loops).
     fn loop_here(&mut self) {
-        let Some(k) = self.selected.filter(|_| !self.behind) else { return };
+        let Some(k) = self.selected.filter(|_| self.body()) else { return };
         let to = if self.loop_point() == Some(k) { 0 } else { k };
         self.change(|ed| ed.current_mut().loop_from = to);
         // From the start, to see it open.
@@ -1232,10 +1365,14 @@ impl RegionEditor {
             return Err("\"idle\" needs a picture at least".into());
         }
         let r = self.sheet.regions();
-        // Pictures were added below it: the sheet is written again, whole.
+        // Pictures were added below it: the sheet is written again, whole;
+        // painted on, it is written again in place.
         if self.sheet.extended {
             self.sheet.name = sheet::Sheet::write_for(&self.sheet.original, self.character)?;
+        } else if self.sheet.painted {
+            self.sheet.name = sheet::Sheet::rewrite(&self.sheet.original, self.character, &self.sheet.name)?;
         }
+        self.sheet.painted = false;
         r.save(self.character)?;
         self.saved = self.sheet.anims.clone();
         self.saved_settings = self.settings();
@@ -1309,6 +1446,9 @@ impl RegionEditor {
         push(Rect::new(b.x + 16.0 + half, b.y + 126.0, half, 26.0), "Generate…", Cmd::Generate, false, true);
         push(Rect::new(b.x + 10.0, b.y + 158.0, half, 26.0), "Grid", Cmd::Grid, self.grid.is_some(), true);
         push(Rect::new(b.x + 16.0 + half, b.y + 158.0, half, 26.0), "Import…", Cmd::Import, false, true);
+        push(Rect::new(b.x + 10.0, b.y + 190.0, half, 26.0), "Paint", Cmd::Paint, self.paint.is_some(), true);
+        let colours = self.palette.is_some();
+        push(Rect::new(b.x + 16.0 + half, b.y + 190.0, half, 26.0), "Colours", Cmd::Colours, colours, true);
         // The side, from the bottom up; the preview gets what is left.
         let (w2, w3) = ((side.w - 6.0) / 2.0, (side.w - 12.0) / 3.0);
         let n = self.pics().len();
@@ -1351,10 +1491,10 @@ impl RegionEditor {
         let flipped = pic.is_some_and(|p| p.flip);
         push(Rect::new(side.x + w3 + 6.0, y, w3, 28.0), "Mirror", Cmd::Mirror, flipped, any);
         let looping = self.selected.is_some() && self.loop_point() == self.selected;
-        let can_loop = chosen.len() == 1 && !self.behind && !self.current().is_some_and(|a| a.once);
+        let can_loop = chosen.len() == 1 && self.body() && !self.current().is_some_and(|a| a.once);
         push(Rect::new(side.x + 2.0 * (w3 + 6.0), y, w3, 28.0), "Loop here", Cmd::LoopHere, looping, can_loop);
         y -= 34.0;
-        let run = self.chosen_run().filter(|_| !self.behind);
+        let run = self.chosen_run().filter(|_| self.body());
         let times = self.run_times();
         // Within a run: the whole run.
         let inside = run.and_then(|(a, b)| self.current()?.repeat_of(a).filter(|r| b <= r.to));
@@ -1373,10 +1513,10 @@ impl RegionEditor {
         });
         y -= 58.0;
         let info = y;
-        // Above: the preview, its controls, the layers, the pace and the
-        // pictures.
+        // Above: the preview, its controls, the layers, the pace, the turn
+        // and the pictures.
         let mut t = side.y;
-        let fixed = 34.0 + if self.layered() { 34.0 } else { 0.0 } + 34.0;
+        let fixed = 4.0 * 34.0;
         let cols = ((side.w + THUMB_GAP) / (THUMB + THUMB_GAP)).floor().max(1.0) as usize;
         let room_rows = (((info - 4.0 - side.y - fixed - 110.0) / (THUMB + THUMB_GAP)).floor().max(1.0)) as usize;
         let thumb_rows = n.div_ceil(cols).clamp(1, room_rows);
@@ -1398,11 +1538,17 @@ impl RegionEditor {
             push(Rect::new(side.x + i as f32 * (w4 + 6.0), t, w4, 28.0), label, cmd, on, n > 0);
         }
         t += 34.0;
-        if self.layered() {
-            push(Rect::new(side.x, t, w2, 28.0), "Body", Cmd::Body, !self.behind, true);
-            push(Rect::new(side.x + w2 + 6.0, t, w2, 28.0), "Behind", Cmd::Behind, self.behind, true);
-            t += 34.0;
+        for (i, (label, cmd, layer)) in [
+            ("Body", Cmd::Body, Layer::Body),
+            ("Behind", Cmd::Behind, Layer::Behind),
+            ("Front", Cmd::Front, Layer::Front),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            push(Rect::new(side.x + i as f32 * (w3 + 6.0), t, w3, 28.0), label, cmd, self.layer == layer, true);
         }
+        t += 34.0;
         let anim = self.current();
         steppers.push(Stepper {
             r: Rect::new(side.x, t, w2, 28.0),
@@ -1413,6 +1559,15 @@ impl RegionEditor {
             enabled: true,
         });
         push(Rect::new(side.x + w2 + 6.0, t, w2, 28.0), "Play once", Cmd::Once, anim.is_some_and(|a| a.once), true);
+        t += 34.0;
+        steppers.push(Stepper {
+            r: Rect::new(side.x, t, side.w, 28.0),
+            label: "Turns",
+            value: anim.map_or(Turn::Ground, |a| a.turn).label().to_string(),
+            less: Cmd::TurnLess,
+            more: Cmd::TurnMore,
+            enabled: true,
+        });
         t += 34.0;
         let shown = (thumb_rows * cols).min(n);
         let thumbs: Vec<Rect> = (0..shown)
@@ -1450,7 +1605,24 @@ impl RegionEditor {
             let r = Rect::new(x + 136.0, y, 76.0, 30.0);
             buttons.push(Button { r, label: "Cancel".into(), cmd: Cmd::GridCancel, on: false, enabled: true });
         }
-        Layout { list, sheet_box, view, side, preview, thumbs, unshown: n - shown, info, buttons, steppers, swatches }
+        // The paint and colour tools' bars, along the bottom of the sheet view.
+        let mut tool_swatches = vec![];
+        let picker = self.tool_bars(view, &mut buttons, &mut steppers, &mut tool_swatches);
+        Layout {
+            list,
+            sheet_box,
+            view,
+            side,
+            preview,
+            thumbs,
+            unshown: n - shown,
+            info,
+            buttons,
+            steppers,
+            swatches,
+            tool_swatches,
+            picker,
+        }
     }
 
     // ── A frame ─────────────────────────────────────────────────
@@ -1476,6 +1648,7 @@ impl RegionEditor {
             ask = self.keys(input, dt, &l);
         }
         self.mouse(input, l.view);
+        self.retexture_now();
         self.draw(&self.layout(), input);
         ask
     }
@@ -1643,6 +1816,16 @@ impl RegionEditor {
             let cmd = if m.x < s.r.x + s.r.w / 3.0 { s.less } else { s.more };
             return if s.enabled { self.command(cmd) } else { None };
         }
+        if let Some(&(_, sw)) = l.tool_swatches.iter().find(|s| s.0.contains(m)) {
+            input.consumed = true;
+            self.tool_swatch(sw);
+            return None;
+        }
+        if l.picker.is_some_and(|r| r.contains(m)) {
+            input.consumed = true;
+            self.picker_press(l, m);
+            return None;
+        }
         if let Some(&(_, _, i)) = l.swatches.iter().find(|s| s.0.contains(m)) {
             input.consumed = true;
             match i {
@@ -1692,7 +1875,7 @@ impl RegionEditor {
                     Some(_) => None,
                     None => Some(Grid { area: None, cols: 1, rows: 1 }),
                 };
-                self.picking = false;
+                (self.picking, self.paint, self.palette) = (false, None, None);
             }
             Cmd::Import => return Some(Ask::Import),
             Cmd::ExportGif => self.export_gif(),
@@ -1733,10 +1916,31 @@ impl RegionEditor {
                 }
             }
             Cmd::Onion => self.onion = !self.onion,
-            Cmd::Body | Cmd::Behind => {
-                self.behind = cmd == Cmd::Behind;
+            Cmd::Body | Cmd::Behind | Cmd::Front => {
+                self.layer = match cmd {
+                    Cmd::Behind => Layer::Behind,
+                    Cmd::Front => Layer::Front,
+                    _ => Layer::Body,
+                };
                 self.select_only((!self.pics().is_empty()).then_some(0));
             }
+            Cmd::TurnLess | Cmd::TurnMore => {
+                let now = self.current().map_or(Turn::Ground, |a| a.turn);
+                let i = Turn::ALL.iter().position(|&t| t == now).unwrap_or(0);
+                let by = if cmd == Cmd::TurnMore { 1 } else { Turn::ALL.len() - 1 };
+                let turn = Turn::ALL[(i + by) % Turn::ALL.len()];
+                self.change(|ed| ed.current_mut().turn = turn);
+            }
+            Cmd::Paint => self.toggle_paint(),
+            Cmd::Colours => self.toggle_palette(),
+            Cmd::Brush(_)
+            | Cmd::ColourPicker
+            | Cmd::SizeLess
+            | Cmd::SizeMore
+            | Cmd::ColoursUsual
+            | Cmd::ColoursSuper
+            | Cmd::PutBack
+            | Cmd::ToolDone => self.tool_command(cmd),
             Cmd::Slower => self.step_pace(-1),
             Cmd::Faster => self.step_pace(1),
             Cmd::Once => self.change(|ed| {
@@ -1760,6 +1964,7 @@ impl RegionEditor {
             Cmd::Delete => self.delete(),
             Cmd::Pick => {
                 self.picking = !self.picking;
+                (self.paint, self.palette) = (None, None);
                 if self.picking {
                     self.notes.push(Note::Info("Click the sheet's background colour (Esc: never mind)".into()));
                 }
@@ -1807,7 +2012,7 @@ impl RegionEditor {
                 self.picking = false;
                 return None;
             }
-            if self.grid.take().is_some() {
+            if self.grid.take().is_some() || self.close_tool() {
                 return None;
             }
             return self.leave(Ask::Close);
@@ -1880,6 +2085,7 @@ impl RegionEditor {
             (KeyCode::G, Cmd::Generate),
             (KeyCode::R, Cmd::Grid),
             (KeyCode::E, Cmd::ExportGif),
+            (KeyCode::P, Cmd::Paint),
             (KeyCode::LeftBracket, Cmd::Previous),
             (KeyCode::Comma, Cmd::Previous),
             (KeyCode::RightBracket, Cmd::Next),
@@ -1893,8 +2099,13 @@ impl RegionEditor {
         if pressed(KeyCode::T) {
             return Some(Ask::Try);
         }
-        if pressed(KeyCode::B) && self.layered() {
-            self.command(if self.behind { Cmd::Body } else { Cmd::Behind });
+        if pressed(KeyCode::B) {
+            let next = match self.layer {
+                Layer::Body => Cmd::Behind,
+                Layer::Behind => Cmd::Front,
+                Layer::Front => Cmd::Body,
+            };
+            self.command(next);
         }
         if pressed(KeyCode::Home) {
             self.frame_view(l.view);
@@ -1964,6 +2175,13 @@ impl RegionEditor {
         }
         if self.grid.is_some() {
             return Some(Drag::GridArea(p));
+        }
+        if self.paint.is_some() {
+            return self.paint_press(p);
+        }
+        if self.palette.is_some() {
+            self.palette_pick(p);
+            return None;
         }
         let under = self.pics().iter().rposition(|q| q.src.contains(p));
         if input.shift || input.ctrl {
@@ -2088,6 +2306,8 @@ impl RegionEditor {
                 }
             }
             Some(Drag::Pan(from, o)) => self.origin = (o + m - from).round(),
+            Some(Drag::Paint) => self.paint_to(p),
+            Some(Drag::Shade | Drag::Hue) => self.picker_drag(m),
             _ => {}
         }
         let right_up = is_mouse_button_released(MouseButton::Right) || is_mouse_button_released(MouseButton::Middle);
@@ -2134,6 +2354,11 @@ impl RegionEditor {
                 let r = rect_between(from, p, size);
                 self.gather(r);
             }
+            Some(Drag::Paint) => self.end_stroke(),
+            Some(Drag::Shade | Drag::Hue) => {
+                self.retexture = Some(0.0);
+                self.keep_colours();
+            }
             Some(Drag::GridArea(from)) => {
                 let r = rect_between(from, p, size);
                 if r.w >= 2.0 && r.h >= 2.0 {
@@ -2162,8 +2387,10 @@ impl RegionEditor {
         if !self.playing {
             return self.selected.map(|k| k.min(n - 1));
         }
-        if self.behind {
-            return Some((self.clock * BEHIND_FPS) as usize % n);
+        match self.layer {
+            Layer::Behind => return Some((self.clock * BEHIND_FPS) as usize % n),
+            Layer::Front => return Some((self.clock * a.fps.unwrap_or(FRONT_FPS)) as usize % n),
+            Layer::Body => {}
         }
         let t = self.clock * a.fps.unwrap_or(PREVIEW_FPS);
         if a.once {
@@ -2193,6 +2420,7 @@ impl RegionEditor {
         for s in &l.steppers {
             draw_stepper(s, m);
         }
+        self.draw_tools(l, m);
         self.draw_help();
     }
 
@@ -2309,7 +2537,7 @@ impl RegionEditor {
             y += h;
             row += 1;
         }
-        let texture = &self.sheet.texture;
+        let texture = self.texture();
         draw_texture_ex(
             texture,
             sr.x,
@@ -2353,12 +2581,13 @@ impl RegionEditor {
                 draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0, alpha(TEXT_MUTED, 0.3));
             }
         }
-        // This animation's other layer.
+        // This animation's other layers.
         if let Some(a) = self.current() {
-            let other = if self.behind { &a.pics } else { &a.behind };
-            for q in other {
-                let r = self.screen_rect(q.src);
-                draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0, alpha(WARNING, 0.55));
+            for layer in [Layer::Body, Layer::Behind, Layer::Front].into_iter().filter(|&l| l != self.layer) {
+                for q in layer_of(a, layer) {
+                    let r = self.screen_rect(q.src);
+                    draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0, alpha(WARNING, 0.55));
+                }
             }
         }
         // Its pictures, numbered (chosen ones lit).
@@ -2382,7 +2611,7 @@ impl RegionEditor {
             if self.loop_point() == Some(k) {
                 label += " ↻";
             }
-            if let Some(r) = self.current().and_then(|a| a.repeat_of(k)).filter(|r| r.from == k && !self.behind) {
+            if let Some(r) = self.current().and_then(|a| a.repeat_of(k)).filter(|r| r.from == k && self.body()) {
                 label += &format!(" ↻×{}", r.times);
             }
             let lw = measure_bold(&label, 11.0) + 8.0;
@@ -2390,9 +2619,10 @@ impl RegionEditor {
             draw_rectangle(tag.x, tag.y, tag.w, tag.h, c);
             text_bold(&label, tag.x + 4.0, baseline(tag.y + 7.5, 11.0), 11.0, Color::new(0.05, 0.04, 0.1, 1.0));
         }
-        if let Some(q) = self.selected_pic() {
+        if let Some(q) = self.selected_pic().filter(|_| self.paint.is_none() && self.palette.is_none()) {
             self.draw_selected(q, m);
         }
+        self.draw_brush(v, m);
         match self.drag {
             Some(Drag::New(from)) => {
                 dashed_rect(self.screen_rect(rect_between(from, self.to_sheet(m), size)), ACCENT_HI)
@@ -2416,8 +2646,14 @@ impl RegionEditor {
         // What this animation is.
         let (name, what) = &self.names[self.anim];
         let n = self.pics().len();
-        let layer = if self.behind { "  ·  behind" } else { "" };
-        let caption = if self.picking {
+        let layer = match self.layer {
+            Layer::Body => "",
+            Layer::Behind => "  ·  behind",
+            Layer::Front => "  ·  in front",
+        };
+        let caption = if let Some(c) = self.tool_caption() {
+            c
+        } else if self.picking {
             "Click the sheet's background colour to cut it out  ·  Esc: never mind".to_string()
         } else if self.grid.as_ref().is_some_and(|g| g.area.is_none()) {
             "Grid: drag a box over pictures laid out in rows and columns (Alt: as drawn)  ·  Esc: never mind"
@@ -2429,16 +2665,18 @@ impl RegionEditor {
         };
         let bar = Rect::new(v.x + 1.0, v.y + 1.0, v.w - 2.0, 28.0);
         draw_rectangle(bar.x, bar.y, bar.w, bar.h, alpha(SURFACE, 0.92));
-        text_left(bar, 12.0, &caption, 13.0, if self.picking || self.grid.is_some() { WARNING } else { TEXT });
+        let tool = self.picking || self.grid.is_some() || self.paint.is_some() || self.palette.is_some();
+        text_left(bar, 12.0, &caption, 13.0, if tool { WARNING } else { TEXT });
         let z = format!("×{}", self.zoom);
         text(&z, bar.right() - 12.0 - measure(&z, 12.0), baseline(bar.y + 14.0, 12.0), 12.0, TEXT_MUTED);
+        self.draw_tool_bars(v);
         // Behind the grid's settings.
         if self.grid.as_ref().is_some_and(|g| g.area.is_some()) {
             let r = Rect::new(v.x + 1.0, v.bottom() - 48.0, v.w - 2.0, 47.0);
             draw_rectangle(r.x, r.y, r.w, r.h, alpha(SURFACE, 0.92));
         }
         // A sheet with nothing cut out yet.
-        if !self.clear && !self.picking && self.grid.is_none() {
+        if !self.clear && !self.picking && self.grid.is_none() && self.paint.is_none() && self.palette.is_none() {
             let tip = "Nothing is see-through on this sheet yet: Pick (left, under SHEET), then click its background";
             let tw = measure(tip, 12.0) + 20.0;
             let r = Rect::new(v.x + (v.w - tw) / 2.0, v.bottom() - 40.0, tw, 26.0);
@@ -2460,7 +2698,8 @@ impl RegionEditor {
             draw_line(m.x, m.y - 9.0, m.x, m.y + 9.0, 1.0, WHITE);
         }
         // Which animation a faint picture is.
-        if self.drag.is_none() && !self.picking && v.contains(m) && self.handle_at(m).is_none() {
+        let tool = self.picking || self.paint.is_some() || self.palette.is_some();
+        if self.drag.is_none() && !tool && v.contains(m) && self.handle_at(m).is_none() {
             let p = self.to_sheet(m);
             if !self.pics().iter().any(|q| q.src.contains(p)) {
                 if let Some(&(i, k)) = self.others_at(p).first() {
@@ -2510,7 +2749,7 @@ impl RegionEditor {
     /// they compare.
     fn preview_zoom(&self, pv: Rect) -> f32 {
         let stand = body_radii(self.character, false).1 * self.sheet.scale;
-        let all = self.sheet.anims.values().flat_map(|a| a.pics.iter().chain(&a.behind));
+        let all = self.sheet.anims.values().flat_map(all_pics);
         let (half, up) =
             all.fold((0.0f32, 0.0f32), |(h, u), p| (h.max(p.centre.x).max(p.src.w - p.centre.x), u.max(p.centre.y)));
         ((pv.w - 40.0) / (2.0 * half.max(1.0))).min((pv.h - 50.0) / (up + stand)).floor().clamp(1.0, 6.0)
@@ -2519,7 +2758,7 @@ impl RegionEditor {
     fn draw_preview(&self, pv: Rect) {
         rrect(pv, RADIUS, SURFACE_2);
         rrect_lines(pv, RADIUS, 1.0, BORDER);
-        let Some(a) = self.current().filter(|a| !a.pics.is_empty() || !a.behind.is_empty()) else {
+        let Some(a) = self.current().filter(|a| all_pics(a).next().is_some()) else {
             text_centered("No pictures yet", pv.x + pv.w / 2.0, pv.y + pv.h / 2.0 - 10.0, 13.0, TEXT_DIM);
             let hint = "Drag on the sheet, or double-click a sprite";
             text_centered(hint, pv.x + pv.w / 2.0, pv.y + pv.h / 2.0 + 10.0, 11.0, TEXT_MUTED);
@@ -2533,29 +2772,29 @@ impl RegionEditor {
         draw_line(pv.x + 12.0, ground, pv.right() - 12.0, ground, 1.0, alpha(TEXT_MUTED, 0.6));
         let b = body * z;
         draw_rectangle_lines(c.x - b.x, c.y - b.y, b.x * 2.0, b.y * 2.0, 1.0, alpha(SUCCESS, 0.45));
-        let tex = &self.sheet.texture;
-        // The layer edited follows the controls; the other plays.
+        let tex = self.texture();
+        // The layer edited follows the controls; the others play.
         let shown = self.shown();
-        let kb = if self.behind {
-            shown
-        } else {
-            (!a.behind.is_empty()).then(|| (self.clock * BEHIND_FPS) as usize % a.behind.len())
-        };
-        let kp = if self.behind {
-            (!a.pics.is_empty()).then(|| a.at(self.clock * a.fps.unwrap_or(PREVIEW_FPS), false))
-        } else {
-            shown
+        let playing = |layer: Layer| -> Option<usize> {
+            let n = layer_of(a, layer).len();
+            if layer == self.layer {
+                return shown;
+            }
+            (n > 0).then(|| match layer {
+                Layer::Body => a.at(self.clock * a.fps.unwrap_or(PREVIEW_FPS), false),
+                Layer::Behind => (self.clock * BEHIND_FPS) as usize % n,
+                Layer::Front => (self.clock * a.fps.unwrap_or(FRONT_FPS)) as usize % n,
+            })
         };
         // The picture before, faintly, to line them up.
-        let (list, k) = if self.behind { (&a.behind, kb) } else { (&a.pics, kp) };
+        let (list, k) = (layer_of(a, self.layer), shown);
         if let Some(k) = k.filter(|_| self.onion && list.len() > 1) {
             draw_pic(tex, list[(k + list.len() - 1) % list.len()], c, z, alpha(WHITE, 0.35));
         }
-        if let Some(k) = kb {
-            draw_pic(tex, a.behind[k], c, z, WHITE);
-        }
-        if let Some(k) = kp {
-            draw_pic(tex, a.pics[k], c, z, WHITE);
+        for layer in [Layer::Behind, Layer::Body, Layer::Front] {
+            if let Some(k) = playing(layer) {
+                draw_pic(tex, layer_of(a, layer)[k], c, z, WHITE);
+            }
         }
         draw_circle(c.x, c.y, 2.0, DANGER);
         clip(None);
@@ -2563,11 +2802,14 @@ impl RegionEditor {
             Some(f) => format!("{} pictures a second", num(f)),
             None => "the games' pace".to_string(),
         };
-        let how = match self.loop_point() {
+        let mut how = match self.loop_point() {
             _ if a.once => "  ·  once".to_string(),
             Some(k) => format!("  ·  loops from {}", k + 1),
             None => String::new(),
         };
+        if a.turn != Turn::Ground {
+            how += &format!("  ·  turns {}", a.turn.label());
+        }
         text(&format!("×{z}  ·  {pace}{how}"), pv.x + 10.0, baseline(pv.y + 14.0, 11.0), 11.0, TEXT_MUTED);
         if let Some(k) = k {
             let s = format!("{} / {}", k + 1, list.len());
@@ -2586,7 +2828,7 @@ impl RegionEditor {
             let z = if z >= 1.0 { z.floor() } else { z };
             let at = vec2(t.x + (t.w - q.src.w * z) / 2.0, t.y + (t.h - q.src.h * z) / 2.0).round();
             draw_texture_ex(
-                &self.sheet.texture,
+                self.texture(),
                 at.x,
                 at.y,
                 WHITE,
@@ -2609,7 +2851,7 @@ impl RegionEditor {
             rrect_lines(*t, 6.0, if lit { 2.0 } else { 1.0 }, border);
             text_bold(&(k + 1).to_string(), t.x + 4.0, t.y + 12.0, 10.0, TEXT_DIM);
             // Repeated runs, along their tops.
-            if let Some(r) = self.current().and_then(|a| a.repeat_of(k)).filter(|_| !self.behind) {
+            if let Some(r) = self.current().and_then(|a| a.repeat_of(k)).filter(|_| self.body()) {
                 draw_rectangle(t.x + 6.0, t.y + 1.0, t.w - 12.0, 2.0, alpha(ACCENT_HI, 0.9));
                 if r.from == k {
                     let s = format!("×{}", r.times);
@@ -2634,7 +2876,7 @@ impl RegionEditor {
             text(&format!("+{} more", l.unshown), l.side.x, last.bottom() + 10.0, 11.0, TEXT_MUTED);
         }
         if l.thumbs.is_empty() {
-            let y = l.preview.bottom() + 8.0 + 34.0 + if self.layered() { 34.0 } else { 0.0 } + 34.0;
+            let y = l.preview.bottom() + 8.0 + 4.0 * 34.0;
             text("No pictures in this animation", l.side.x + 4.0, baseline(y + THUMB / 2.0, 12.0), 12.0, TEXT_MUTED);
         }
     }
@@ -2660,7 +2902,7 @@ impl RegionEditor {
                 if self.loop_point() == Some(k) {
                     head += "  ·  loops from here";
                 }
-                if let Some(r) = self.current().and_then(|a| a.repeat_of(k)).filter(|_| !self.behind) {
+                if let Some(r) = self.current().and_then(|a| a.repeat_of(k)).filter(|_| self.body()) {
                     head += &format!("  ·  run ×{}", r.times);
                 }
                 line(0.0, &head, TEXT);
@@ -2855,7 +3097,9 @@ impl App {
         let Some(ed) = self.regions.as_mut() else { return };
         let made = if from_sheet {
             let sh = &ed.sheet;
-            maker::from_sheet(c, &sh.name, &sh.image, &ed.rows(), sh.scale)
+            let mut made = maker::from_sheet(c, &sh.name, &sh.image, &ed.rows(), sh.scale);
+            (made.regions.recolour, made.regions.super_colours) = (sh.recolour.clone(), sh.super_colours.clone());
+            made
         } else {
             maker::from_drawing(c)
         };

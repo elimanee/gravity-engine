@@ -565,21 +565,63 @@ pub struct Repeat {
     pub times: u32,
 }
 
+/// How an animation's pictures turn with the ground under the character.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Turn {
+    /// As the ground slopes, smoothly.
+    #[default]
+    Ground,
+    /// By eighths of a turn (45°), as the Mega Drive games drew them.
+    Steps,
+    /// Never: always upright.
+    Upright,
+}
+
+impl Turn {
+    pub const ALL: [Turn; 3] = [Turn::Ground, Turn::Steps, Turn::Upright];
+
+    /// The angle drawn for the ground's `angle` (radians).
+    pub fn angle(self, angle: f32) -> f32 {
+        const EIGHTH: f32 = std::f32::consts::FRAC_PI_4;
+        match self {
+            Turn::Ground => angle,
+            Turn::Steps => (angle / EIGHTH).round() * EIGHTH,
+            Turn::Upright => 0.0,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Turn::Ground => "with the ground",
+            Turn::Steps => "by 45°",
+            Turn::Upright => "never",
+        }
+    }
+}
+
 /// An animation's pictures, the pieces drawn behind them (Tails' tails, on
-/// their own clock), its pace in pictures a second (none: the games' own,
-/// which follows the character's speed), whether it plays once, stopping
-/// on its last picture, its loop point (the pictures before it open the
-/// animation once, then it loops from there) and runs of pictures it
-/// repeats on the way.
+/// their own clock) and in front (dust, sparks…, on theirs), its pace in
+/// pictures a second (none: the games' own, which follows the character's
+/// speed), whether it plays once, stopping on its last picture, its loop
+/// point (the pictures before it open the animation once, then it loops
+/// from there), runs of pictures it repeats on the way, and how it turns
+/// with the ground.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Anim {
     pub pics: Vec<Pic>,
     pub behind: Vec<Pic>,
+    pub front: Vec<Pic>,
     pub fps: Option<f32>,
     pub once: bool,
     pub loop_from: usize,
     pub repeats: Vec<Repeat>,
+    pub turn: Turn,
 }
+
+/// The pieces in front play at this many pictures a second when their
+/// animation has no pace of its own.
+pub const FRONT_FPS: f32 = 12.0;
 
 impl Anim {
     /// Its pictures in the order they play, each run repeated as many
@@ -669,9 +711,11 @@ impl Anim {
     }
 }
 
-/// A loaded sheet.
+/// A loaded sheet: its texture (recoloured), and another in its Super
+/// colours when it has some.
 pub struct Sheet {
     texture: Texture2D,
+    super_texture: Option<Texture2D>,
     anims: HashMap<String, Anim>,
     scale: f32,
     pub name: String,
@@ -762,6 +806,50 @@ pub fn clear_background_near(img: &mut image::RgbaImage, colours: &[[u8; 3]]) {
             }
         }
         p[3] = (p[3] as f32 * a) as u8;
+    }
+}
+
+/// A colour of the sheet and the one it becomes.
+pub type Swap = [[u8; 3]; 2];
+
+/// The Super colours over the usual ones: `sup`, then the swaps of `usual`
+/// for the colours `sup` leaves alone.
+pub fn super_swaps(usual: &[Swap], sup: &[Swap]) -> Vec<Swap> {
+    let mine = |c: &[u8; 3]| sup.iter().any(|s| s[0] == *c);
+    sup.iter().chain(usual.iter().filter(|s| !mine(&s[0]))).copied().collect()
+}
+
+/// How close (summed squares) a colour of a lossy picture has to be to one
+/// swapped to go with it.
+const NEAR_SWAP: i32 = 28 * 28;
+
+/// Give `img`'s colours in `swaps` their new ones: exactly, or by closeness
+/// for lossy pictures (`soft`), each pixel keeping how it differs.
+pub fn swap_colours(img: &mut image::RgbaImage, swaps: &[Swap], soft: bool) {
+    if swaps.is_empty() {
+        return;
+    }
+    let dist = |a: [u8; 3], b: [u8; 3]| (0..3).map(|k| (a[k] as i32 - b[k] as i32).pow(2)).sum::<i32>();
+    let mut done: HashMap<[u8; 3], [u8; 3]> = HashMap::new();
+    for p in img.pixels_mut() {
+        if p[3] == 0 {
+            continue;
+        }
+        let rgb = [p[0], p[1], p[2]];
+        let to = *done.entry(rgb).or_insert_with(|| {
+            let found = if soft {
+                swaps.iter().map(|s| (s, dist(s[0], rgb))).filter(|&(_, d)| d <= NEAR_SWAP).min_by_key(|&(_, d)| d)
+            } else {
+                swaps.iter().find(|s| s[0] == rgb).map(|s| (s, 0))
+            };
+            match found {
+                Some(([from, to], _)) => {
+                    [0, 1, 2].map(|k| (to[k] as i32 + rgb[k] as i32 - from[k] as i32).clamp(0, 255) as u8)
+                }
+                None => rgb,
+            }
+        });
+        (p[0], p[1], p[2]) = (to[0], to[1], to[2]);
     }
 }
 
@@ -1081,6 +1169,13 @@ pub struct Editable {
     /// Pictures were added below it: saving writes the sheet itself again,
     /// a sheet of its own then (its regions hold everything).
     pub extended: bool,
+    /// Its pixels were painted on: saving writes it again, in place.
+    pub painted: bool,
+    /// Its colours swapped for others, always and when Super.
+    pub recolour: Vec<Swap>,
+    pub super_colours: Vec<Swap>,
+    /// The sheet in its Super colours, when it has some.
+    pub super_texture: Option<Texture2D>,
 }
 
 impl Editable {
@@ -1100,6 +1195,10 @@ impl Editable {
             name: p.name,
             known: p.known,
             extended: false,
+            painted: false,
+            recolour: vec![],
+            super_colours: vec![],
+            super_texture: None,
             anims: p.anims.clone(),
             defaults: p.anims,
             warning: None,
@@ -1110,7 +1209,10 @@ impl Editable {
                 ed.background = r.background;
                 ed.soft = r.soft;
                 ed.scale = r.scale.unwrap_or(ed.scale);
-                if !ed.background.is_empty() || ed.soft {
+                ed.recolour = r.recolour;
+                ed.super_colours = r.super_colours;
+                let swapped = !ed.recolour.is_empty() || !ed.super_colours.is_empty();
+                if !ed.background.is_empty() || ed.soft || swapped {
                     ed.recolour();
                 }
             }
@@ -1120,29 +1222,88 @@ impl Editable {
         Ok(Some(ed))
     }
 
-    /// Clear the backgrounds again, after the colours changed.
+    /// Clear the backgrounds again and swap the colours, after they changed.
     pub fn recolour(&mut self) {
         let mut img = self.original.clone();
         clear(&mut img, &self.layout_background, self.layout_soft);
         clear(&mut img, &self.background, self.soft || self.layout_soft);
-        self.texture = upload(&img);
         self.image = img;
+        self.retexture();
+    }
+
+    /// The textures again from the image (its colours swapped).
+    pub fn retexture(&mut self) {
+        let (usual, sup) = self.textures_of(&self.image);
+        self.texture = upload(&usual);
+        self.super_texture = sup.map(|s| upload(&s));
+    }
+
+    /// The sheet as drawn, its colours swapped (Super ones: `sup`).
+    pub fn drawn(&self, sup: bool) -> image::RgbaImage {
+        let (usual, s) = self.textures_of(&self.image);
+        if sup {
+            s.unwrap_or(usual)
+        } else {
+            usual
+        }
+    }
+
+    /// `img` (part of the sheet as drawn) in its colours, and its Super
+    /// colours when it has some.
+    fn textures_of(&self, img: &image::RgbaImage) -> (image::RgbaImage, Option<image::RgbaImage>) {
+        let soft = self.soft || self.layout_soft;
+        let sup = (!self.super_colours.is_empty()).then(|| {
+            let mut s = img.clone();
+            swap_colours(&mut s, &super_swaps(&self.recolour, &self.super_colours), soft);
+            s
+        });
+        let mut usual = img.clone();
+        swap_colours(&mut usual, &self.recolour, soft);
+        (usual, sup)
+    }
+
+    /// After the pixels in `r` (whole pixels, on the sheet) were painted:
+    /// that part drawn again, quickly.
+    pub fn repaint(&mut self, r: [u32; 4]) {
+        let [x, y, w, h] = r;
+        let (sw, sh) = self.original.dimensions();
+        let (w, h) = (w.min(sw.saturating_sub(x)), h.min(sh.saturating_sub(y)));
+        if w == 0 || h == 0 {
+            return;
+        }
+        let mut part = image::imageops::crop_imm(&self.original, x, y, w, h).to_image();
+        clear(&mut part, &self.layout_background, self.layout_soft);
+        clear(&mut part, &self.background, self.soft || self.layout_soft);
+        image::imageops::replace(&mut self.image, &part, x as i64, y as i64);
+        let (usual, sup) = self.textures_of(&part);
+        let up = |t: &Texture2D, img: image::RgbaImage| {
+            let img = Image { width: w as u16, height: h as u16, bytes: img.into_raw() };
+            t.update_part(&img, x as i32, y as i32, w as i32, h as i32);
+        };
+        up(&self.texture, usual);
+        if let (Some(t), Some(s)) = (&self.super_texture, sup) {
+            up(t, s);
+        }
+        self.painted = true;
     }
 
     /// The regions to keep: what changed from the layout; everything, the
     /// layout's backgrounds too, for a sheet pictures were added to.
     pub fn regions(&self) -> Regions {
-        if self.extended {
+        let mut r = if self.extended {
             let mut r = Regions::changes(self.image.dimensions(), &HashMap::new(), &self.anims);
             r.background = self.layout_background.iter().chain(&self.background).copied().collect();
             r.soft = self.soft || self.layout_soft;
             r.scale = (self.scale != 1.0).then_some(self.scale);
-            return r;
-        }
-        let mut r = Regions::changes(self.image.dimensions(), &self.defaults, &self.anims);
-        r.background = self.background.clone();
-        r.soft = self.soft;
-        r.scale = (self.scale != self.layout_scale).then_some(self.scale);
+            r
+        } else {
+            let mut r = Regions::changes(self.image.dimensions(), &self.defaults, &self.anims);
+            r.background = self.background.clone();
+            r.soft = self.soft;
+            r.scale = (self.scale != self.layout_scale).then_some(self.scale);
+            r
+        };
+        (r.recolour, r.super_colours) = (self.recolour.clone(), self.super_colours.clone());
         r
     }
 
@@ -1179,7 +1340,13 @@ impl Editable {
 
     /// The sheet as edited, to play with before it is saved.
     pub fn sheet(&self) -> Sheet {
-        Sheet { texture: self.texture.clone(), anims: self.anims.clone(), scale: self.scale, name: self.name.clone() }
+        Sheet {
+            texture: self.texture.clone(),
+            super_texture: self.super_texture.clone(),
+            anims: self.anims.clone(),
+            scale: self.scale,
+            name: self.name.clone(),
+        }
     }
 }
 
@@ -1194,15 +1361,23 @@ impl Sheet {
             return Err(format!("the game does not know this sheet ({w} × {h}): lay it out with Edit sprite regions…"));
         }
         let mut scale = p.scale;
+        let mut super_texture = None;
         if let Some(r) = &regions {
-            clear(&mut p.image, &r.background, r.soft || p.soft);
+            let soft = r.soft || p.soft;
+            clear(&mut p.image, &r.background, soft);
             r.apply(&mut p.anims);
             scale = r.scale.unwrap_or(scale);
+            if !r.super_colours.is_empty() {
+                let mut sup = p.image.clone();
+                swap_colours(&mut sup, &super_swaps(&r.recolour, &r.super_colours), soft);
+                super_texture = Some(upload(&sup));
+            }
+            swap_colours(&mut p.image, &r.recolour, soft);
         }
         if p.anims.get("idle").is_none_or(|a| a.pics.is_empty()) {
             return Err("no \"idle\" picture: give it one with Edit sprite regions…".into());
         }
-        Ok(Some(Sheet { texture: upload(&p.image), anims: p.anims, scale, name: p.name }))
+        Ok(Some(Sheet { texture: upload(&p.image), super_texture, anims: p.anims, scale, name: p.name }))
     }
 
     /// Copy a chosen sheet into the Sonic folder: as the character or the
@@ -1263,6 +1438,25 @@ impl Sheet {
         Ok(name.to_string())
     }
 
+    /// Write `img` over `c`'s sheet `name`, as a PNG (one in another format
+    /// gives way to it). Returns the file it became.
+    pub fn rewrite(img: &image::RgbaImage, c: Character, name: &str) -> Result<String, String> {
+        let dir = dir().ok_or("no config directory")?;
+        let was = dir.join(name);
+        let png = if name.to_lowercase().ends_with(".png") {
+            was.clone()
+        } else if c == Character::Sonic {
+            was.with_extension("png")
+        } else {
+            dir.join(file_names(c)[0])
+        };
+        img.save(&png).map_err(|e| e.to_string())?;
+        if png != was {
+            let _ = std::fs::remove_file(&was);
+        }
+        Ok(png.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()))
+    }
+
     /// Make `src` (any picture file) `c`'s sheet, as a PNG under the
     /// character's name; the sheet it had goes (Sonic's layout too). The
     /// regions beside it (`<name>.regions.json`), if any, come too.
@@ -1319,11 +1513,15 @@ impl Sheet {
         Some((anim, anim.at(t, once), name))
     }
 
-    fn blit(&self, pic: Pic, s: &Sonic, facing: f32, angle: f32) {
-        self.blit_at(pic, s.pos, facing, angle, WHITE);
+    fn blit(&self, texture: &Texture2D, pic: Pic, s: &Sonic, facing: f32, angle: f32) {
+        self.blit_with(texture, pic, s.pos, facing, angle, WHITE);
     }
 
     fn blit_at(&self, pic: Pic, pos: Vec2, facing: f32, angle: f32, tint: Color) {
+        self.blit_with(&self.texture, pic, pos, facing, angle, tint);
+    }
+
+    fn blit_with(&self, texture: &Texture2D, pic: Pic, pos: Vec2, facing: f32, angle: f32, tint: Color) {
         let k = super::SCALE / self.scale.max(0.01);
         let size = vec2(pic.src.w, pic.src.h) * k;
         // A mirrored picture faces the other way.
@@ -1331,7 +1529,7 @@ impl Sheet {
         let cx = if flip { pic.src.w - pic.centre.x } else { pic.centre.x };
         let top_left = pos - vec2(cx, pic.centre.y) * k;
         draw_texture_ex(
-            &self.texture,
+            texture,
             top_left.x,
             top_left.y,
             tint,
@@ -1356,14 +1554,19 @@ impl Sheet {
         true
     }
 
-    /// Draw him from the sheet (world pass); golden when super.
+    /// Draw him from the sheet (world pass); in its Super colours when
+    /// super, else golden.
     pub fn draw(&self, s: &Sonic) {
         let Some((anim, k, name)) = self.pick(s) else { return };
         // Balancing, he faces the drop.
         let facing = if name == "balance" { s.balancing.unwrap_or(s.facing) } else { s.facing };
         let upright = !s.grounded || (s.gsp == 0.0 && super::mode_down(s.angle).y > 0.5 && s.angle.sin().abs() < 0.4);
-        let angle = if upright && s.grounded { 0.0 } else { s.angle };
-        let golden = if s.super_form { golden_material() } else { None };
+        let angle = anim.turn.angle(if upright && s.grounded { 0.0 } else { s.angle });
+        let texture = match (&self.super_texture, s.super_form) {
+            (Some(t), true) => t,
+            _ => &self.texture,
+        };
+        let golden = if s.super_form && self.super_texture.is_none() { golden_material() } else { None };
         if let Some(m) = &golden {
             gl_use_material(m);
             m.set_uniform("shine", (get_time() as f32 * 10.0).sin());
@@ -1373,9 +1576,14 @@ impl Sheet {
         if !anim.behind.is_empty() {
             // Tails' tails swish on their own clock.
             let t = (get_time() * if s.flying.is_some() { 20.0 } else { 8.0 }) as usize;
-            self.blit(anim.behind[t % anim.behind.len()], s, facing, angle);
+            self.blit(texture, anim.behind[t % anim.behind.len()], s, facing, angle);
         }
-        self.blit(anim.pics[k], s, facing, angle);
+        self.blit(texture, anim.pics[k], s, facing, angle);
+        if !anim.front.is_empty() {
+            // What is in front (dust, sparks) plays on its own.
+            let t = (get_time() * anim.fps.unwrap_or(FRONT_FPS) as f64) as usize;
+            self.blit(texture, anim.front[t % anim.front.len()], s, facing, angle);
+        }
         if golden.is_some() {
             gl_use_default_material();
         }
@@ -1455,6 +1663,35 @@ pub fn upload(img: &image::RgbaImage) -> Texture2D {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn colours_swap_exactly_or_by_closeness_and_super_ones_go_over() {
+        let px = |x: u32| match x {
+            0 => [0, 0, 255, 255],
+            1 => [10, 10, 240, 255],
+            2 => [255, 0, 0, 255],
+            _ => [0, 0, 255, 0],
+        };
+        let img = image::RgbaImage::from_fn(4, 1, |x, _| image::Rgba(px(x)));
+        let swaps = [[[0, 0, 255], [200, 0, 0]]];
+        let mut exact = img.clone();
+        swap_colours(&mut exact, &swaps, false);
+        let row = |i: &image::RgbaImage| (0..4).map(|x| i.get_pixel(x, 0).0).collect::<Vec<_>>();
+        assert_eq!(row(&exact), [[200, 0, 0, 255], [10, 10, 240, 255], [255, 0, 0, 255], [0, 0, 255, 0]]);
+        // By closeness, a shade keeps how it differs.
+        let mut soft = img.clone();
+        swap_colours(&mut soft, &swaps, true);
+        assert_eq!(row(&soft)[1], [210, 10, 0, 255]);
+        // Super: its own colours, the usual ones for the rest.
+        let usual = [[[0, 0, 255], [255, 0, 0]], [[255, 0, 0], [255, 255, 255]]];
+        let sup = [[[0, 0, 255], [255, 220, 0]]];
+        assert_eq!(super_swaps(&usual, &sup), [[[0, 0, 255], [255, 220, 0]], [[255, 0, 0], [255, 255, 255]]]);
+        // Turning with the ground: smoothly, by eighths, or not.
+        let eighth = std::f32::consts::FRAC_PI_4;
+        assert_eq!(Turn::Ground.angle(0.3), 0.3);
+        assert_eq!((Turn::Steps.angle(0.3), Turn::Steps.angle(0.5)), (0.0, eighth));
+        assert_eq!(Turn::Upright.angle(1.2), 0.0);
+    }
 
     #[test]
     fn layouts_parse_and_backgrounds_clear() {

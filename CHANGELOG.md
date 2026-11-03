@@ -13,6 +13,10 @@ described on the [releases page](https://github.com/elimanee/gravity-engine/rele
 - **GIF** (`E`) in the editor: the animation shown as an animated GIF, three times as big on a transparent background, at its pace, kept with the screenshots
 - **Grid** (`R`) in the editor: drag a box over pictures laid out in rows and columns; their columns and rows are counted and the box fits itself around them (Alt: as drawn), then *Add* (`Enter`) adds every cell with a sprite in it, with the character at the same place in each, so the animation does not wobble
 - **Import…** in the editor: pictures from files (PNG, WebP, BMP, JPEG, or every frame of an animated GIF, its timing kept as holds and pace) added to the animation, below the sheet; *Save* writes the sheet again with them. Dropping pictures on the editor does the same
+- **Paint** (`P`) in the editor: a pencil and an eraser (1 to 16 pixels), a fill and an eyedropper (or Alt-click) on the sheet itself, with a colour picker and the sheet's own colours; strokes undo like any change, and *Save* writes the sheet again in place (as a PNG)
+- **Colours** in the editor: change a character's colours without touching the sheet (pick them from a list of its colours or on the sheet; lossy sheets take the shades close to them), and give them **Super colours** of their own, used by the game when they turn Super instead of the golden glow. Kept with the regions (`recolour`, `super`); undone like any change
+- **Turns** for each animation: with the ground (as before), by 45° as the Mega Drive games drew it, or never (kept as `turn` in the regions)
+- **A layer in front**: besides the pieces drawn behind (Tails' tails), any animation can have pieces drawn in front of the character (dust, sparks…), playing on their own; *Body* / *Behind* / *Front* (`B`) for every character. In the generator's sheets, GIFs and the regions (`front`)
 
 ## [3.4.2]
 
