@@ -651,11 +651,11 @@ impl RegionEditor {
         }
         let p = self.palette.as_ref()?;
         Some(if p.sup && self.sheet.super_colours.is_empty() {
-            "Super colours: none yet (the game turns the character golden)  ·  choose a colour to change".to_string()
+            "Super colours: none yet (the game makes the character golden)  ·  choose one to change".to_string()
         } else if p.sup {
             "Super colours: what each colour becomes when Super  ·  click one here or on the sheet".to_string()
         } else {
-            "Colours: choose one (below, or click it on the sheet), then what it becomes  ·  Esc: done".to_string()
+            "Colours: choose one (below or on the sheet), then what it becomes  ·  Esc: done".to_string()
         })
     }
 

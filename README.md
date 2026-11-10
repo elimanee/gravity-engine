@@ -4,7 +4,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
-![Version](https://img.shields.io/badge/version-3.4-8b78ff)
+![Version](https://img.shields.io/badge/version-3.5-8b78ff)
 
 **[Play it in your browser](https://elimanee.github.io/gravity-engine/)**, or [download it](#download) for Linux and Windows.
 
@@ -13,6 +13,23 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 | Sandbox | Settings drawer (Space) | Tool picker (Tab) |
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
+
+## What's new in 3.5: zone gimmicks, a zone's sheet and a fuller sprite region editor
+
+![Sonic, drawn by the game, on a bridge of logs that dips under him, a platform swinging on its chain above, a cracked wall to roll through and a rock beyond](docs/screenshots/zone-gimmicks.png)
+
+- **Zone gimmicks**, in Meadow's acts and in the level editor (*Gimmick*): **bridges** of logs that dip under the character, **platforms swinging** on chains that carry the character along, **ledges that crumble** a moment after they are stood on, **walls** broken by rolling into them, **logs with spikes** going round them, and **rocks**. The endless run has nothing loose that tumbles about any more: walls to roll through instead of crates.
+- **The zone's sheet**: the ground of the acts and of your levels (grass along the top, the ground repeated all over), the ledges in the air and every gimmick can be drawn from a sheet of tiles (`zone.png`), laid out in the sprite region editor's new **Zone** tab. The Green Hill Zone objects sheet from The Spriters Resource is recognised as it is. See [The zone's sheet](#the-zones-sheet).
+- **New animations** a character's sheet can have, which the game plays: flat out, falling, landing, balancing at the edge of a drop (facing it), catching a bubble, drowning, turning super and the victory pose past the goal.
+
+![The sprite region editor on Tails as the game draws him: his orange chosen in the colour list and turned blue in the colour picker, every picture of the sheet and the walk playing beside it in his new colours](docs/screenshots/sprite-colours.png)
+
+- **The sheet generator** (*Generate…*) makes a sheet the way fans lay theirs out, from the game's drawing of a character or from the pictures its sheet uses, with its regions: ready to play, or to paint over.
+- **Paint** (`P`) touches the sheet up (pencil, eraser, fill, eyedropper, a colour picker); **Colours** changes a character's colours without touching the sheet, with **Super colours** of their own.
+- **Grid** (`R`) cuts pictures laid out in rows and columns, **Import…** brings in pictures and animated GIFs, **GIF** (`E`) keeps an animation as one.
+- Each animation **turns** with the ground smoothly, by 45° as on the Mega Drive, or not at all, and can have pieces drawn **in front** of the character as well as behind.
+
+See [Editing the regions](#editing-the-regions). *(The pictures are the game's own drawings and shapes: no sprites from the games are included.)*
 
 ## What's new in 3.4: any sheet, in the sprite region editor
 

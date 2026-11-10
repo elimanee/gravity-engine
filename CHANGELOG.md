@@ -4,22 +4,29 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
-## [Unreleased]
+## [3.5.0]
 
 ### Added
-- **Sheet generator** in the sprite region editor (*Generate…*, `G`): makes a sheet laid out the way fans lay theirs out (a banner with the character's name, the pictures' origin, credits and palette; an animation a row, each picture in its own box on a dark page), with its regions beside it so it works as it is. From **the game's drawing** of the character (every animation the game asks of them, two pixels to one of the game's: to play, or to paint over) or from **the pictures its sheet uses**, tidied. Kept with the screenshots; *Use it for … now* makes it the character's sheet at once. Clicking a character with no sheet offers it too
-- *Open…* (formerly *Open a sheet…*) also brings in the regions kept beside a picture (`<name>.regions.json`), so a generated or shared sheet comes in laid out
-- **New animations** a sheet can have, played by the game when it has them (else the character does what it did before): `full_speed` (flat out on the ground, faster than running), `fall` (falling without being curled up), `land` (a moment on touching down from a fall), `balance` (teetering at the edge of a drop, facing it), `breathe` (catching an air bubble), `drown`, `transform` (turning super) and `victory` (past the goal post). In the editor's list with what each is, and in the game's drawing for the generator
-- **GIF** (`E`) in the editor: the animation shown as an animated GIF, three times as big on a transparent background, at its pace, kept with the screenshots
-- **Grid** (`R`) in the editor: drag a box over pictures laid out in rows and columns; their columns and rows are counted and the box fits itself around them (Alt: as drawn), then *Add* (`Enter`) adds every cell with a sprite in it, with the character at the same place in each, so the animation does not wobble
-- **Import…** in the editor: pictures from files (PNG, WebP, BMP, JPEG, or every frame of an animated GIF, its timing kept as holds and pace) added to the animation, below the sheet; *Save* writes the sheet again with them. Dropping pictures on the editor does the same
-- **Paint** (`P`) in the editor: a pencil and an eraser (1 to 16 pixels), a fill and an eyedropper (or Alt-click) on the sheet itself, with a colour picker and the sheet's own colours; strokes undo like any change, and *Save* writes the sheet again in place (as a PNG)
-- **Colours** in the editor: change a character's colours without touching the sheet (pick them from a list of its colours or on the sheet; lossy sheets take the shades close to them), and give them **Super colours** of their own, used by the game when they turn Super instead of the golden glow. Kept with the regions (`recolour`, `super`); undone like any change
-- **Turns** for each animation: with the ground (as before), by 45° as the Mega Drive games drew it, or never (kept as `turn` in the regions)
 - **Zone gimmicks** in the acts and the level editor (*Gimmick*, click again for the next): bridges of logs that dip under the character, platforms swinging on chains (they carry the character along), ledges that crumble once stood on (back a while later), walls broken by rolling into them, logs with spikes going round them, and rocks. In Meadow's acts, and every one of them behind the start of the sprite test track
 - **The zone's sheet** (`zone.png`): the acts' and your levels' ground drawn with its tiles (the grass along the top, blades over the sky, the ground repeated all over the world so the pieces meet), the ledges in the air, and every gimmick. The Green Hill Zone objects sheet from The Spriters Resource (864 × 707) is known as it is; any other is laid out in the sprite region editor's new **Zone** tab (`--sprite-regions=zone`), its tiles listed instead of animations, and *Try* plays the test track with them. Without one, everything is drawn as before
-- The **endless run** has nothing that falls or rolls about any more: its stretch of crates (loose boxes that tumbled and got in the way) is now two walls to roll through and a rock to jump
+- **New animations** a sheet can have, played by the game when it has them (else the character does what it did before): `full_speed` (flat out on the ground, faster than running), `fall` (falling without being curled up), `land` (a moment on touching down from a fall), `balance` (teetering at the edge of a drop, facing it), `breathe` (catching an air bubble), `drown`, `transform` (turning super) and `victory` (past the goal post). In the editor's list with what each is, and in the game's drawing for the generator
+- **Sheet generator** in the sprite region editor (*Generate…*, `G`): makes a sheet laid out the way fans lay theirs out (a banner with the character's name, the pictures' origin, credits and palette; an animation a row, each picture in its own box on a dark page), with its regions beside it so it works as it is. From **the game's drawing** of the character (every animation the game asks of them, two pixels to one of the game's: to play, or to paint over) or from **the pictures its sheet uses**, tidied. Kept with the screenshots; *Use it for … now* makes it the character's sheet at once. Clicking a character with no sheet offers it too
+- **Paint** (`P`) in the editor: a pencil and an eraser (1 to 16 pixels), a fill and an eyedropper (or Alt-click) on the sheet itself, with a colour picker and the sheet's own colours; strokes undo like any change, and *Save* writes the sheet again in place (as a PNG)
+- **Colours** in the editor: change a character's colours without touching the sheet (pick them from a list of its colours or on the sheet; lossy sheets take the shades close to them), and give them **Super colours** of their own, used by the game when they turn Super instead of the golden glow. Kept with the regions (`recolour`, `super`); undone like any change
+- **Grid** (`R`) in the editor: drag a box over pictures laid out in rows and columns; their columns and rows are counted and the box fits itself around them (Alt: as drawn), then *Add* (`Enter`) adds every cell with a sprite in it, with the character at the same place in each, so the animation does not wobble
+- **Import…** in the editor: pictures from files (PNG, WebP, BMP, JPEG, or every frame of an animated GIF, its timing kept as holds and pace) added to the animation, below the sheet; *Save* writes the sheet again with them. Dropping pictures on the editor does the same
+- **GIF** (`E`) in the editor: the animation shown as an animated GIF, three times as big on a transparent background, at its pace, kept with the screenshots
+- **Turns** for each animation: with the ground (as before), by 45° as the Mega Drive games drew it, or never (kept as `turn` in the regions)
 - **A layer in front**: besides the pieces drawn behind (Tails' tails), any animation can have pieces drawn in front of the character (dust, sparks…), playing on their own; *Body* / *Behind* / *Front* (`B`) for every character. In the generator's sheets, GIFs and the regions (`front`)
+
+### Changed
+- *Open…* (formerly *Open a sheet…*) also brings in the regions kept beside a picture (`<name>.regions.json`), so a generated or shared sheet comes in laid out
+- The **endless run** has nothing that falls or rolls about any more: its stretch of crates (loose boxes that tumbled and got in the way) is now two walls to roll through and a rock to jump
+
+### Downloads
+- `gravity_engine-linux-x86_64` — Linux build (needs `libopenmpt` and the usual X11 / ALSA libraries)
+- `gravity_engine-windows-x86_64.zip` — Windows build: unzip and run `gravity_engine.exe` (keep the DLLs next to it)
+- Or play it in the browser: https://elimanee.github.io/gravity-engine/ (the sprite region editor needs the desktop version, like your own sprite and zone sheets)
 
 ## [3.4.2]
 
