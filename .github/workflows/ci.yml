@@ -11,7 +11,9 @@ env:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # Built on an older Ubuntu so the binary runs on older Linux too (glibc 2.35
+    # and up): one built on ubuntu-latest needs the newest glibc.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -42,6 +44,12 @@ jobs:
 
       - name: Release build
         run: cargo build --release
+
+      - name: Check the glibc it needs
+        run: |
+          need=$(objdump -T target/release/gravity_engine | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+          echo "Needs $need"
+          [ "$(printf '%s\n' "$need" GLIBC_2.35 | sort -V | tail -1)" = GLIBC_2.35 ]
 
       # Test builds of any branch, downloadable from the run's page.
       - uses: actions/upload-artifact@v4

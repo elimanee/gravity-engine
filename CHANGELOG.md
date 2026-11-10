@@ -14,6 +14,9 @@ described on the [releases page](https://github.com/elimanee/gravity-engine/rele
 - Crumbling ledges wait half a second before they start to go, and go a piece at a time more slowly, so running on keeps ahead of them
 - The level editor shows the sprite sheets and the zone's tiles from the start, before anything is played
 
+### Fixed
+- The Linux build runs on older Linux again (glibc 2.35 and up: Ubuntu 22.04, Debian 12…): 3.5.0's was built on the newest Ubuntu and asked for glibc 2.43
+
 ## [3.5.0]
 
 ### Added

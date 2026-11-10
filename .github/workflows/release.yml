@@ -23,7 +23,8 @@ env:
 
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    # An older Ubuntu, so the binary runs on older Linux too (glibc 2.35 and up).
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -51,6 +52,9 @@ jobs:
       - name: Build
         run: |
           cargo build --release --locked
+          need=$(objdump -T target/release/gravity_engine | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+          echo "Needs $need"
+          [ "$(printf '%s\n' "$need" GLIBC_2.35 | sort -V | tail -1)" = GLIBC_2.35 ]
           mkdir dist
           cp target/release/gravity_engine dist/gravity_engine-linux-x86_64
 

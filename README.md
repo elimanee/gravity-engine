@@ -533,7 +533,7 @@ Press **F1** in the app for the full list.
 
 ## Download
 
-Linux and Windows builds are attached to each [release](https://github.com/elimanee/gravity-engine/releases). On Windows, unzip `gravity_engine-windows-x86_64.zip` and run `gravity_engine.exe` (keep the DLLs next to it).
+Linux and Windows builds are attached to each [release](https://github.com/elimanee/gravity-engine/releases). The Linux build runs on distributions with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later) and needs `libopenmpt`. On Windows, unzip `gravity_engine-windows-x86_64.zip` and run `gravity_engine.exe` (keep the DLLs next to it).
 
 Or play the [web version](https://elimanee.github.io/gravity-engine/) in your browser, with nothing to install.
 
