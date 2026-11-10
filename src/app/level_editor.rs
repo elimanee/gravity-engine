@@ -46,38 +46,10 @@ pub(super) struct LevelEditor {
 impl App {
     /// Open the editor on a new level, or on "My levels" entry `i`.
     pub(super) fn open_level_editor(&mut self, existing: Option<usize>) {
-        let (sc, path) = match existing {
-            Some(i) => {
-                self.refresh_levels();
-                let Some((path, _)) = self.levels.get(i).cloned() else { return };
-                match scene::read(&path) {
-                    Ok(sc) => (sc, Some(path)),
-                    Err(e) => {
-                        self.toasts.error(format!("Could not open the level: {e}"));
-                        return;
-                    }
-                }
-            }
-            None => (self.blank_level(), None),
-        };
-        let name = sc.game.as_ref().map(|g| g.name.clone()).unwrap_or_default();
-        self.open_level_editor_on(sc, name, path, true);
-    }
-
-    /// Open the editor on `sc` (kept at `path`, if it is, saved or not).
-    pub(super) fn open_level_editor_on(
-        &mut self,
-        sc: scene::SceneFile,
-        name: String,
-        path: Option<PathBuf>,
-        saved: bool,
-    ) {
         self.challenge = None;
         self.editor = None;
         self.stop_game();
         self.library.fader.open = false;
-        // The level as it will look: its things, and the zone's tiles.
-        self.sonic_sheets_once();
         let mut ed = LevelEditor {
             name: String::new(),
             path: None,
@@ -91,10 +63,27 @@ impl App {
             start: None,
             testing: None,
             preview: None,
-            saved,
+            saved: true,
         };
-        ed.spec = sc.game.clone().unwrap_or_default();
-        (ed.name, ed.path) = (name, path);
+        let sc = match existing {
+            Some(i) => {
+                self.refresh_levels();
+                let Some((path, _)) = self.levels.get(i).cloned() else { return };
+                match scene::read(&path) {
+                    Ok(sc) => {
+                        ed.spec = sc.game.clone().unwrap_or_default();
+                        ed.name = ed.spec.name.clone();
+                        ed.path = Some(path);
+                        sc
+                    }
+                    Err(e) => {
+                        self.toasts.error(format!("Could not open the level: {e}"));
+                        return;
+                    }
+                }
+            }
+            None => self.blank_level(),
+        };
         // The world it was made in first: points in metres turn into pixels in it.
         self.level_world(&sc);
         ed.start = sc.sonic.map(|[x, y]| crate::physics::to_screen(x, y));

@@ -1,18 +1,15 @@
-//! Sonic's endless run, in the infinite world: a level made from a seed as
-//! he goes (see [`procedural`]: hills, slopes, cliffs, pits to get over on
-//! bridges, swings, platforms or crumbling ledges, loops, walls, two
-//! paths) and cleared away behind him, through themed zones (meadow,
-//! twilight, snowfield, lagoon, storm) with more and more badniks and
-//! spikes the further he gets. There is nothing under the ground: a pit
-//! ends the run. It is played as a level with one life; the best run is
-//! kept as a ghost that races him on the same course next time.
+//! Sonic's endless run, in the infinite world: stretches of terrain are
+//! made ahead of him as he goes (hills, loops, ramps, springs, platforms,
+//! walls to roll through, rings) and cleared away behind him, through themed zones
+//! (meadow, twilight, snowfield, lagoon, storm) with more and more
+//! badniks and spikes the further he gets. It is played as a level with
+//! one life; the best run is kept as a ghost that races him on the same
+//! course next time.
 
 use super::*;
 use crate::background::LevelSky;
-use crate::game::{EnemyKind, LevelSpec, MONITOR, SPIKES};
-use crate::library::procedural::{self, Danger, Kind, Look, Rng};
-use crate::library::{Builder, CORAL, LEAF, SKY, SNOW, STONE, VIOLET};
-use crate::physics::borders::BorderMode;
+use crate::game::{EnemyKind, LevelSpec, MonitorKind, MONITOR, SPIKES};
+use crate::library::{Builder, CORAL, LEAF, SKY, SNOW, STONE, VIOLET, WOOD};
 use crate::weather::Weather;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -20,6 +17,8 @@ use std::collections::VecDeque;
 /// Terrain kept ready ahead of him, and kept behind him (px).
 const AHEAD: f32 = 2600.0;
 const BEHIND: f32 = 1800.0;
+/// The floor in the builder's design coordinates.
+const FLOOR: f32 = 690.0;
 /// The ghost's track is sampled this often (per second).
 const GHOST_RATE: f32 = 15.0;
 /// Seconds between the end of a run and the next.
@@ -107,15 +106,34 @@ fn zone_at(d: f32) -> usize {
     0
 }
 
-/// Ghosts of courses made the way they are made now (older ones raced
-/// on other courses).
-const GHOST_VERSION: u32 = 2;
+/// A small seeded random generator, so a course can be made again.
+#[derive(Clone)]
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    fn range(&mut self, lo: f32, hi: f32) -> f32 {
+        lo + (self.next() % 1_000_000) as f32 / 1_000_000.0 * (hi - lo)
+    }
+
+    fn below(&mut self, n: u32) -> u32 {
+        (self.next() % n.max(1) as u64) as u32
+    }
+
+    fn chance(&mut self, p: f32) -> bool {
+        self.range(0.0, 1.0) < p
+    }
+}
 
 /// The best run: its course and where the character was, sampled.
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub(super) struct Ghost {
-    #[serde(default)]
-    version: u32,
     seed: u64,
     distance: f32,
     character: crate::sonic::Character,
@@ -129,8 +147,7 @@ fn ghost_path() -> Option<std::path::PathBuf> {
 
 impl Ghost {
     fn load() -> Option<Ghost> {
-        let g: Ghost = serde_json::from_str(&crate::storage::read_to_string(&ghost_path()?).ok()?).ok()?;
-        (g.version == GHOST_VERSION).then_some(g)
+        serde_json::from_str(&crate::storage::read_to_string(&ghost_path()?).ok()?).ok()
     }
 
     fn save(&self) -> Result<(), String> {
@@ -151,16 +168,14 @@ pub(super) struct Endless {
     floor: f32,
     stretches: VecDeque<Stretch>,
     made: u32,
-    last_kind: Kind,
-    /// The ground's top where the next stretch starts (design px).
-    ground: f32,
+    last_kind: u32,
     /// Furthest point reached (px).
     pub reached: f32,
     seed: u64,
     rng: Rng,
     /// The zone he is in, and the sky the player had before the run.
     zone: usize,
-    before: (Weather, bool, bool, f32, BorderMode),
+    before: (Weather, bool, bool, f32),
     /// The sky turning from the last zone's (0 → 1).
     sky_from: LevelSky,
     sky_t: f32,
@@ -197,20 +212,21 @@ impl Endless {
         if self.track.is_empty() || d <= 20.0 || self.ghost.as_ref().is_some_and(|g| d <= g.distance) {
             return None;
         }
-        let track = std::mem::take(&mut self.track);
-        let ghost = Ghost { version: GHOST_VERSION, seed: self.seed, distance: d, character: self.character, track };
+        let ghost =
+            Ghost { seed: self.seed, distance: d, character: self.character, track: std::mem::take(&mut self.track) };
         Some(ghost.save().map(|()| d))
     }
 }
 
 impl App {
+    /// Start an endless run: the infinite world, an empty floor and Sonic,
+    /// on the best run's course (racing its ghost) or a new one.
     pub(super) fn start_endless(&mut self) {
         if !self.infinite() {
             self.set_world_size(4);
         }
         let (aw, ah) = self.arena();
-        // The ground starts at the generator's base line.
-        let floor = Builder::at(0.0, ah).to_world(0.0, procedural::BASE).y;
+        let floor = ah - WALL_T * PPM;
         let x = aw / 2.0;
         let start = vec2(x, floor - 40.0);
         let ghost = Ghost::load().filter(|g| !g.track.is_empty());
@@ -218,10 +234,7 @@ impl App {
         let before = self
             .endless
             .as_ref()
-            .map_or((self.s.weather, self.s.night, self.s.water, self.s.water_level, self.s.border), |e| e.before);
-        // Nothing under the ground: a pit ends the run.
-        self.s.border = BorderMode::Open;
-        self.world.set_border(BorderMode::Open);
+            .map_or((self.s.weather, self.s.night, self.s.water, self.s.water_level), |e| e.before);
         // One life, no goal: the run ends at the first fall.
         self.start_game(&LevelSpec { name: "Endless run".into(), ..LevelSpec::default() }, start);
         if let Some(g) = &mut self.game {
@@ -234,11 +247,10 @@ impl App {
             floor,
             stretches: VecDeque::new(),
             made: 0,
-            last_kind: Kind::Flat,
-            ground: procedural::BASE,
+            last_kind: 0,
             reached: x,
             seed,
-            rng: Rng::new(seed),
+            rng: Rng(seed | 1),
             zone: usize::MAX,
             before,
             sky_from: LevelSky::DAY,
@@ -250,20 +262,13 @@ impl App {
             ghost_target: self.endless.as_mut().and_then(|e| e.ghost_target.take()),
             over: None,
         });
-        // Ground under him before he can fall.
-        while self.endless.as_ref().is_some_and(|e| e.next < x + AHEAD) {
-            self.make_stretch();
-        }
     }
 
     /// The run is over: keep it if it is the best and give the player
     /// their sky back.
     pub(super) fn end_endless(&mut self) {
         if let Some(mut e) = self.endless.take() {
-            let border;
-            (self.s.weather, self.s.night, self.s.water, self.s.water_level, border) = e.before;
-            self.s.border = border;
-            self.world.set_border(border);
+            (self.s.weather, self.s.night, self.s.water, self.s.water_level) = e.before;
             // The benchmark leaves the player's ghost alone.
             if self.bench.is_none() {
                 self.ghost_toast(e.keep_if_best());
@@ -396,25 +401,27 @@ impl App {
     fn make_stretch(&mut self) {
         let (_, ah) = self.arena();
         let Some(e) = &mut self.endless else { return };
-        let (x0, ground, last) = (e.next, e.ground, e.last_kind);
-        let first = e.made == 0;
-        let quiet = e.made <= 2;
+        let x0 = e.next;
+        // A different kind each time (the first is flat).
+        let kind = if e.made == 0 {
+            0
+        } else {
+            let mut k = 1 + e.rng.below(5);
+            if k == e.last_kind {
+                k = k % 5 + 1;
+            }
+            k
+        };
         e.made += 1;
+        e.last_kind = kind;
         // Further on, the zone's look and more danger.
         let d = ((x0 - e.start) / PPM).max(0.0);
         let zone = &ZONES[zone_at(d)];
-        let look = Look { ground: zone.ground, edge: zone.edge };
         let level = (d / 150.0) as u32;
         let mut rng = e.rng.clone();
         let mut b = Builder::at(x0, ah);
-        let (kind, piece) = if first {
-            (Kind::Flat, procedural::start(&mut b, 0.0, ground, 1400.0, &look))
-        } else {
-            let kind = procedural::pick(&mut rng, last, ground);
-            (kind, procedural::piece(&mut b, kind, 0.0, ground, &look, &mut rng))
-        };
-        let dangers = if quiet { vec![] } else { procedural::dangers(&piece.floors, level, &mut rng) };
-        // Its gimmicks are the game's (bridges, swings, walls…).
+        let width = build(&mut b, kind, zone, &mut rng);
+        // Its gimmicks are the game's (walls, rocks).
         if let (Some(g), Some(spec)) = (self.game.as_mut(), b.scene.game.as_ref()) {
             g.add_things(&mut self.world, spec);
         }
@@ -422,26 +429,71 @@ impl App {
         let bodies = made.objects.iter().map(|o| o.body).collect();
         self.objects.extend(made.objects);
         self.rings.extend(b.scene.rings.iter().map(|&[x, y]| crate::physics::to_screen(x, y)));
-        for d in dangers {
-            self.endless_danger(&b, d);
+        let floor = ah - WALL_T * PPM;
+        let first = self.endless.as_ref().is_none_or(|e| e.made <= 2);
+        if !first {
+            self.endless_dangers(kind, x0, floor, level, &mut rng);
         }
         if let Some(e) = &mut self.endless {
             e.rng = rng;
-            e.last_kind = kind;
-            e.ground = piece.end;
-            e.next = x0 + piece.width;
-            e.stretches.push_back(Stretch { x1: x0 + piece.width, bodies });
+            e.next = x0 + width;
+            e.stretches.push_back(Stretch { x1: x0 + width, bodies });
         }
     }
 
-    /// A badnik, spikes or a monitor on a stretch made with `b`.
-    fn endless_danger(&mut self, b: &Builder, d: Danger) {
+    /// Badniks, spikes and monitors for a stretch of kind `kind` from `x0`
+    /// (px), more of them at higher `level`s.
+    fn endless_dangers(&mut self, kind: u32, x0: f32, floor: f32, level: u32, rng: &mut Rng) {
         let Some(g) = &mut self.game else { return };
-        match d {
-            Danger::Walker(kind, x, y) => g.add_enemy(kind, b.to_world(x, y - 17.0)),
-            Danger::Flyer(x, y) => g.add_enemy(EnemyKind::Flyer, b.to_world(x, y)),
-            Danger::Spikes(x, y) => g.add_spikes(&mut self.world, b.to_world(x, y - SPIKES.y / 2.0)),
-            Danger::Monitor(kind, x, y) => g.add_monitor(&mut self.world, kind, b.to_world(x, y - MONITOR.y / 2.0)),
+        let walker = |rng: &mut Rng| {
+            if level >= 4 && rng.chance(0.4) {
+                EnemyKind::Crab
+            } else {
+                EnemyKind::Crawler
+            }
+        };
+        let on_floor = |x: f32| vec2(x0 + x, floor - 17.0);
+        let count = (1 + level / 2).min(4);
+        // Where each kind of stretch has room on the floor (design px).
+        let room: &[(f32, f32)] = match kind {
+            0 => &[(250.0, 820.0)],
+            1 => &[(640.0, 760.0)],
+            2 => &[(720.0, 960.0)],
+            3 => &[(900.0, 1100.0)],
+            4 => &[(320.0, 640.0), (720.0, 1000.0)],
+            _ => &[(700.0, 980.0)],
+        };
+        for _ in 0..count {
+            if !rng.chance(0.35 + level as f32 * 0.08) {
+                continue;
+            }
+            let (a, b) = room[rng.below(room.len() as u32) as usize];
+            let x = rng.range(a, b);
+            if level >= 2 && rng.chance(0.3) {
+                g.add_enemy(EnemyKind::Flyer, vec2(x0 + x, floor - rng.range(120.0, 200.0)));
+            } else {
+                g.add_enemy(walker(rng), on_floor(x));
+            }
+        }
+        // Spikes on open floor.
+        if level >= 1 && kind == 0 && rng.chance(0.4 + level as f32 * 0.05) {
+            let x = rng.range(420.0, 640.0);
+            for k in 0..(1 + level.min(3) / 2) {
+                g.add_spikes(&mut self.world, vec2(x0 + x + k as f32 * SPIKES.x, floor - SPIKES.y / 2.0));
+            }
+        }
+        // Now and then a monitor.
+        if rng.chance(0.18) {
+            let kinds = [
+                MonitorKind::Rings,
+                MonitorKind::Rings,
+                MonitorKind::Shield,
+                MonitorKind::Shoes,
+                MonitorKind::Invincible,
+            ];
+            let k = if rng.chance(0.05) { MonitorKind::Life } else { kinds[rng.below(kinds.len() as u32) as usize] };
+            let (a, _) = room[0];
+            g.add_monitor(&mut self.world, k, vec2(x0 + a - 60.0, floor - MONITOR.y / 2.0));
         }
     }
 
@@ -521,6 +573,88 @@ impl App {
     }
 }
 
+/// Build one stretch of kind `kind` from design x = 0; returns its width.
+fn build(b: &mut Builder, kind: u32, zone: &Zone, rng: &mut Rng) -> f32 {
+    let plank = Material { flammable: false, bounce: 0.1, friction: 0.6, ..Material::DEFAULT };
+    let ring_row = |b: &mut Builder, x: f32, y: f32, n: usize| {
+        for k in 0..n {
+            b.ring(x + k as f32 * 36.0, y);
+        }
+    };
+    match kind {
+        // Flat ground and a row of rings.
+        0 => {
+            ring_row(b, 300.0, FLOOR - 40.0, 6);
+            900.0
+        }
+        // Two rolling hills, rings along their tops.
+        1 => {
+            let h = rng.range(50.0, 95.0);
+            for start in [0.0f32, 700.0] {
+                let pts: Vec<(f32, f32)> = (0..=35)
+                    .map(|i| {
+                        let x = i as f32 / 35.0 * 700.0;
+                        let y = FLOOR + 5.0 - (h + 5.0) * (std::f32::consts::PI * x / 700.0).sin().powi(2);
+                        (start + x, y)
+                    })
+                    .collect();
+                b.stroke(&pts, 16.0, zone.edge, true, plank);
+                for k in 0..5 {
+                    let x = 220.0 + k as f32 * 65.0;
+                    let y = FLOOR - h * (std::f32::consts::PI * x / 700.0).sin().powi(2) - 45.0;
+                    b.ring(start + x, y);
+                }
+            }
+            1400.0
+        }
+        // A dash panel and a loop with rings round the inside.
+        2 => {
+            let dash = Material { conveyor: 20.0, flammable: false, ..Material::DEFAULT };
+            b.stroke(&[(150.0, FLOOR - 3.0), (260.0, FLOOR - 3.0)], 8.0, CORAL, true, dash);
+            let r = 110.0;
+            b.sonic_loop(500.0, FLOOR - r, r, zone.ground);
+            for k in 0..8 {
+                let a = (k as f32 / 8.0 * 360.0).to_radians();
+                b.ring(500.0 + a.cos() * (r - 42.0), FLOOR - r + a.sin() * (r - 42.0));
+            }
+            ring_row(b, 140.0, FLOOR - 40.0, 4);
+            1000.0
+        }
+        // A ramp to fly off, rings in the air.
+        3 => {
+            let top = FLOOR - rng.range(60.0, 100.0);
+            b.wall(&[(100.0, FLOOR + 4.0), (380.0, top)], zone.ground);
+            for k in 0..7 {
+                let t = k as f32 / 6.0;
+                b.ring(470.0 + t * 420.0, top - 120.0 - 160.0 * t * (1.0 - t) * 2.0);
+            }
+            1150.0
+        }
+        // A spring up to a platform full of rings (or run on underneath).
+        4 => {
+            let spring = Material { bounce: 1.0, flammable: false, ..Material::DEFAULT };
+            b.stroke(&[(150.0, FLOOR - 4.0), (205.0, FLOOR - 4.0)], 10.0, CORAL, true, spring);
+            let y = FLOOR - 250.0;
+            b.wall(&[(260.0, y), (680.0, y)], WOOD);
+            ring_row(b, 300.0, y - 40.0, 10);
+            for k in 0..3 {
+                b.ring(178.0, FLOOR - 120.0 - k as f32 * 45.0);
+            }
+            1050.0
+        }
+        // Walls to roll through (curl up!) and a rock to jump, rings
+        // between them: nothing that falls or rolls about.
+        _ => {
+            b.breakable_wall(380.0, FLOOR);
+            ring_row(b, 450.0, FLOOR - 40.0, 3);
+            b.breakable_wall(600.0, FLOOR);
+            b.rock(1060.0, FLOOR);
+            ring_row(b, 680.0, FLOOR - 40.0, 6);
+            1200.0
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -549,13 +683,15 @@ mod tests {
     #[test]
     fn nothing_on_the_course_falls_or_rolls_about() {
         let zone = &ZONES[0];
-        let look = Look { ground: zone.ground, edge: zone.edge };
-        let mut rng = Rng::new(7);
-        for kind in Kind::ALL {
+        for kind in 0..=5 {
             let mut b = Builder::at(0.0, 1440.0);
-            procedural::piece(&mut b, kind, 0.0, procedural::BASE, &look, &mut rng);
-            assert!(b.scene.objects.iter().all(|o| o.pinned), "{kind:?} has something loose");
+            build(&mut b, kind, zone, &mut Rng(7));
+            assert!(b.scene.objects.iter().all(|o| o.pinned), "stretch {kind} has something loose");
         }
+        let mut b = Builder::at(0.0, 1440.0);
+        build(&mut b, 5, zone, &mut Rng(7));
+        let spec = b.scene.game.expect("walls and a rock");
+        assert_eq!((spec.walls.len(), spec.rocks.len()), (2, 1));
     }
 
     #[test]

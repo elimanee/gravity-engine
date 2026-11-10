@@ -161,19 +161,13 @@ While someone plays, `X` is the action button (the Winamp player is on `X` other
 
 *Play* tries the level straight away from its start, *Stop* comes back to the editor. *Save* keeps it in `~/.config/gravity_engine/levels/`: your levels are listed in Library → Sonic after the acts, to play or to edit again (they are ordinary `.gscene` files, so they can be shared).
 
-### Random acts
-
-**Library → Sonic → Random act** makes a new act each time it is played, from a seed: the start, sixteen stretches one after another, a star post every few of them and the goal. The ground goes up and down (hills, slopes, a cliff with a spring to climb it, drops), **pits** come with a way across (a jump, a bridge, a swinging platform, ledges in the air, a ledge that crumbles, a log with spikes), and some stretches have **two paths**: a spring up to a row of ledges with the monitors on them, or the ground below with the badniks. Loops, walls to roll through and rocks come up too, and the badniks and spikes get more numerous towards the goal. Every pit can be jumped or crossed. With a zone's sheet (see [The zone's sheet](#the-zones-sheet)), the ground and the gimmicks are drawn with its tiles.
-
-Its *Edit* button opens the last random act played in the level editor (named *Random act* and its number): change it if you like, and *Save* keeps it in *My levels*.
-
 ### A richer endless run
 
 ![The Twilight zone at night: Sonic lit up among crates, the best run's ghost glowing beside him and rings gleaming](docs/screenshots/endless-twilight.png)
 
-The *Endless run* example (Sonic in the infinite world, on a course made ahead of him by the same generator as the [random acts](#random-acts): hills and slopes, pits with a way across, two paths, loops, springs, walls to roll through and rings) now goes through **five zones** — Meadow, Twilight (at night: Sonic carries a light and the rings gleam), Snowfield (snow), Lagoon (water) and Storm peak (rain and lightning) — each with its own colours and sky, and round again. The further you go, the more **badniks, flyers, crabs and spikes**, with the odd monitor.
+The *Endless run* example (Sonic in the infinite world, with hills, loops, ramps, springs, platforms, walls to roll through and rings made ahead of him) now goes through **five zones** — Meadow, Twilight (at night: Sonic carries a light and the rings gleam), Snowfield (snow), Lagoon (water) and Storm peak (rain and lightning) — each with its own colours and sky, and round again. The further you go, the more **badniks, flyers, crabs and spikes**, with the odd monitor.
 
-One life: at the first one lost (a hit without rings, or a fall into a pit) the run is over and starts again. The best run is kept as a **ghost** that races you on the same course next time (`ghost.json`); the distance, your best and the zone are shown under the counters.
+One life: at the first fall the run is over and starts again. The best run is kept as a **ghost** that races you on the same course next time (`ghost.json`); the distance, your best and the zone are shown under the counters.
 
 ### Controllers
 
@@ -475,8 +469,7 @@ Without them, everything is drawn with shapes.
 - **Special stages** — 50 rings at a goal open a giant ring to a Blue Spheres stage; win the seven **chaos emeralds** and turn **super** (any character)
 - **Music** — chiptune songs and jingles for Sonic's mode, made by the program
 - **Level editor** (Library → Sonic → *New level*) — make Sonic levels, try them and keep them in *My levels*
-- **Random acts** (Library → Sonic → *Random act*) — a new act made each time: hills and slopes, pits to cross, two paths, the zone's gimmicks; keep the ones you like
-- **Endless run** — a course made as you go (hills, pits, two paths), five zones, more and more badniks, and the best run's ghost to race
+- **Endless run** — five zones, more and more badniks, and the best run's ghost to race
 - **Game controllers** — play with a pad (Linux and Windows; it rumbles on Windows)
 - **Weather and night** (`Shift+H` / `Shift+T`) — rain, snow and storms with lightning; a night lit by lamps with shadows, fire and lasers
 - **Screenshots** (`F12`) and **GIF recording** (`F11`, up to 30 s) of the scene, without the interface

@@ -10,7 +10,6 @@ pub mod challenges;
 pub mod custom;
 pub mod examples;
 pub mod levels;
-pub mod procedural;
 
 use crate::config::PPM;
 use crate::drawing;
@@ -90,11 +89,6 @@ impl Builder {
     /// A builder in world pixels, for a world `ah` px high (the level editor).
     pub fn world(ah: f32) -> Self {
         Builder { dx: 0.0, dy: 0.0, bottom: ah, ..Builder::new(DESIGN_W, ah) }
-    }
-
-    /// Design pixels → world pixels.
-    pub fn to_world(&self, x: f32, y: f32) -> macroquad::prelude::Vec2 {
-        macroquad::prelude::vec2(x + self.dx, y + self.dy)
     }
 
     /// Design pixels → physics metres.
@@ -368,19 +362,11 @@ impl Builder {
     /// Ground from x0 to x1 whose top rises `h` px in a smooth hump (made
     /// of pieces at most 600 px wide, so their sprites stay small).
     pub fn hill(&mut self, x0: f32, x1: f32, top: f32, h: f32, rgb: [u8; 3], edge: [u8; 3]) {
-        self.terrain(x0, x1, top, top, h, rgb, edge);
-    }
-
-    /// Ground from x0 to x1 whose top goes smoothly from `y0` to `y1`,
-    /// rising `hump` px more in the middle.
-    #[allow(clippy::too_many_arguments)]
-    pub fn terrain(&mut self, x0: f32, x1: f32, y0: f32, y1: f32, hump: f32, rgb: [u8; 3], edge: [u8; 3]) {
         let n = ((x1 - x0) / 40.0).ceil().max(1.0) as usize;
         let surface: Vec<(f32, f32)> = (0..=n)
             .map(|i| {
                 let t = i as f32 / n as f32;
-                let along = y0 + (y1 - y0) * t * t * (3.0 - 2.0 * t);
-                (x0 + (x1 - x0) * t, along - hump * (std::f32::consts::PI * t).sin().powi(2))
+                (x0 + (x1 - x0) * t, top - h * (std::f32::consts::PI * t).sin().powi(2))
             })
             .collect();
         let m = Material { flammable: false, friction: 0.6, bounce: 0.05, ..Material::DEFAULT };
