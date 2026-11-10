@@ -3205,10 +3205,7 @@ impl App {
             level: self.level.clone(),
         });
         // Every sheet as saved, but this one as edited.
-        if !self.sonic_sheet_tried {
-            self.sonic_sheet_tried = true;
-            self.load_sonic_sheet();
-        }
+        self.sonic_sheets_once();
         match owner {
             Owner::Char(c) => {
                 self.sonic_sheet.set(c, edited);

@@ -134,6 +134,10 @@ pub enum Action {
     LevelContinue,
     /// Play one of Sonic's built-in acts.
     OpenAct(usize),
+    /// Play a new random act, or open the last one in the level editor (to keep it).
+    RandomAct {
+        edit: bool,
+    },
     /// Play one of "My levels", or edit it (`None`: a new level).
     OpenLevel(usize),
     EditLevel(Option<usize>),

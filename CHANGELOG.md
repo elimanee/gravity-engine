@@ -4,6 +4,16 @@ Notes for each release. The release workflow publishes the section matching
 the tag as the GitHub release description. Versions up to 1.7.0 are
 described on the [releases page](https://github.com/elimanee/gravity-engine/releases).
 
+## [Unreleased]
+
+### Added
+- **Random acts** (Library → Sonic → *Random act*): a new act made each time from a seed, from the start through sixteen stretches and star posts to the goal. The ground goes up and down (hills, slopes, a cliff with a spring, drops); pits come with a way across (a jump, a bridge, a swinging platform, ledges in the air, a crumbling ledge, a spike log), every one of them crossable; some stretches have two paths (a spring up to ledges with the monitors, or the ground below with the badniks); loops, walls and rocks too, and more badniks towards the goal. Drawn with the zone's tiles when there is a zone sheet. *Edit* opens the last one played in the level editor, to change it and keep it in *My levels*
+
+### Changed
+- The **endless run** is made by the same generator as the random acts, as Sonic goes: real ground with hills, slopes, cliffs and drops, pits to get over (falling in one ends the run), two paths and the zone gimmicks, instead of stretches laid on a flat floor. A best run's ghost from before is not raced any more (its course is gone); the next best run makes a new one
+- Crumbling ledges wait half a second before they start to go, and go a piece at a time more slowly, so running on keeps ahead of them
+- The level editor shows the sprite sheets and the zone's tiles from the start, before anything is played
+
 ## [3.5.1]
 
 ### Fixed
