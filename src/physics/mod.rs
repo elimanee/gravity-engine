@@ -117,11 +117,13 @@ impl PhysWorld {
             if h == self.ground || walls.contains(&h) {
                 continue;
             }
+            // Where a pinned (kinematic) body is going, read before
+            // set_position makes it the new position too.
+            let next = b.is_kinematic().then(|| *b.next_position());
             let mut p = *b.position();
             p.translation.x -= dx;
             b.set_position(p, false);
-            if b.is_kinematic() {
-                let mut n = *b.next_position();
+            if let Some(mut n) = next {
                 n.translation.x -= dx;
                 b.set_next_kinematic_position(n);
             }
@@ -329,5 +331,27 @@ mod tests {
         assert!((after.y - before.y).abs() < 0.05);
         assert!(w.bodies[far].translation().y > 0.4, "the floor goes on forever");
         assert!(!w.walls().sides && !w.walls().ceiling);
+    }
+
+    #[test]
+    fn pinned_things_shift_once_with_the_world() {
+        let mut w = PhysWorld::new(-9.8, BorderMode::Open, (60_000.0, 1400.0));
+        w.set_infinite(true);
+        // A pinned piece of ground (kinematic) and one gliding along.
+        let still = w.bodies.insert(RigidBodyBuilder::kinematic_position_based().translation(vector![500.0, 5.0]));
+        w.colliders.insert_with_parent(ColliderBuilder::cuboid(5.0, 0.5), still, &mut w.bodies);
+        let gliding = w.bodies.insert(RigidBodyBuilder::kinematic_position_based().translation(vector![600.0, 5.0]));
+        w.colliders.insert_with_parent(ColliderBuilder::cuboid(1.0, 0.2), gliding, &mut w.bodies);
+        w.bodies[gliding].set_next_kinematic_translation(vector![600.5, 5.0]);
+        w.shift(200.0);
+        for _ in 0..3 {
+            w.step_fixed();
+        }
+        let x = |h: RigidBodyHandle| w.bodies[h].translation().x;
+        assert!((x(still) - 300.0).abs() < 1e-3, "moved once, not twice: {}", x(still));
+        assert!((x(gliding) - 400.5).abs() < 1e-3, "where it was going, moved once: {}", x(gliding));
+        // Its collider is there too.
+        let c = w.bodies[still].colliders()[0];
+        assert!((w.colliders[c].position().translation.x - 300.0).abs() < 1e-3);
     }
 }

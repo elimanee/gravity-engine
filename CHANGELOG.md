@@ -13,6 +13,10 @@ described on the [releases page](https://github.com/elimanee/gravity-engine/rele
 - The **endless run** is made by the same generator as the random acts, as Sonic goes: real ground with hills, slopes, cliffs and drops, pits to get over (falling in one ends the run), two paths and the zone gimmicks, instead of stretches laid on a flat floor. A best run's ghost from before is not raced any more (its course is gone); the next best run makes a new one
 - Crumbling ledges wait half a second before they start to go, and go a piece at a time more slowly, so running on keeps ahead of them
 - The level editor shows the sprite sheets and the zone's tiles from the start, before anything is played
+- In the random acts and the endless run, badniks are only put where there is room: no more walker or flyer on a short bit of ground between two pits, where the character lands (a hit there threw them back into the pit)
+
+### Fixed
+- In the infinite world, pinned things moved twice as far as everything else whenever the world was brought back under the view: in the endless run the ground vanished from under the character after 200 m, and in the sandbox pinned objects jumped
 
 ## [3.5.1]
 

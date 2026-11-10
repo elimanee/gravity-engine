@@ -368,6 +368,9 @@ pub enum Danger {
 
 /// What goes on `floors`, `level` the further on (0 at first): badniks and
 /// spikes below, monitors and the odd ring box up on the upper path.
+/// The least ground (px) a badnik is put on.
+const ROOMY: f32 = 300.0;
+
 pub fn dangers(floors: &[Floor], level: u32, rng: &mut Rng) -> Vec<Danger> {
     let mut out = vec![];
     for f in floors {
@@ -393,12 +396,16 @@ pub fn dangers(floors: &[Floor], level: u32, rng: &mut Rng) -> Vec<Danger> {
         if !rng.chance(busy) {
             continue;
         }
+        // Badniks only where there is room: on a bit of ground between pits
+        // (walkers go to its edges) they would be where the character lands,
+        // and being hit there throws them back into the pit.
+        let roomy = x1 - x0 >= ROOMY;
         match rng.below(10) {
-            0..=4 => {
+            0..=4 if roomy => {
                 let kind = if level >= 3 && rng.chance(0.4) { EnemyKind::Crab } else { EnemyKind::Crawler };
                 out.push(Danger::Walker(kind, x, f.y));
             }
-            5 | 6 if level >= 1 => out.push(Danger::Flyer(x, f.y - rng.range(120.0, 200.0))),
+            5 | 6 if level >= 1 && roomy => out.push(Danger::Flyer(x, f.y - rng.range(120.0, 200.0))),
             7 | 8 if x1 - x0 > 160.0 => out.push(Danger::Spikes(x, f.y)),
             _ if rng.chance(0.3) => out.push(Danger::Monitor(MonitorKind::Rings, x, f.y)),
             _ => {}
@@ -525,7 +532,12 @@ mod tests {
 
     #[test]
     fn dangers_stay_on_their_floors_with_monitors_up_top() {
-        let floors = [floor(100.0, 400.0, 500.0), Floor { x0: 600.0, x1: 800.0, y: 300.0, upper: true }];
+        // Room for badniks, a ledge up top, and a short bit between pits.
+        let floors = [
+            floor(100.0, 400.0, 500.0),
+            Floor { x0: 600.0, x1: 800.0, y: 300.0, upper: true },
+            floor(1000.0, 1100.0, 500.0),
+        ];
         let mut rng = Rng::new(3);
         for _ in 0..200 {
             for d in dangers(&floors, 5, &mut rng) {
@@ -534,7 +546,9 @@ mod tests {
                         assert!((100.0..=400.0).contains(&x) && y == 500.0)
                     }
                     Danger::Flyer(x, y) => assert!((100.0..=400.0).contains(&x) && y < 500.0),
-                    Danger::Monitor(_, x, y) => assert!((100.0..=800.0).contains(&x) && (y == 500.0 || y == 300.0)),
+                    Danger::Monitor(_, x, y) => assert!(
+                        ((100.0..=800.0).contains(&x) || (1000.0..=1100.0).contains(&x)) && (y == 500.0 || y == 300.0)
+                    ),
                 }
             }
         }
