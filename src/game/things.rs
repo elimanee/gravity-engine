@@ -27,8 +27,8 @@ const SWING_PERIOD: f32 = 3.4;
 /// A ledge crumbles this long after it is stood on, a column after the
 /// next as they go away from where; it comes back this long after, once
 /// the character is this far away.
-const CRUMBLE_DELAY: f32 = 0.35;
-const CRUMBLE_EACH: f32 = 0.06;
+const CRUMBLE_DELAY: f32 = 0.5;
+const CRUMBLE_EACH: f32 = 0.1;
 const LEDGE_BACK: f32 = 5.0;
 const LEDGE_AWAY: f32 = 500.0;
 /// Pieces falling (world px/s²) and how long they are seen.
@@ -538,7 +538,12 @@ mod tests {
         let col = th.ledges[0].columns[1].body.unwrap().1;
         s.on = Some(col);
         th.step(&mut w, &s, 1.0 / 60.0);
-        for _ in 0..40 {
+        // Not at once: running on, the character keeps ahead of it.
+        for _ in 0..20 {
+            th.step(&mut w, &s, 1.0 / 60.0);
+        }
+        assert!(th.ledges[0].columns.iter().all(|c| c.body.is_some()));
+        for _ in 0..30 {
             th.step(&mut w, &s, 1.0 / 60.0);
         }
         assert!(th.ledges[0].columns.iter().all(|c| c.body.is_none() && c.falling.is_some()));

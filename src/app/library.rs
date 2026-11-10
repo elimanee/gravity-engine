@@ -91,7 +91,9 @@ impl App {
         self.zones = sanitize_zones(sc.zones.clone());
         let made = scene::instantiate(&sc, &mut self.world);
         let n = made.objects.len();
-        self.objects = made.objects;
+        // The endless run's first stretches, made above, stay (after the scene's own).
+        let endless = std::mem::replace(&mut self.objects, made.objects);
+        self.objects.extend(endless);
         self.links = made.links;
         self.gadgets = made.gadgets;
         if let Some(spec) = &sc.game {
@@ -118,6 +120,42 @@ impl App {
         self.camera.zoom = 1.0;
         self.paused = false;
         self.library.fader.open = false;
+    }
+
+    /// A random act's scene, from `seed`, and its name.
+    fn random_act_scene(&mut self, seed: u64) -> (scene::SceneFile, String) {
+        if !self.infinite() {
+            self.set_world_size(4);
+        }
+        let (aw, ah) = self.arena();
+        let mut b = crate::library::Builder::at(aw / 2.0 - 600.0, ah);
+        b.scene.border = crate::physics::borders::BorderMode::Open;
+        b.scene.world_size = Some(4);
+        let name = crate::library::procedural::act(&mut b, seed, 16);
+        (b.scene, name)
+    }
+
+    /// A new random act to play; or (`edit`) the last one played (a new one
+    /// if none) in the level editor, to change it and keep it in My levels.
+    pub(super) fn random_act(&mut self, edit: bool) {
+        self.challenge = None;
+        self.library.fader.open = false;
+        let seed = match self.random_act.filter(|_| edit) {
+            Some(seed) => seed,
+            None => ((get_time() * 1e6) as u64 ^ 0x2545_f491_4f6c_dd1d).wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 8,
+        };
+        self.random_act = Some(seed);
+        let (sc, name) = self.random_act_scene(seed);
+        if edit {
+            self.open_level_editor_on(sc, name.clone(), None, false);
+            self.toasts.info(format!("{name} in the level editor  ·  change it, then Save keeps it in My levels"));
+            return;
+        }
+        self.apply_scene(sc);
+        self.act = None;
+        self.camera.zoom = 1.0;
+        self.paused = false;
+        self.toasts.info(format!("{name}  ·  Library → Sonic → Random act → Edit keeps it"));
     }
 
     /// Act `i` straight away (`--act`).

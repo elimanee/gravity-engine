@@ -32,6 +32,8 @@ pub struct LibraryData<'a> {
     pub levels: &'a [String],
     /// The chaos emeralds found (one bit each).
     pub emeralds: u8,
+    /// The seed of the last random act played.
+    pub random: Option<u64>,
 }
 
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -59,8 +61,8 @@ impl Library {
             Tab::Examples => examples::ALL.len(),
             Tab::Challenges => challenges::ALL.len(),
             Tab::Mine => mine + 1,
-            // "New level", the built-in acts, then the player's levels.
-            Tab::Sonic => 1 + acts::ALL.len() + levels,
+            // "New level", "Random act", the built-in acts, then the player's levels.
+            Tab::Sonic => 2 + acts::ALL.len() + levels,
         }
     }
 
@@ -150,9 +152,10 @@ impl Library {
                     Tab::Mine if edit => Action::OpenEditor(Some(i - 1)),
                     Tab::Mine => Action::StartCustom(i - 1),
                     Tab::Sonic if i == 0 => Action::EditLevel(None),
-                    Tab::Sonic if i <= acts::ALL.len() => Action::OpenAct(i - 1),
-                    Tab::Sonic if edit => Action::EditLevel(Some(i - 1 - acts::ALL.len())),
-                    Tab::Sonic => Action::OpenLevel(i - 1 - acts::ALL.len()),
+                    Tab::Sonic if i == 1 => Action::RandomAct { edit },
+                    Tab::Sonic if i <= acts::ALL.len() + 1 => Action::OpenAct(i - 2),
+                    Tab::Sonic if edit => Action::EditLevel(Some(i - 2 - acts::ALL.len())),
+                    Tab::Sonic => Action::OpenLevel(i - 2 - acts::ALL.len()),
                 });
                 self.fader.open = false;
             } else if !p.contains(input.mouse) {
@@ -268,8 +271,22 @@ impl Library {
                         text(line, r.x + 12.0, r.y + 46.0 + k as f32 * 14.0, 11.0, fade(TEXT_MUTED, f));
                     }
                 }
-                Tab::Sonic if i > acts::ALL.len() => {
-                    let name = &data.levels[i - 1 - acts::ALL.len()];
+                Tab::Sonic if i == 1 => {
+                    icons::zone_kind(ZoneKind::Goal, vec2(r.x + 22.0, r.y + 22.0), 18.0, fade(ACCENT_HI, f), t);
+                    text_bold("Random act", r.x + 38.0, r.y + 27.0, 14.0, fade(TEXT, f));
+                    let about = match data.random {
+                        Some(seed) => format!("A new one each time · Edit keeps #{} in My levels", seed % 100_000),
+                        None => "A new act each time: hills, pits, two paths, zone gimmicks".to_string(),
+                    };
+                    for (k, line) in wrap(&about, r.w - 24.0, 11.0).iter().take(2).enumerate() {
+                        text(line, r.x + 12.0, r.y + 46.0 + k as f32 * 14.0, 11.0, fade(TEXT_MUTED, f));
+                    }
+                    let e = Self::edit_button(r);
+                    draw_button(e, "Edit", e.contains(mouse), false, f);
+                    text("Play", r.x + r.w - 44.0, r.y + 26.0, 11.0, fade(if hov { ACCENT_HI } else { TEXT_DIM }, f));
+                }
+                Tab::Sonic if i > acts::ALL.len() + 1 => {
+                    let name = &data.levels[i - 2 - acts::ALL.len()];
                     text_bold(&fit(name, r.w - 24.0 - 58.0, 14.0), r.x + 12.0, r.y + 26.0, 14.0, fade(TEXT, f));
                     text("My level", r.x + 12.0, r.y + 46.0, 11.0, fade(TEXT_MUTED, f));
                     if let Some(score) = data.act_scores.get(name) {
@@ -281,7 +298,7 @@ impl Library {
                     text("Play", r.x + r.w - 44.0, r.y + 26.0, 11.0, fade(if hov { ACCENT_HI } else { TEXT_DIM }, f));
                 }
                 Tab::Sonic => {
-                    let i = i - 1;
+                    let i = i - 2;
                     let a = &acts::ALL[i];
                     keycap(r.x + 12.0, r.y + 18.0, &(i + 1).to_string(), 10.0, f);
                     text_bold(&fit(a.name, r.w - 36.0 - 58.0, 14.0), r.x + 36.0, r.y + 23.0, 14.0, fade(TEXT, f));

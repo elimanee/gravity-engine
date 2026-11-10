@@ -59,12 +59,17 @@ impl App {
     }
 
     pub(super) fn spawn_sonic(&mut self, at: Vec2) {
+        self.sonic_sheets_once();
+        let sonic = Sonic::as_character(at, self.s.character);
+        self.sonic = Some(SonicRun { sonic, acc: 0.0, jump: false, action: false, rings: 0, held: None });
+    }
+
+    /// The sprite sheets, the first time they are wanted.
+    pub(super) fn sonic_sheets_once(&mut self) {
         if !self.sonic_sheet_tried {
             self.sonic_sheet_tried = true;
             self.load_sonic_sheet();
         }
-        let sonic = Sonic::as_character(at, self.s.character);
-        self.sonic = Some(SonicRun { sonic, acc: 0.0, jump: false, action: false, rings: 0, held: None });
     }
 
     /// (Re)load the sprite sheets from the Sonic folder: the characters', and the objects'.

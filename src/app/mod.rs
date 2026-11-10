@@ -208,6 +208,8 @@ pub struct App {
     /// built-in act it is.
     level: Option<scene::SceneFile>,
     act: Option<usize>,
+    /// The seed of the last random act played (its "Edit" opens it).
+    random_act: Option<u64>,
     /// The night's light map.
     lights: crate::lighting::Lights,
     climate: weather::Climate,
@@ -335,6 +337,7 @@ impl App {
             warp_echo: None,
             level: None,
             act: None,
+            random_act: None,
             level_editor: None,
             level_bar: Default::default(),
             levels: Vec::new(),
@@ -1307,6 +1310,7 @@ impl App {
             Action::EditSpriteRegions => self.open_regions(None),
             Action::LevelContinue => self.level_continue(),
             Action::OpenAct(i) => self.open_act(i),
+            Action::RandomAct { edit } => self.random_act(edit),
             Action::OpenLevel(i) => self.open_level(i),
             Action::EditLevel(i) => self.open_level_editor(i),
             Action::Level(cmd) => self.level_cmd(cmd),
@@ -2312,6 +2316,7 @@ impl App {
                 emeralds: self.s.emeralds,
                 character: self.s.character,
                 levels: &levels,
+                random: self.random_act,
             };
             self.library.draw(&data, m);
         }
