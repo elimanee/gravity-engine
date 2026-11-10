@@ -17,7 +17,7 @@ use crate::game::{self, BossKind, EnemyKind, LevelSpec, MonitorKind, Placed};
 use crate::physics::borders::BorderMode;
 use crate::physics::gadgets::{GadgetKind, GadgetSpec, Trigger};
 use crate::physics::links::LinkKind;
-use crate::physics::object::Material;
+use crate::physics::object::{Material, Skin};
 use crate::physics::zones::{self, Zone, ZoneKind};
 use crate::scene::{SceneFile, SceneGadget, SceneLink, SceneObject, SceneSource, SceneWater};
 use crate::shapes::Shape;
@@ -304,6 +304,49 @@ impl Builder {
         self.stroke(&outline, 4.0, rgb, true, m);
     }
 
+    /// A span from x0 to x1 with its top at `top` (design px), in metres.
+    fn span(&self, x0: f32, x1: f32, top: f32) -> game::things::Span {
+        let ([a, y], [b, _]) = (self.phys(x0, top), self.phys(x1, top));
+        game::things::Span { x0: a.min(b), x1: a.max(b), y }
+    }
+
+    /// A bridge of logs from x0 to x1, its top at `top`: it dips under the
+    /// character.
+    pub fn bridge(&mut self, x0: f32, x1: f32, top: f32) {
+        let s = self.span(x0, x1, top);
+        self.level().bridges.push(s);
+    }
+
+    /// A platform swinging on a chain from (x, y).
+    pub fn swing(&mut self, x: f32, y: f32) {
+        let at = self.phys(x, y);
+        self.level().swings.push(at);
+    }
+
+    /// A ledge from x0 to x1, its top at `top`, that crumbles once stood on.
+    pub fn crumbling(&mut self, x0: f32, x1: f32, top: f32) {
+        let s = self.span(x0, x1, top);
+        self.level().ledges.push(s);
+    }
+
+    /// A wall on the ground at `ground`, broken by rolling into it.
+    pub fn breakable_wall(&mut self, x: f32, ground: f32) {
+        let at = self.phys(x, ground);
+        self.level().walls.push(at);
+    }
+
+    /// A log from x0 to x1 (its top at `top`) with spikes going round it.
+    pub fn spike_log(&mut self, x0: f32, x1: f32, top: f32) {
+        let s = self.span(x0, x1, top);
+        self.level().spike_logs.push(s);
+    }
+
+    /// A rock on the ground at `ground`.
+    pub fn rock(&mut self, x: f32, ground: f32) {
+        let at = self.phys(x, ground);
+        self.level().rocks.push(at);
+    }
+
     /// An air bubble vent on the ground at `ground` (under water).
     pub fn vent(&mut self, x: f32, ground: f32) {
         let at = self.phys(x, ground);
@@ -338,8 +381,8 @@ impl Builder {
             outline.push((b.0, self.bottom));
             outline.push((a.0, self.bottom));
             outline.push(a);
-            self.stroke(&outline, 4.0, rgb, true, m);
-            self.stroke(&dense(piece), 10.0, edge, true, m);
+            self.stroke(&outline, 4.0, rgb, true, Material { skin: Skin::Ground, ..m });
+            self.stroke(&dense(piece), 10.0, edge, true, Material { skin: Skin::Grass, ..m });
         }
     }
 
@@ -350,14 +393,15 @@ impl Builder {
         let n = ((x1 - x0) / 600.0).ceil().max(1.0) as usize;
         for k in 0..n {
             let (a, b) = (x0 + (x1 - x0) * k as f32 / n as f32, x0 + (x1 - x0) * (k + 1) as f32 / n as f32);
-            self.stroke(&[(a, top), (b, top), (b, bottom), (a, bottom), (a, top)], 4.0, rgb, true, m);
-            self.stroke(&dense(&[(a, top), (b, top)]), 10.0, edge, true, m);
+            let ground = Material { skin: Skin::Ground, ..m };
+            self.stroke(&[(a, top), (b, top), (b, bottom), (a, bottom), (a, top)], 4.0, rgb, true, ground);
+            self.stroke(&dense(&[(a, top), (b, top)]), 10.0, edge, true, Material { skin: Skin::Grass, ..m });
         }
     }
 
     /// A floating platform plank from x0 to x1 at height y.
     pub fn platform(&mut self, x0: f32, x1: f32, y: f32, rgb: [u8; 3]) {
-        let m = Material { flammable: false, friction: 0.6, bounce: 0.05, ..Material::DEFAULT };
+        let m = Material { flammable: false, friction: 0.6, bounce: 0.05, skin: Skin::Platform, ..Material::DEFAULT };
         self.stroke(&dense(&[(x0, y), (x1, y)]), 16.0, rgb, true, m);
     }
 

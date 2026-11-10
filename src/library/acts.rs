@@ -6,7 +6,7 @@
 //! flooded tunnel, the anchor crane) and, for Halloween, a graveyard at
 //! night where Sonic.exe hunts the player.
 
-use super::{Builder, LEAF, SKY, SNOW, STONE, WOOD};
+use super::{Builder, LEAF, SNOW, STONE, WOOD};
 use crate::game::{BossKind, EnemyKind, MonitorKind};
 use crate::physics::borders::BorderMode;
 use crate::scene::SceneFile;
@@ -110,11 +110,20 @@ fn arc(b: &mut Builder, x: f32, y: f32, n: usize, w: f32, h: f32) {
 
 /// Room to stand, look up, crouch and spin dash; a low wall to push; a
 /// hill; a loop; a badnik to bump into; a spring up to a ledge; and a high
-/// wall to climb at the end.
+/// wall to climb at the end. Behind the start, every gimmick of the zone.
 fn test_track(b: &mut Builder) {
     b.sonic(200.0, G - 40.0);
-    b.block(-700.0, -600.0, G - 420.0, G, ROCK, STONE);
-    b.ground(-600.0, 4300.0, G, DIRT, LEAF);
+    // To the left, the zone's gimmicks: a rock, a wall to roll through, a
+    // bridge, a swinging platform, a crumbling ledge and a spiked log.
+    b.block(-1400.0, -1300.0, G - 420.0, G, ROCK, STONE);
+    b.ground(-1300.0, -380.0, G, DIRT, LEAF);
+    b.spike_log(-1250.0, -1060.0, G - 24.0);
+    b.crumbling(-980.0, -780.0, G - 80.0);
+    b.swing(-560.0, G - 300.0);
+    b.bridge(-380.0, -140.0, G);
+    b.ground(-140.0, 4300.0, G, DIRT, LEAF);
+    b.breakable_wall(-60.0, G);
+    b.rock(60.0, G);
     rings(b, 300.0, G - 40.0, 4);
     b.block(720.0, 780.0, G - 60.0, G, ROCK, STONE);
     b.monitor(MonitorKind::Rings, 1000.0, G);
@@ -146,8 +155,9 @@ fn meadow_1(b: &mut Builder) {
     b.post(2340.0, G);
     b.monitor(MonitorKind::Shield, 2420.0, G);
     b.spikes(2520.0, G, 2);
-    // The first pit.
+    // The first pit, with a bridge over it.
     arc(b, 2730.0, G - 80.0, 5, 180.0, 90.0);
+    b.bridge(2700.0, 2940.0, G);
     b.ground(2940.0, 4700.0, G, DIRT, LEAF);
     rings(b, 3000.0, G - 40.0, 5);
     b.dash_panel(3200.0, 3320.0, G);
@@ -170,8 +180,11 @@ fn meadow_1(b: &mut Builder) {
     b.ground(4900.0, 6200.0, G, DIRT, LEAF);
     b.monitor(MonitorKind::Rings, 5000.0, G);
     b.walker(EnemyKind::Crawler, 5150.0, G);
+    b.rock(5280.0, G);
     b.walker(EnemyKind::Crawler, 5350.0, G);
     rings(b, 5450.0, G - 40.0, 5);
+    // Roll through the wall.
+    b.breakable_wall(5650.0, G);
     b.goal(5800.0, G);
 }
 
@@ -180,13 +193,13 @@ fn meadow_2(b: &mut Builder) {
     b.ground(-400.0, 1000.0, G, DIRT, LEAF);
     b.monitor(MonitorKind::Shoes, 420.0, G);
     rings(b, 560.0, G - 40.0, 6);
-    // Steps over a long pit.
-    for (k, (x0, x1, y)) in
-        [(1150.0, 1390.0, G - 60.0), (1500.0, 1700.0, G - 140.0), (1820.0, 2050.0, G - 60.0)].into_iter().enumerate()
-    {
-        b.platform(x0, x1, y, if k % 2 == 0 { WOOD } else { SKY });
+    // Steps over a long pit, a platform swinging between them.
+    for (x0, x1, y) in [(1150.0, 1390.0, G - 60.0), (1820.0, 2050.0, G - 60.0)] {
+        b.platform(x0, x1, y, WOOD);
         rings(b, x0 + 40.0, y - 40.0, 4);
     }
+    b.swing(1605.0, G - 290.0);
+    rings(b, 1545.0, G - 190.0, 4);
     b.enemy(EnemyKind::Flyer, 1600.0, G - 300.0);
     b.ground(2200.0, 3600.0, G, DIRT, LEAF);
     b.post(2300.0, G);
@@ -194,6 +207,8 @@ fn meadow_2(b: &mut Builder) {
     b.monitor(MonitorKind::Rings, 2560.0, G);
     b.walker(EnemyKind::Crab, 2700.0, G);
     b.spikes(2850.0, G, 3);
+    b.crumbling(2960.0, 3100.0, G - 70.0);
+    rings(b, 2985.0, G - 110.0, 3);
     b.monitor(MonitorKind::Life, 3150.0, G);
     b.walker(EnemyKind::Crawler, 3400.0, G);
     // Up a cliff with a spring.
@@ -208,6 +223,8 @@ fn meadow_2(b: &mut Builder) {
     b.wall(&[(4600.0, G - 200.0), (5000.0, G - 6.0)], ROCK);
     b.dash_panel(5100.0, 5220.0, G);
     arc(b, 5450.0, G - 60.0, 6, 260.0, 120.0);
+    // Over the last pit on a log with spikes going round it.
+    b.spike_log(5400.0, 5780.0, G);
     b.ground(5780.0, 7000.0, G, DIRT, LEAF);
     b.post(5900.0, G);
     rings(b, 5960.0, G - 40.0, 4);
@@ -227,6 +244,7 @@ fn meadow_3(b: &mut Builder) {
     rings(b, 1000.0, G - 40.0, 5);
     b.walker(EnemyKind::Crawler, 1200.0, G);
     arc(b, 1300.0, G - 100.0, 6, 220.0, 60.0);
+    b.crumbling(1300.0, 1520.0, G - 60.0);
     b.enemy(EnemyKind::Flyer, 1500.0, G - 160.0);
     b.monitor(MonitorKind::Rings, 1600.0, G);
     b.post(1700.0, G);
@@ -431,6 +449,18 @@ mod tests {
         }
         assert!(specs[1].game.as_ref().unwrap().vents.len() >= 2, "the tunnel has air");
         assert_eq!(specs[2].game.as_ref().unwrap().boss_kind, BossKind::Anchor);
+    }
+
+    #[test]
+    fn meadow_has_every_gimmick_of_the_zone() {
+        let specs: Vec<_> =
+            ALL.iter().filter(|a| a.zone == Zone::Meadow).map(|a| a.scene(0.0, 1440.0).game.unwrap()).collect();
+        let any = |f: fn(&crate::game::LevelSpec) -> bool| specs.iter().any(f);
+        assert!(any(|g| !g.bridges.is_empty()) && any(|g| !g.swings.is_empty()));
+        assert!(any(|g| !g.ledges.is_empty()) && any(|g| !g.walls.is_empty()));
+        assert!(any(|g| !g.spike_logs.is_empty()) && any(|g| !g.rocks.is_empty()));
+        // Spans go left to right.
+        assert!(specs.iter().flat_map(|g| g.bridges.iter().chain(&g.ledges).chain(&g.spike_logs)).all(|s| s.x0 < s.x1));
     }
 
     #[test]

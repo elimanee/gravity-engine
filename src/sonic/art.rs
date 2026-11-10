@@ -118,6 +118,12 @@ impl Frame {
 
 /// Draw the character (world pass).
 pub fn draw(s: &Sonic) {
+    draw_at(s, get_time() as f32);
+}
+
+/// Draw the character as at time `t` (s): what moves on its own clock
+/// (Tails' tails, the golden shine) does so from it.
+pub fn draw_at(s: &Sonic, t: f32) {
     let upright = !s.grounded || (s.gsp == 0.0 && super::mode_down(s.angle).y > 0.5 && s.angle.sin().abs() < 0.4);
     let mut angle = if upright && s.grounded { 0.0 } else { s.angle };
     let mut at = s.pos;
@@ -130,16 +136,16 @@ pub fn draw(s: &Sonic) {
     }
     let (sin, cos) = angle.sin_cos();
     let f = Frame { at, sin, cos, facing: s.facing, scale: super::SCALE };
-    let l = if s.super_form { golden(look(s.character), get_time() as f32) } else { look(s.character) };
+    let l = if s.super_form { golden(look(s.character), t) } else { look(s.character) };
     // Curled up, except mid-swing or lunging out of a teleport.
     if s.is_ball() && !(s.hammer_air && s.hammer.is_some()) && s.warp.is_none() {
         ball(&f, s, &l);
         if s.character == Character::Tails {
             // His tails trail behind the ball.
-            tails(&f, s, &l, (-12.0, 4.0), 2.6, false);
+            tails(&f, s, &l, (-12.0, 4.0), 2.6, false, t);
         }
     } else {
-        body(&f, s, &l);
+        body(&f, s, &l, t);
     }
 }
 
@@ -184,8 +190,7 @@ fn ball(f: &Frame, s: &Sonic, l: &Look) {
 }
 
 /// Tails' two tails, from `root`; `rotor`: spun above him (flying).
-fn tails(f: &Frame, s: &Sonic, l: &Look, root: (f32, f32), wag: f32, rotor: bool) {
-    let t = get_time() as f32;
+fn tails(f: &Frame, s: &Sonic, l: &Look, root: (f32, f32), wag: f32, rotor: bool, t: f32) {
     for k in 0..2 {
         let (a, len) = if rotor {
             // Whirling round above his back.
@@ -216,7 +221,7 @@ fn hammer(f: &Frame, hand: (f32, f32), a: f32) {
     f.ellipse(head.0, head.1, 8.0, 1.6, -tilt, GOLD);
 }
 
-fn body(f: &Frame, s: &Sonic, l: &Look) {
+fn body(f: &Frame, s: &Sonic, l: &Look, t_now: f32) {
     let ch = s.character;
     let speed = s.gsp.abs();
     let running = s.grounded && speed >= 6.0 && !s.sliding;
@@ -249,7 +254,7 @@ fn body(f: &Frame, s: &Sonic, l: &Look) {
     // Behind the body: Tails' tails, Knuckles' dreadlocks.
     if ch == Character::Tails {
         let flying = s.flying.is_some();
-        tails(f, s, l, t(-5.0, 9.0), if s.gsp == 0.0 && s.grounded { 3.0 } else { 9.0 }, flying);
+        tails(f, s, l, t(-5.0, 9.0), if s.gsp == 0.0 && s.grounded { 3.0 } else { 9.0 }, flying, t_now);
     }
 
     // Back arm (behind the body).

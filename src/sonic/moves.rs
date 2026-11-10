@@ -237,6 +237,7 @@ impl Sonic {
         if again && self.can_super && !self.super_form {
             self.super_form = true;
             self.can_super = false;
+            self.transforming = Some(0);
             events.push(Event::Transform);
             return true;
         }

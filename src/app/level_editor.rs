@@ -4,6 +4,7 @@
 //! goal and a boss, play it, and save it to "My levels" (Library → Sonic).
 
 use super::*;
+use crate::game::things::{self, Gimmick, Span};
 use crate::game::{
     art as game_art, BossKind, EnemyKind, Game, LevelSpec, MonitorKind, Placed, ARENA_HALF, MONITOR, SPIKES,
 };
@@ -27,6 +28,7 @@ pub(super) struct LevelEditor {
     pub item: Option<Item>,
     pub monitor: MonitorKind,
     pub badnik: EnemyKind,
+    pub gimmick: Gimmick,
     /// Where a drag started (ground, ledge, row of rings), and the last ring laid.
     drag: Option<Vec2>,
     last_ring: Option<Vec2>,
@@ -54,6 +56,7 @@ impl App {
             item: None,
             monitor: MonitorKind::Rings,
             badnik: EnemyKind::Crawler,
+            gimmick: Gimmick::Bridge,
             drag: None,
             last_ring: None,
             spec: LevelSpec::default(),
@@ -155,6 +158,7 @@ impl App {
             monitor: ed.monitor,
             badnik: ed.badnik,
             boss: ed.spec.boss_kind,
+            gimmick: ed.gimmick,
             hunter: ed.spec.hunter,
             testing: ed.testing.is_some(),
             has_start: ed.start.is_some(),
@@ -187,6 +191,9 @@ impl App {
                 } else if again && item == Item::Badnik {
                     let i = EnemyKind::ALL.iter().position(|&k| k == ed.badnik).unwrap_or(0);
                     ed.badnik = EnemyKind::ALL[(i + 1) % EnemyKind::ALL.len()];
+                } else if again && item == Item::Gimmick {
+                    let i = Gimmick::ALL.iter().position(|&k| k == ed.gimmick).unwrap_or(0);
+                    ed.gimmick = Gimmick::ALL[(i + 1) % Gimmick::ALL.len()];
                 } else if again && item == Item::Boss {
                     let i = BossKind::ALL.iter().position(|&k| k == ed.spec.boss_kind).unwrap_or(0);
                     ed.spec.boss_kind = BossKind::ALL[(i + 1) % BossKind::ALL.len()];
@@ -339,6 +346,12 @@ impl App {
                 objects = Some(b);
             }
             Item::Ground | Item::Platform => ed.drag = Some(m),
+            Item::Gimmick if ed.gimmick.dragged() => ed.drag = Some(m),
+            Item::Gimmick => match ed.gimmick {
+                Gimmick::Swing => ed.spec.swings.push(at(m)),
+                Gimmick::Wall => ed.spec.walls.push(at(vec2(m.x, g))),
+                _ => ed.spec.rocks.push(at(vec2(m.x, g))),
+            },
             Item::Erase => {
                 self.level_erase(m);
                 return true;
@@ -375,6 +388,18 @@ impl App {
         if x1 - x0 < 40.0 {
             return;
         }
+        if ed.item == Some(Item::Gimmick) {
+            let span = Span::from_px(x0, x1, start.y);
+            match ed.gimmick {
+                Gimmick::Bridge => ed.spec.bridges.push(span),
+                Gimmick::Crumble => ed.spec.ledges.push(span),
+                Gimmick::SpikeLog => ed.spec.spike_logs.push(span),
+                _ => return,
+            }
+            ed.saved = false;
+            self.level_preview();
+            return;
+        }
         let mut b = Builder::world(ah);
         match ed.item {
             Some(Item::Ground) => b.ground(x0, x1, start.y.min(m.y), DIRT, LEAF),
@@ -401,8 +426,21 @@ impl App {
         let s = &mut ed.spec;
         let tally = |s: &LevelSpec| {
             let small = s.posts.len() + s.vents.len() + s.pumpkins.len();
-            (s.enemies.len(), s.monitors.len(), s.spikes.len(), small, s.goal, s.boss)
+            let gimmicks =
+                s.bridges.len() + s.swings.len() + s.ledges.len() + s.walls.len() + s.spike_logs.len() + s.rocks.len();
+            (s.enemies.len(), s.monitors.len(), s.spikes.len(), small, gimmicks, s.goal, s.boss)
         };
+        // A span is under the pointer when it is near its top, between its ends.
+        let across = |sp: &Span| {
+            let (x0, x1, top) = sp.px();
+            m.x >= x0 - 10.0 && m.x <= x1 + 10.0 && (m.y - top).abs() < ERASE_REACH
+        };
+        let swing_near = |p: [f32; 2]| {
+            let a = crate::physics::to_screen(p[0], p[1]);
+            (a - m).length() < ERASE_REACH || (things::swing_at(a, 0.0) - m).length() < ERASE_REACH * 1.5
+        };
+        let standing =
+            |p: [f32; 2], h: f32| near(p) || (crate::physics::to_screen(p[0], p[1]) - vec2(0.0, h) - m).length() < h;
         let before = tally(s);
         if let Some(i) = s.enemies.iter().position(|e| near(e.at)) {
             s.enemies.remove(i);
@@ -416,6 +454,18 @@ impl App {
             s.vents.remove(i);
         } else if let Some(i) = s.pumpkins.iter().position(|&p| near(p)) {
             s.pumpkins.remove(i);
+        } else if let Some(i) = s.swings.iter().position(|&p| swing_near(p)) {
+            s.swings.remove(i);
+        } else if let Some(i) = s.walls.iter().position(|&p| standing(p, things::WALL.y / 2.0)) {
+            s.walls.remove(i);
+        } else if let Some(i) = s.rocks.iter().position(|&p| standing(p, things::ROCK.y / 2.0)) {
+            s.rocks.remove(i);
+        } else if let Some(i) = s.bridges.iter().position(across) {
+            s.bridges.remove(i);
+        } else if let Some(i) = s.ledges.iter().position(across) {
+            s.ledges.remove(i);
+        } else if let Some(i) = s.spike_logs.iter().position(across) {
+            s.spike_logs.remove(i);
         } else if s.goal.is_some_and(near) {
             s.goal = None;
         } else if s.boss.is_some_and(near) {
@@ -449,7 +499,7 @@ impl App {
         let Some(ed) = self.level_editor.as_ref().filter(|e| e.testing.is_none()) else { return };
         let t = get_time() as f32;
         if let Some(g) = &ed.preview {
-            game_art::draw(g, t, self.game_sprites.as_ref());
+            game_art::draw(g, t, self.game_sprites.as_ref(), self.sonic_sheet.zone.as_ref());
         }
         // A boss guards its arena.
         if let Some(b) = ed.spec.boss {
@@ -483,6 +533,15 @@ impl App {
                     draw_rectangle_lines(x0, top, x1 - x0, ah - top, 2.0, c);
                 }
                 Item::Platform => draw_line(x0, start.y, x1, start.y, 16.0, Color { a: 0.4, ..c }),
+                Item::Gimmick => {
+                    let h = match ed.gimmick {
+                        Gimmick::Crumble => things::LEDGE_DEPTH,
+                        Gimmick::SpikeLog => things::SPIKE_LOG,
+                        _ => things::LOG / 2.0,
+                    };
+                    draw_rectangle(x0, start.y, x1 - x0, h, Color { a: 0.25, ..c });
+                    draw_rectangle_lines(x0, start.y, x1 - x0, h, 2.0, c);
+                }
                 _ => {}
             }
         }
@@ -490,6 +549,7 @@ impl App {
         let dropped = ed.item.is_some_and(|i| match i {
             Item::Ring | Item::Boss | Item::Erase | Item::Hunter => false,
             Item::Badnik => walks(ed.badnik),
+            Item::Gimmick => matches!(ed.gimmick, Gimmick::Wall | Gimmick::Rock),
             _ => true,
         });
         if dropped && ed.drag.is_none() {

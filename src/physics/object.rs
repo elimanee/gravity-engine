@@ -144,6 +144,19 @@ impl Outline {
     }
 }
 
+/// What of a zone an object is, drawn with the zone's tiles when there is
+/// a zone sheet: the ground (its grass on top), the strip of grass along
+/// it (hidden then: the ground draws it), or a ledge in the air.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Skin {
+    #[default]
+    None,
+    Ground,
+    Grass,
+    Platform,
+}
+
 /// Surface and motion properties an object can be given from its menu.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -170,6 +183,13 @@ pub struct Material {
     /// For Sonic's loops: 0 always solid, 1 only on the way in, 2 only on
     /// the way out, 3 the top that switches between them.
     pub layer: u8,
+    /// Drawn with the zone's tiles (levels' ground and ledges).
+    #[serde(skip_serializing_if = "is_unskinned")]
+    pub skin: Skin,
+}
+
+fn is_unskinned(s: &Skin) -> bool {
+    *s == Skin::None
 }
 
 impl Default for Material {
@@ -191,6 +211,7 @@ impl Material {
         mirror: false,
         planet: 0.0,
         layer: 0,
+        skin: Skin::None,
     };
     pub const RUBBER: Material = Material { bounce: 0.92, friction: 0.9, ..Material::DEFAULT };
     pub const ICE: Material = Material { bounce: 0.05, friction: 0.0, flammable: false, ..Material::DEFAULT };
@@ -268,6 +289,11 @@ pub struct Object {
     pub pinned: bool,
     pub material: Material,
     trail: VecDeque<Ghost>,
+    /// Drawn instead of the sprite: a picture made from the zone's tiles,
+    /// and where it goes from the object's centre (unturned px); and which
+    /// zone sheet it was made with (0: none yet).
+    pub skin: Option<(Texture2D, Rect)>,
+    pub skinned: u32,
 }
 
 fn upload(img: &image::RgbaImage) -> Texture2D {
@@ -338,6 +364,8 @@ impl Object {
             pinned: at.pinned,
             material: at.material,
             trail: VecDeque::new(),
+            skin: None,
+            skinned: 0,
         }
     }
 
@@ -482,6 +510,18 @@ impl Object {
     /// Draw with the sprite multiplied by `tint` (charring, heat glow).
     pub fn draw_tinted(&self, world: &PhysWorld, tint: Color) {
         let (pos, angle) = self.screen_pos(world);
+        if let Some((tex, r)) = &self.skin {
+            if r.w > 0.0 && r.h > 0.0 {
+                let params = DrawTextureParams {
+                    dest_size: Some(r.size()),
+                    rotation: -angle,
+                    pivot: Some(pos),
+                    ..Default::default()
+                };
+                draw_texture_ex(tex, pos.x + r.x, pos.y + r.y, tint, params);
+            }
+            return;
+        }
         // Soft contact shadow.
         self.draw_sprite(self.texture(), pos + vec2(3.0, 4.0), angle, Color::new(0.0, 0.0, 0.0, 0.22));
         self.draw_sprite(self.texture(), pos, angle, tint);
@@ -623,6 +663,8 @@ impl Object {
             pinned: false,
             material: Material::default(),
             trail: VecDeque::new(),
+            skin: None,
+            skinned: 0,
         }
     }
 }

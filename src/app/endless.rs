@@ -1,6 +1,6 @@
 //! Sonic's endless run, in the infinite world: stretches of terrain are
 //! made ahead of him as he goes (hills, loops, ramps, springs, platforms,
-//! crates, rings) and cleared away behind him, through themed zones
+//! walls to roll through, rings) and cleared away behind him, through themed zones
 //! (meadow, twilight, snowfield, lagoon, storm) with more and more
 //! badniks and spikes the further he gets. It is played as a level with
 //! one life; the best run is kept as a ghost that races him on the same
@@ -421,6 +421,10 @@ impl App {
         let mut rng = e.rng.clone();
         let mut b = Builder::at(x0, ah);
         let width = build(&mut b, kind, zone, &mut rng);
+        // Its gimmicks are the game's (walls, rocks).
+        if let (Some(g), Some(spec)) = (self.game.as_mut(), b.scene.game.as_ref()) {
+            g.add_things(&mut self.world, spec);
+        }
         let made = crate::scene::instantiate(&b.scene, &mut self.world);
         let bodies = made.objects.iter().map(|o| o.body).collect();
         self.objects.extend(made.objects);
@@ -457,7 +461,7 @@ impl App {
             2 => &[(720.0, 960.0)],
             3 => &[(900.0, 1100.0)],
             4 => &[(320.0, 640.0), (720.0, 1000.0)],
-            _ => &[(650.0, 950.0)],
+            _ => &[(700.0, 980.0)],
         };
         for _ in 0..count {
             if !rng.chance(0.35 + level as f32 * 0.08) {
@@ -638,18 +642,15 @@ fn build(b: &mut Builder, kind: u32, zone: &Zone, rng: &mut Rng) -> f32 {
             }
             1050.0
         }
-        // Crates to bowl over (curl up!), rings behind them.
+        // Walls to roll through (curl up!) and a rock to jump, rings
+        // between them: nothing that falls or rolls about.
         _ => {
-            let crate_ = Material { breakable: true, strength: 7.0, ..Material::DEFAULT };
-            for (col, rows) in [(0, 3), (1, 2), (2, 1)] {
-                for row in 0..rows {
-                    let x = 420.0 + col as f32 * 50.0;
-                    let rgb = if row % 2 == 0 { WOOD } else { SKY };
-                    b.shape_with(Shape::Box, rgb, x, FLOOR - 24.0 - row as f32 * 48.0, 46.0, false, crate_);
-                }
-            }
-            ring_row(b, 650.0, FLOOR - 40.0, 6);
-            1000.0
+            b.breakable_wall(380.0, FLOOR);
+            ring_row(b, 450.0, FLOOR - 40.0, 3);
+            b.breakable_wall(600.0, FLOOR);
+            b.rock(1060.0, FLOOR);
+            ring_row(b, 680.0, FLOOR - 40.0, 6);
+            1200.0
         }
     }
 }
@@ -677,6 +678,20 @@ mod tests {
         assert!(close(a.mix(&b, 7.0), b), "held at the end");
         let half = a.mix(&b, 0.5);
         assert!((half.near.g - (a.near.g + b.near.g) / 2.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn nothing_on_the_course_falls_or_rolls_about() {
+        let zone = &ZONES[0];
+        for kind in 0..=5 {
+            let mut b = Builder::at(0.0, 1440.0);
+            build(&mut b, kind, zone, &mut Rng(7));
+            assert!(b.scene.objects.iter().all(|o| o.pinned), "stretch {kind} has something loose");
+        }
+        let mut b = Builder::at(0.0, 1440.0);
+        build(&mut b, 5, zone, &mut Rng(7));
+        let spec = b.scene.game.expect("walls and a rock");
+        assert_eq!((spec.walls.len(), spec.rocks.len()), (2, 1));
     }
 
     #[test]

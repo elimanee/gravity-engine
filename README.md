@@ -4,7 +4,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![Static Badge](https://img.shields.io/badge/Claude-yes-green?logo=claude)
-![Version](https://img.shields.io/badge/version-3.4-8b78ff)
+![Version](https://img.shields.io/badge/version-3.5-8b78ff)
 
 **[Play it in your browser](https://elimanee.github.io/gravity-engine/)**, or [download it](#download) for Linux and Windows.
 
@@ -13,6 +13,23 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 | Sandbox | Settings drawer (Space) | Tool picker (Tab) |
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
+
+## What's new in 3.5: zone gimmicks, a zone's sheet and a fuller sprite region editor
+
+![Sonic, drawn by the game, on a bridge of logs that dips under him, a platform swinging on its chain above, a cracked wall to roll through and a rock beyond](docs/screenshots/zone-gimmicks.png)
+
+- **Zone gimmicks**, in Meadow's acts and in the level editor (*Gimmick*): **bridges** of logs that dip under the character, **platforms swinging** on chains that carry the character along, **ledges that crumble** a moment after they are stood on, **walls** broken by rolling into them, **logs with spikes** going round them, and **rocks**. The endless run has nothing loose that tumbles about any more: walls to roll through instead of crates.
+- **The zone's sheet**: the ground of the acts and of your levels (grass along the top, the ground repeated all over), the ledges in the air and every gimmick can be drawn from a sheet of tiles (`zone.png`), laid out in the sprite region editor's new **Zone** tab. The Green Hill Zone objects sheet from The Spriters Resource is recognised as it is. See [The zone's sheet](#the-zones-sheet).
+- **New animations** a character's sheet can have, which the game plays: flat out, falling, landing, balancing at the edge of a drop (facing it), catching a bubble, drowning, turning super and the victory pose past the goal.
+
+![The sprite region editor on Tails as the game draws him: his orange chosen in the colour list and turned blue in the colour picker, every picture of the sheet and the walk playing beside it in his new colours](docs/screenshots/sprite-colours.png)
+
+- **The sheet generator** (*Generate…*) makes a sheet the way fans lay theirs out, from the game's drawing of a character or from the pictures its sheet uses, with its regions: ready to play, or to paint over.
+- **Paint** (`P`) touches the sheet up (pencil, eraser, fill, eyedropper, a colour picker); **Colours** changes a character's colours without touching the sheet, with **Super colours** of their own.
+- **Grid** (`R`) cuts pictures laid out in rows and columns, **Import…** brings in pictures and animated GIFs, **GIF** (`E`) keeps an animation as one.
+- Each animation **turns** with the ground smoothly, by 45° as on the Mega Drive, or not at all, and can have pieces drawn **in front** of the character as well as behind.
+
+See [Editing the regions](#editing-the-regions). *(The pictures are the game's own drawings and shapes: no sprites from the games are included.)*
 
 ## What's new in 3.4: any sheet, in the sprite region editor
 
@@ -140,7 +157,7 @@ While someone plays, `X` is the action button (the Winamp player is on `X` other
 
 ![The level editor: a start, rows of rings, a ledge, a flyer, a crawler, a crab, a spring, a monitor and a star post](docs/screenshots/level-editor.png)
 
-**Library → Sonic → New level** opens the level editor, in the infinite world. Name the level, then pick what to place in the bar and click (or drag) in the world: the start, rings (drag for a row), the three badniks, monitors (click *Monitor* again for the next item), spikes, star posts, the goal, the boss, springs, ground (drag across), ledges and loops; *Erase* takes things away. Things are dropped onto the ground under the pointer. The sandbox tools still work to build the scenery.
+**Library → Sonic → New level** opens the level editor, in the infinite world. Name the level, then pick what to place in the bar and click (or drag) in the world: the start, rings (drag for a row), the three badniks, monitors (click *Monitor* again for the next item), spikes, star posts, the goal, the boss, springs, ground (drag across), ledges and loops, and the zone's **gimmicks** (click *Gimmick* again for the next): a **bridge** of logs that dips under the character (drag across a gap), a **platform swinging** on its chain (click where it hangs from), a **ledge that crumbles** a moment after it is stood on (and comes back later), a **wall** broken by rolling into it, a **log with spikes** going round it (cross it while they are underneath) and a **rock**; *Erase* takes things away. Things are dropped onto the ground under the pointer. The sandbox tools still work to build the scenery.
 
 *Play* tries the level straight away from its start, *Stop* comes back to the editor. *Save* keeps it in `~/.config/gravity_engine/levels/`: your levels are listed in Library → Sonic after the acts, to play or to edit again (they are ordinary `.gscene` files, so they can be shared).
 
@@ -148,7 +165,7 @@ While someone plays, `X` is the action button (the Winamp player is on `X` other
 
 ![The Twilight zone at night: Sonic lit up among crates, the best run's ghost glowing beside him and rings gleaming](docs/screenshots/endless-twilight.png)
 
-The *Endless run* example (Sonic in the infinite world, with hills, loops, ramps, springs, platforms, crates and rings made ahead of him) now goes through **five zones** — Meadow, Twilight (at night: Sonic carries a light and the rings gleam), Snowfield (snow), Lagoon (water) and Storm peak (rain and lightning) — each with its own colours and sky, and round again. The further you go, the more **badniks, flyers, crabs and spikes**, with the odd monitor.
+The *Endless run* example (Sonic in the infinite world, with hills, loops, ramps, springs, platforms, walls to roll through and rings made ahead of him) now goes through **five zones** — Meadow, Twilight (at night: Sonic carries a light and the rings gleam), Snowfield (snow), Lagoon (water) and Storm peak (rain and lightning) — each with its own colours and sky, and round again. The further you go, the more **badniks, flyers, crabs and spikes**, with the odd monitor.
 
 One life: at the first fall the run is over and starts again. The best run is kept as a **ghost** that races you on the same course next time (`ghost.json`); the distance, your best and the zone are shown under the counters.
 
@@ -178,15 +195,43 @@ A game controller plays Sonic and his friends (Linux joystick devices and XInput
 }
 ```
 
-Each frame is the top-left corner of a `cell`-sized box whose centre is Sonic's centre, facing right; `transparent` lists background colours to cut out and `scale` is sheet pixels per original game pixel. Animations: `idle` (required), `bored`, `walk`, `run`, `roll` (also the spin dash), `skid`, `push`, `crouch`, `look_up`, `spring`; missing ones fall back to `walk` or `idle`. Frames play at the games' speed (held for 8 − speed frames, 4 − speed curled up) and turn with the ground.
+Each frame is the top-left corner of a `cell`-sized box whose centre is Sonic's centre, facing right; `transparent` lists background colours to cut out and `scale` is sheet pixels per original game pixel. Animations: `idle` (required), `bored`, `walk`, `run`, `full_speed`, `roll` (also the spin dash), `skid`, `push`, `crouch`, `look_up`, `spring`, `fall`, `land`, `balance`, `breathe`, `drown`, `transform`, `victory`; missing ones fall back to what the character did before, then `walk` or `idle`. Frames play at the games' speed (held for 8 − speed frames, 4 − speed curled up) and turn with the ground.
 
 Tails, Knuckles and Amy can have theirs as well, recognised by their size and kept as `tails.png`, `knuckles.png` and `amy.png` / `amy.webp`: the Sonic 3 Tails sheet (1174 × 1820) and the Sonic 3 & Knuckles Knuckles sheet (1131 × 1862) from The Spriters Resource, and for Amy either CartoonsAnimate22's sheet (1274 × 2000, its Sonic Mania style) or DeltaConduit's custom sheet in the style of Sonic 1 (583 × 570; original sprites by Sega and Sonic Team). Sonic.exe's is a sheet in the style of Sonic 1 (691 × 677), kept as `exe.png`. Where each character's centre sits in a picture is worked out from its pixels.
 
+#### The zone's sheet
+
+The levels can be drawn from a sheet too, kept as `zone.png`: the ground of the acts and of your levels, the ledges in the air, and the zone's gimmicks (bridges, swinging platforms, crumbling ledges, walls, spiked logs, rocks). The Green Hill Zone objects sheet from The Spriters Resource (864 × 707) is recognised as it is (*Sonic sprites…* puts it in place by its size); any other is laid out in the sprite region editor, under **Zone** (`--sprite-regions=zone`), where its tiles are listed instead of animations:
+
+- `grass`: the ground's top, repeated along it, its cross on the line the character runs on (the blades above it are drawn over the sky); `ground`: what is inside, repeated all over the world, so the pieces of ground meet; `platform`: the ledges in the air, along them (the cross on their top).
+- `log` (a bridge's), `post_left` / `post_right` (its ends), `swing`, `chain` and `anchor` (a swinging platform), `ledge` (a crumbling ledge's columns, one picture after the other), `wall`, `spike_log` (eight pictures, an eighth of a turn each: the spikes going round the log) and `rock`.
+
+Without a zone sheet (or a tile it has no picture for), they are drawn as before. *Try* on the zone plays the test track drawn with the tiles as edited, its gimmicks behind the start (run left). The regions go in `zone.regions.json`.
+
 #### Editing the regions
 
-*Edit sprite regions…* in the settings (or `--sprite-regions[=CHARACTER]`) opens a character's sheet over the whole window, to change which pictures each animation uses, where the character stands in them, how long each shows and at what pace the animation plays: for a built-in layout that is a little off, or **any sheet at all**. The buttons along the top switch between the characters (one without a sheet asks for a picture).
+*Edit sprite regions…* in the settings (or `--sprite-regions[=CHARACTER]`) opens a character's sheet over the whole window, to change which pictures each animation uses, where the character stands in them, how long each shows and at what pace the animation plays: for a built-in layout that is a little off, or **any sheet at all**. The buttons along the top switch between the characters (one without a sheet asks for a picture) and **Zone**, the zone's tiles (see *The zone's sheet*).
 
-**Any picture as a sheet.** *Open a sheet…* (bottom left) makes any picture (PNG, WebP, GIF, BMP or JPEG) the character's sheet: it is kept as a PNG under the character's name (`sheet.png` for Sonic, `tails.png`…), and a sheet the game does not know opens empty. *Pick* (`I`) is an eyedropper: click the sheet's background and that colour is cut out (pick several if it has more; click a swatch to put one back). *Soft edges* cuts them out by closeness, for lossy pictures such as JPEGs, and *Scale* tells how many sheet pixels make one of the game's (2 for sprites drawn twice as big). A checkerboard shows through what is cut out. Once the background is gone, the sheet's sprites are found by themselves: hold Shift to see them.
+**Any picture as a sheet.** *Open…* (bottom left, under SHEET) makes any picture (PNG, WebP, GIF, BMP or JPEG) the character's sheet: it is kept as a PNG under the character's name (`sheet.png` for Sonic, `tails.png`…), and a sheet the game does not know opens empty. *Pick* (`I`) is an eyedropper: click the sheet's background and that colour is cut out (pick several if it has more; click a swatch to put one back). *Soft edges* cuts them out by closeness, for lossy pictures such as JPEGs, and *Scale* tells how many sheet pixels make one of the game's (2 for sprites drawn twice as big). A checkerboard shows through what is cut out. Once the background is gone, the sheet's sprites are found by themselves: hold Shift to see them.
+
+**The sheet generator.** *Generate…* (`G`, beside *Open…*) makes a sheet the way fans lay theirs out: a banner with the character's name, where its pictures come from and the credits, beside its palette; below it, an animation a row, each picture in its own box on a dark page. Its regions come with it (`<name>.regions.json` beside the PNG), so it works as it is. It is kept with your screenshots (`~/Pictures/gravity_engine/`, else `~/.config/gravity_engine/screenshots/`), and *Use it for … now* makes it the character's sheet at once; *Open…* brings it in later, laid out, wherever it is (the regions beside a picture come with it).
+
+- **The game's drawing**: the character as the game draws it, every animation the game asks of them (Tails' flight, Knuckles' glide and climb, Amy's hammer, Sonic.exe's teleport, chase and laugh…), two pixels to one of the game's. Play it as it is, or paint over its pictures in any paint program, keeping each in its box, to make your own character. Clicking a character with no sheet offers this too.
+- **This sheet's pictures, tidied**: only the pictures the character's animations use, each in its own box, with their centres, pace, loops and repeats; handy to share a character, or to start again from a cleaner sheet.
+
+**Pictures from files.** *Import…* (under SHEET) adds pictures to the animation shown: any number of PNG, WebP, BMP or JPEG pictures, or an animated GIF, every frame of it (dropping them on the editor does the same). They go below the sheet, sharing one place for the character, and a GIF's timing sets how long each is held (and the pace of an animation that had none). *Save* then writes the sheet again with them, as a sheet of its own: its regions keep every animation. Draw them at the sheet's size: they are drawn at its *Scale* like the rest.
+
+**Painting on the sheet.** *Paint* (`P`, under SHEET) touches the sheet up where it is: a stray pixel, a background left around a sprite, a sprite changed. Along the bottom of the sheet: *Pencil* and *Eraser* (dragged, a brush 1 to 16 pixels wide: *Size*), *Fill* (a patch of one colour, or a see-through one) and *Pick* (or Alt-click) to take a colour from the sheet; the swatch opens a colour picker, with the sheet's own colours to take one quickly. `Ctrl+Z` undoes a stroke like any change, and *Save* writes the sheet again in place, as a PNG (a WebP or JPEG gives way to it).
+
+**Colours.** *Colours* (under SHEET) changes the character's colours without touching the sheet: its colours are listed along the bottom (those changed first, then the most used by its pictures; click one on the sheet to add it). Choose one and what it becomes in the picker: the sheet, the preview and the game show it at once (a lossy sheet, with *Soft edges*, takes the shades close to it too). *Super* gives the character colours of their own when Super, over the usual ones (none: the game turns them golden, as before); *Put back* gives a colour back its own. They are kept with the regions (`recolour` and `super`), so the sheet stays as it is.
+
+**The animations the game asks for.** Besides standing, walking, running, rolling and the rest, a sheet can have (none of them is needed: without one, the character does what it did before):
+
+- `full_speed`: flat out on the ground, faster than running (dash panels, long slopes, Super), legs a blur.
+- `fall`: falling without being curled up (off a ledge, after being hurt); `land`: a moment on touching down from a fall.
+- `balance`: standing at the edge of a drop, teetering, facing it.
+- `breathe`: catching an air bubble underwater; `drown`: out of air.
+- `transform`: turning super; `victory`: standing still past the goal post.
 
 - **The animations** are listed on the left with how many pictures each has (a dot marks those changed, amber until saved); above the sheet, when the game shows the one picked.
 - **On the sheet**, its pictures are numbered boxes (`×2` held longer, `↔` mirrored) and the other animations' are faint (point at one to see whose it is, right-click it to go to it).
@@ -196,8 +241,10 @@ Tails, Knuckles and Amy can have theirs as well, recognised by their size and ke
   - The arrow keys move the pictures by a pixel (Shift: 10); with Ctrl they resize them, with Alt they move their centres.
   - *Fit: feet* (`F`) tightens a picture around its sprite and puts the centre above the feet; *Fit: middle* (`M`) puts it in the middle (curled up, in the air). *Same centre* (`C`) gives the other pictures chosen (or, with one chosen, the whole animation) the same place for the character, measured from the bottom middle of their boxes.
   - *Copy* / *Paste* (`Ctrl+C` / `Ctrl+V`) take pictures from one animation to another (use the walk for the run, then change what differs).
+  - **Grid** (`R`, under SHEET) is for pictures laid out in rows and columns: drag a box over them and their columns and rows are counted, the box fitting itself around them (hold Alt to keep it as drawn). Change them with the steppers below the sheet if need be, then *Add* (`Enter`) adds every cell with a sprite in it, row by row, with the character at the same place in each cell, so the animation does not wobble. `Esc` leaves the grid.
   - Wheel: zoom; right-drag: pan; `Home`: back to the animation.
-- **On the right**, the animation plays (`Space` pauses it; `←` `→` or `[` `]` step through it; *Onion* shows the picture before faintly, to line them up), and its pictures are listed in order: click one to pick it, *← Earlier* / *Later →* reorder them, *Duplicate* (`D`), *Delete* (`Del`). For Tails, *Body* / *Behind* (`B`) switch to his tails, drawn behind him on their own clock.
+- **On the right**, the animation plays (`Space` pauses it; `←` `→` or `[` `]` step through it; *Onion* shows the picture before faintly, to line them up; **GIF** (`E`) keeps it as an animated GIF with your screenshots, three times as big on a transparent background, at its pace (10 pictures a second for the games' pace), its repeats played out), and its pictures are listed in order: click one to pick it, *← Earlier* / *Later →* reorder them, *Duplicate* (`D`), *Delete* (`Del`). *Body* / *Behind* / *Front* (`B`) switch between the character's pictures and the pieces drawn behind them (Tails' tails, swishing on their own clock) or in front (dust, sparks, a hammer's blur…, playing at the animation's pace, else 12 pictures a second).
+  - **Turns**: how the pictures turn with the ground under the character on slopes and loops: *with the ground*, smoothly (as before), *by 45°* as the Mega Drive games drew them, or *never* (a ball, a pose that stays upright).
   - **Pace**: *Game* follows the character's speed as in the Mega Drive games; otherwise a fixed number of pictures a second (4 to 30). **Play once** stops on the last picture instead of looping (a hammer swing, a laugh), starting again whenever the character starts doing it again.
   - **Hold** (`-` / `=`) shows a picture 2 to 8 times as long as the others; **Mirror** (`H`) draws it facing the other way (for a sheet whose sprites face left, or to use one both ways).
   - **Loop here** (`L`) sets the **loop point** on the selected picture: the pictures before it open the animation once (taking off, leaping off a spring…), then it loops from there; `↻` marks it, and the bars under the pictures show the opening (amber) and the loop (green). In the game the opening plays again whenever the character starts doing it again; on the loop point's own picture, *Loop here* goes back to looping the whole animation.
@@ -205,7 +252,7 @@ Tails, Knuckles and Amy can have theirs as well, recognised by their size and ke
 - **Try** (`T`) plays the character as edited, saved or not, on a test track with room to stand, look up, crouch and spin dash, a wall to push, a hill, a loop, a badnik, a spring up to a ledge and a high wall to climb; `Esc` comes back to the editor, and afterwards to the scene you had.
 - *Undo* / *Redo* (`Ctrl+Z` / `Ctrl+Y`), *Reset this animation*, *Reset all* and *Save* (`Ctrl+S`); `Esc` leaves (press it twice to leave unsaved changes).
 
-What is saved goes beside the sheet as `<character>.regions.json` (`sonic`, `tails`, `knuckles`, `amy` or `exe`), with only what changed, and the game draws from it at once. It belongs to that sheet: one of another size ignores it. Each picture is its box on the sheet (`rect`: x, y, width, height) and the character's centre from the box's top-left (`centre`), maybe mirrored (`flip`) or held longer (`hold`); an animation may have a `fps`, play `once`, loop back to picture `loop_from` (counted from 0) and have `repeats` (runs `from` one picture `to` another played a number of `times`), and one with no pictures left is one the sheet does not have. For a sheet laid out here, the file also keeps its `background` colours, `soft` and `scale`.
+What is saved goes beside the sheet as `<character>.regions.json` (`sonic`, `tails`, `knuckles`, `amy` or `exe`), with only what changed, and the game draws from it at once. It belongs to that sheet: one of another size ignores it. Each picture is its box on the sheet (`rect`: x, y, width, height) and the character's centre from the box's top-left (`centre`), maybe mirrored (`flip`) or held longer (`hold`); an animation may have pieces drawn `behind` and in `front`, a `fps`, play `once`, loop back to picture `loop_from` (counted from 0), have `repeats` (runs `from` one picture `to` another played a number of `times`) and `turn` (`"steps"` or `"upright"`; with the ground when left out), and one with no pictures left is one the sheet does not have. For a sheet laid out here, the file also keeps its `background` colours, `soft` and `scale`; colours changed go in `recolour` and `super`, each a list of pairs (the sheet's colour, then what it becomes).
 
 ```json
 {
@@ -493,7 +540,7 @@ sudo apt install pkg-config libopenmpt-dev libasound2-dev libx11-dev libxi-dev \
 cargo run --release
 ```
 
-Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins. `--act=N` and `--special-stage=N` go straight into Sonic act N (1–7) or special stage N (1–7), and `--sprite-regions[=CHARACTER]` into the sprite region editor (`sonic`, `tails`, `knuckles`, `amy` or `exe`).
+Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins. `--act=N` and `--special-stage=N` go straight into Sonic act N (1–7) or special stage N (1–7), and `--sprite-regions[=CHARACTER]` into the sprite region editor (`sonic`, `tails`, `knuckles`, `amy` or `exe`, or `zone` for the zone's tiles).
 
 `gravity_engine --benchmark` runs five stress scenes for a few seconds each at a fixed 60 Hz and prints the frame times (average, 95th percentile, worst), the bodies still moving, the time spent waiting for the screen and where each frame's time goes, then quits without saving anything.
 
@@ -519,7 +566,7 @@ Everything lives in `~/.config/gravity_engine/` (or `$XDG_CONFIG_HOME/gravity_en
 | `scenes/` | Default folder for saved scenes |
 | `challenges/` | Challenges made in the editor (`.gchallenge`), listed in Library → *My challenges* |
 | `levels/` | Sonic levels made in the level editor (`.gscene`), listed in Library → *Sonic* |
-| `sonic/` | Your sprite sheets for Sonic, Tails, Knuckles, Amy, Sonic.exe and the game's objects, and the regions edited on them (`<character>.regions.json`; see *Sonic sprite sheets*) |
+| `sonic/` | Your sprite sheets for Sonic, Tails, Knuckles, Amy, Sonic.exe, the game's objects and the zone (`zone.png`), and the regions edited on them (`<character>.regions.json`, `zone.regions.json`; see *Sonic sprite sheets*) |
 | `ghost.json` | The endless run's best run, raced as a ghost |
 | `skins/` | Extra Winamp / Audacious skins (`.wsz` files or folders) for the classic player |
 | `sgdb_key` | SteamGridDB API key for the logo fetcher (or set `SGDB_API_KEY`) |

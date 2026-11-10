@@ -6,14 +6,17 @@
 
 use super::sprites::Sprites;
 use super::*;
+use crate::sonic::sheet::Sheet;
 use macroquad::prelude::*;
 
 const STEEL: Color = Color::new(0.74, 0.76, 0.84, 1.0);
 const STEEL_DARK: Color = Color::new(0.36, 0.38, 0.48, 1.0);
 const INK: Color = Color::new(0.06, 0.06, 0.1, 1.0);
 
-/// Everything of the level (world pass), behind and around Sonic.
-pub fn draw(g: &Game, t: f32, sp: Option<&Sprites>) {
+/// Everything of the level (world pass), behind and around Sonic; the
+/// gimmicks from the zone's sheet when there is one.
+pub fn draw(g: &Game, t: f32, sp: Option<&Sprites>, zone: Option<&Sheet>) {
+    things(&g.things, zone);
     for s in &g.spikes {
         if !sp.is_some_and(|sp| sp.spikes(s.pos)) {
             spikes(s.pos);
@@ -542,5 +545,228 @@ fn bomber(b: &Boss, t: f32) {
     for k in 0..(BOSS_HP - b.hp).min(6) {
         let x = p.x - r * 0.8 + k as f32 * r * 0.3;
         draw_line(x, p.y + 2.0, x + 6.0, p.y + 12.0, 2.0, Color::new(0.1, 0.1, 0.1, 0.6));
+    }
+}
+
+// ── The zone's gimmicks ─────────────────────────────────────────
+
+const LOG_WOOD: Color = Color::new(0.72, 0.42, 0.16, 1.0);
+const LOG_DARK: Color = Color::new(0.42, 0.22, 0.08, 1.0);
+const LOG_RING: Color = Color::new(0.92, 0.66, 0.3, 1.0);
+const DIRT: Color = Color::new(0.62, 0.36, 0.14, 1.0);
+const DIRT_DARK: Color = Color::new(0.44, 0.24, 0.08, 1.0);
+const GRASS: Color = Color::new(0.24, 0.7, 0.22, 1.0);
+const GRASS_DARK: Color = Color::new(0.12, 0.46, 0.14, 1.0);
+
+/// The end of a log: rings of wood.
+fn log_end(c: Vec2, r: f32) {
+    draw_circle(c.x, c.y, r, LOG_DARK);
+    draw_circle(c.x, c.y, r * 0.8, LOG_WOOD);
+    draw_circle_lines(c.x, c.y, r * 0.5, 1.5, LOG_RING);
+    draw_circle(c.x, c.y, r * 0.18, LOG_DARK);
+}
+
+/// A checkerboard of earth (GHZ-like), `cell` px squares from the world's origin.
+fn checker(r: Rect, cell: f32) {
+    draw_rectangle(r.x, r.y, r.w, r.h, DIRT);
+    let (i0, j0) = ((r.x / cell).floor() as i32, (r.y / cell).floor() as i32);
+    let (i1, j1) = ((r.right() / cell).ceil() as i32, (r.bottom() / cell).ceil() as i32);
+    for j in j0..j1 {
+        for i in i0..i1 {
+            if (i + j).rem_euclid(2) == 0 {
+                continue;
+            }
+            let x = (i as f32 * cell).max(r.x);
+            let y = (j as f32 * cell).max(r.y);
+            let w = ((i + 1) as f32 * cell).min(r.right()) - x;
+            let h = ((j + 1) as f32 * cell).min(r.bottom()) - y;
+            if w > 0.0 && h > 0.0 {
+                draw_rectangle(x, y, w, h, DIRT_DARK);
+            }
+        }
+    }
+}
+
+fn things(th: &things::Things, zone: Option<&Sheet>) {
+    use things::*;
+    if let Some(z) = zone {
+        zone_things(th, z);
+    }
+    let has = |name: &str| zone.is_some_and(|z| z.pics(name).is_some());
+    for b in th.bridges.iter().filter(|_| !has("log")) {
+        let tops: Vec<Vec2> = b.logs.iter().map(|l| l.2 + vec2(0.0, l.3)).collect();
+        // The ropes they hang on, then the logs, posts at the ends.
+        for w in tops.windows(2) {
+            draw_line(w[0].x, w[0].y - 2.0, w[1].x, w[1].y - 2.0, 2.0, LOG_DARK);
+        }
+        let r = tops.windows(2).next().map_or(LOG / 2.0, |w| (w[1].x - w[0].x) / 2.0);
+        for c in &tops {
+            log_end(*c, r.min(LOG / 2.0));
+        }
+        if let (Some(a), Some(z)) = (b.logs.first(), b.logs.last()) {
+            for (p, side) in [(a.2, -1.0), (z.2, 1.0)] {
+                let x = p.x + side * (r + 6.0);
+                draw_rectangle(x - 5.0, p.y - 26.0, 10.0, 44.0, LOG_DARK);
+                draw_rectangle(x - 3.0, p.y - 24.0, 6.0, 40.0, LOG_WOOD);
+                draw_circle(x, p.y - 26.0, 6.0, LOG_RING);
+            }
+        }
+    }
+    for s in th.swings.iter().filter(|_| !has("swing")) {
+        let top = s.pos - vec2(0.0, SWING_PLATFORM.y / 2.0);
+        let links = 6;
+        for k in 0..=links {
+            let p = s.anchor.lerp(top, k as f32 / links as f32);
+            draw_circle_lines(p.x, p.y, 5.0, 2.0, STEEL);
+        }
+        draw_circle(s.anchor.x, s.anchor.y, 11.0, STEEL_DARK);
+        draw_circle(s.anchor.x, s.anchor.y, 8.0, LOG_RING);
+        let r = Rect::new(s.pos.x - SWING_PLATFORM.x / 2.0, top.y, SWING_PLATFORM.x, SWING_PLATFORM.y);
+        draw_rectangle(r.x, r.y, r.w, r.h, LOG_DARK);
+        draw_rectangle(r.x + 2.0, r.y + 2.0, r.w - 4.0, r.h - 6.0, LOG_WOOD);
+        for k in 1..3 {
+            let x = r.x + r.w * k as f32 / 3.0;
+            draw_line(x, r.y + 3.0, x, r.bottom() - 4.0, 2.0, LOG_DARK);
+        }
+        draw_rectangle(r.x + 4.0, r.y + 3.0, r.w - 8.0, 3.0, LOG_RING);
+    }
+    for l in th.ledges.iter().filter(|_| !has("ledge")) {
+        let w = l.columns.get(1).zip(l.columns.first()).map_or(LEDGE_COLUMN, |(b, a)| b.home.x - a.home.x);
+        for c in &l.columns {
+            let Some(at) = (if c.falling.is_some() { Things::falling_at(c) } else { Some(c.home) }) else { continue };
+            let r = Rect::new(at.x - w / 2.0, at.y - LEDGE_DEPTH / 2.0, w + 0.5, LEDGE_DEPTH);
+            checker(r, 24.0);
+            draw_rectangle(r.x, r.y, r.w, 9.0, GRASS);
+            draw_rectangle(r.x, r.y + 9.0, r.w, 3.0, GRASS_DARK);
+            if c.falling.is_some() {
+                draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0, DIRT_DARK);
+            }
+        }
+    }
+    for w in th.walls.iter().filter(|_| !has("wall")) {
+        let r = Rect::new(w.pos.x - WALL.x / 2.0, w.pos.y - WALL.y / 2.0, WALL.x, WALL.y);
+        checker(r, 24.0);
+        draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, DIRT_DARK);
+        // Cracks: it gives way.
+        draw_line(r.x + 8.0, r.y + 20.0, r.x + 22.0, r.y + 40.0, 1.5, INK);
+        draw_line(r.x + 22.0, r.y + 40.0, r.x + 14.0, r.y + 62.0, 1.5, INK);
+        draw_line(r.right() - 10.0, r.y + 70.0, r.right() - 24.0, r.y + 86.0, 1.5, INK);
+    }
+    for s in th.spike_logs.iter().filter(|_| !has("spike_log")) {
+        let n = ((s.x1 - s.x0) / SPIKE_LOG).ceil().max(1.0) as usize;
+        let mid = s.top + SPIKE_LOG / 2.0;
+        // The spikes behind the log first, then the log, then those in front.
+        for front in [false, true] {
+            if front {
+                draw_rectangle(s.x0, s.top, s.x1 - s.x0, SPIKE_LOG, LOG_DARK);
+                draw_rectangle(s.x0, s.top + 3.0, s.x1 - s.x0, SPIKE_LOG - 8.0, LOG_WOOD);
+                draw_rectangle(s.x0, s.top + 4.0, s.x1 - s.x0, 3.0, LOG_RING);
+            }
+            for k in 0..n {
+                let a = spin(th.t, k) * std::f32::consts::TAU;
+                if (a.sin() > 0.0) != front {
+                    continue;
+                }
+                let x = (s.x0 + (k as f32 + 0.5) * SPIKE_LOG).min(s.x1 - 4.0);
+                // Round the log: the tip's height and how far it leans out.
+                let (dy, out) = (-a.cos(), a.sin().abs());
+                let base = vec2(x, mid + dy * SPIKE_LOG * 0.4);
+                let tip = vec2(x, mid + dy * (SPIKE_LOG * 0.5 + 14.0));
+                let half = 6.0 * (0.4 + 0.6 * out.max(dy.abs()));
+                let c = if front { STEEL } else { STEEL_DARK };
+                draw_triangle(base - vec2(half, 0.0), base + vec2(half, 0.0), tip, c);
+            }
+        }
+    }
+    for r in th.rocks.iter().filter(|_| !has("rock")) {
+        let (c, h) = (r.pos, ROCK / 2.0);
+        let rock = Color::new(0.6, 0.5, 0.78, 1.0);
+        let light = Color::new(0.82, 0.76, 0.95, 1.0);
+        let dark = Color::new(0.36, 0.28, 0.5, 1.0);
+        let pts =
+            [vec2(-1.0, 1.0), vec2(-0.9, -0.2), vec2(-0.5, -0.9), vec2(0.2, -1.0), vec2(0.8, -0.6), vec2(1.0, 1.0)]
+                .map(|p| c + p * h);
+        for w in 1..pts.len() - 1 {
+            draw_triangle(pts[0], pts[w], pts[w + 1], rock);
+        }
+        draw_triangle(pts[2], pts[3], c + vec2(-0.1, -0.2) * h, light);
+        draw_triangle(pts[4], pts[5], c + vec2(0.3, 0.4) * h, dark);
+        for w in pts.windows(2) {
+            draw_line(w[0].x, w[0].y, w[1].x, w[1].y, 1.5, dark);
+        }
+    }
+}
+
+/// The gimmicks the zone's sheet has pictures of.
+fn zone_things(th: &things::Things, z: &Sheet) {
+    use things::*;
+    let k = z.k();
+    let first = |name: &str| z.pics(name).and_then(|p| p.first().copied());
+    if let Some(log) = first("log") {
+        for b in &th.bridges {
+            for l in &b.logs {
+                // The logs' tops are where the character walks.
+                z.put(log, l.2 + vec2(0.0, l.3 - LOG / 4.0 + log.centre.y * k));
+            }
+            let (Some(a), Some(e)) = (b.logs.first(), b.logs.last()) else { continue };
+            let half = (b.logs.get(1).map_or(LOG, |n| n.2.x - a.2.x)) / 2.0;
+            for (name, at, side) in [("post_left", a, -1.0), ("post_right", e, 1.0)] {
+                if let Some(p) = first(name) {
+                    let top = at.2.y - LOG / 4.0 + at.3;
+                    z.put(p, vec2(at.2.x + side * (half + 8.0 * k), top + 8.0 * k));
+                }
+            }
+        }
+    }
+    if let Some(platform) = first("swing") {
+        let (chain, anchor) = (first("chain"), first("anchor"));
+        for s in &th.swings {
+            let top = s.pos - vec2(0.0, SWING_PLATFORM.y / 2.0);
+            if let Some(c) = chain {
+                let step = c.src.h * k;
+                let n = (s.anchor.distance(top) / step).floor() as usize;
+                for i in 1..=n {
+                    z.put(c, s.anchor.lerp(top, i as f32 / (n + 1) as f32));
+                }
+            }
+            if let Some(a) = anchor {
+                z.put(a, s.anchor);
+            }
+            z.put(platform, s.pos);
+        }
+    }
+    if let Some(columns) = z.pics("ledge") {
+        for l in &th.ledges {
+            for (i, c) in l.columns.iter().enumerate() {
+                let at = if c.falling.is_some() { Things::falling_at(c) } else { Some(c.home) };
+                if let Some(at) = at {
+                    z.put(columns[i % columns.len()], at);
+                }
+            }
+        }
+    }
+    if let Some(wall) = first("wall") {
+        for w in &th.walls {
+            z.put(wall, w.pos);
+        }
+    }
+    if let Some(frames) = z.pics("spike_log") {
+        let f = frames[spin_picture(th.t) % frames.len()];
+        for s in &th.spike_logs {
+            // The picture along the log, as many times as it takes.
+            let (w, mid) = (f.src.w * k, s.top + SPIKE_LOG / 2.0);
+            let mut x = s.x0;
+            while x < s.x1 - 0.5 {
+                let part = ((s.x1 - x) / k).min(f.src.w);
+                let src = Rect::new(f.src.x, f.src.y, part, f.src.h);
+                z.put_part(src, vec2(x, mid - f.centre.y * k));
+                x += w;
+            }
+        }
+    }
+    if let Some(rock) = first("rock") {
+        for r in &th.rocks {
+            z.put(rock, r.pos);
+        }
     }
 }

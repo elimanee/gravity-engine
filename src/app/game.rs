@@ -77,6 +77,7 @@ impl App {
         self.booms.retain(|b| b.age < 0.6);
         self.scare = (self.scare - step).max(0.0);
         let (Some(game), Some(run)) = (&mut self.game, &mut self.sonic) else { return };
+        let moved = game.step_things(&mut self.world, &run.sonic, step);
         let grains: HashSet<RigidBodyHandle> = self.grains.bodies().collect();
         let world = &self.world;
         let solid =
@@ -84,8 +85,17 @@ impl App {
         let fall_y = self.world.arena.1 * PPM + 150.0;
         game.water =
             self.s.water.then(|| crate::physics::to_screen(0.0, water::rest_level(world, self.s.water_level)).y);
-        let fx = game.update(step, &self.world, &solid, &mut run.sonic, fall_y);
+        let mut fx = game.update(step, &self.world, &solid, &mut run.sonic, fall_y);
+        fx.extend(moved);
         self.game_effects(fx);
+    }
+
+    /// A breakable wall broken by Sonic's `Break` event; false if it was not one.
+    pub(super) fn break_game_wall(&mut self, collider: ColliderHandle) -> bool {
+        let Some(game) = self.game.as_mut().filter(|g| g.things.is_wall(collider)) else { return false };
+        let fx = game.break_wall(&mut self.world, collider);
+        self.game_effects(fx);
+        true
     }
 
     /// A monitor broken by Sonic's `Break` event; false if it was not one.
@@ -122,6 +132,20 @@ impl App {
                     self.sound(Sound::Ring, at, 0.4);
                 }
                 Effect::ShieldLost(at) => self.sound(Sound::Pop, at, 0.6),
+                Effect::Crumble(at) => {
+                    self.sound(Sound::Hit { size: 60.0, hard: 0.1 }, at, 0.5);
+                    if self.s.effects {
+                        self.effects.dust(at, 8.0);
+                    }
+                }
+                Effect::WallBroken(at) => {
+                    self.sound(Sound::Shatter, at, 0.7);
+                    self.pad.rumble(0.5, 0.15);
+                    if self.s.effects {
+                        self.effects.debris(at, 40.0, Color::new(0.78, 0.45, 0.16, 1.0));
+                        self.effects.debris(at, 30.0, Color::new(0.45, 0.24, 0.1, 1.0));
+                    }
+                }
                 Effect::Died(at) => {
                     self.sound(Sound::Hurt, at, 0.8);
                     self.pad.rumble(1.0, 0.5);
@@ -293,7 +317,7 @@ impl App {
     pub(super) fn draw_game(&self) {
         let Some(g) = &self.game else { return };
         let t = get_time() as f32;
-        game_art::draw(g, t, self.game_sprites.as_ref());
+        game_art::draw(g, t, self.game_sprites.as_ref(), self.sonic_sheet.zone.as_ref());
         self.draw_hunter(g, t);
     }
 
