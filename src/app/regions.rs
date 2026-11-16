@@ -3010,6 +3010,10 @@ impl App {
             wanted
         } else if let (None, Some(&first)) = (c, available.first()) {
             first
+        } else if let Owner::Char(who) = wanted {
+            // No sheet of theirs yet: ask whether to make one or choose one.
+            self.sheet_prompt = Some(who);
+            return;
         } else {
             self.choose_sheet(wanted);
             return;
@@ -3019,6 +3023,92 @@ impl App {
             Ok(None) => self.toasts.warn(format!("{} has no sprite sheet", c.label())),
             Err(e) => self.toasts.error(format!("{} sheet: {e}", whose(c))),
         }
+    }
+
+    /// A character has no sheet: make one from the game's own drawing of
+    /// them, choose a picture, or leave it (over the whole screen).
+    pub(super) fn sheet_prompt_frame(&mut self) {
+        use crate::ui::library::wrap;
+        use crate::ui::widgets::draw_button;
+        let Some(who) = self.sheet_prompt else { return };
+        set_default_camera();
+        clear_background(Color::new(0.05, 0.05, 0.09, 1.0));
+        let (w, h) = (screen_width(), screen_height());
+        let p = Rect::new((w - 560.0) / 2.0, (h - 230.0) / 2.0, 560.0, 230.0);
+        panel(p, 1.0);
+        text_bold(&format!("{} has no sprite sheet yet", who.label()), p.x + 24.0, p.y + 42.0, 20.0, TEXT);
+        let about = format!(
+            "The sprite region editor works on a sheet of pictures. Make one from the game's own drawing of {} \
+             (ready to play, to lay out again or to paint over), or choose a picture of yours.",
+            who.label()
+        );
+        for (k, line) in wrap(&about, p.w - 48.0, 14.0).iter().enumerate() {
+            text(line, p.x + 24.0, p.y + 76.0 + k as f32 * 20.0, 14.0, TEXT_DIM);
+        }
+        let mouse = vec2(mouse_position().0, mouse_position().1);
+        let y = p.y + p.h - 58.0;
+        let buttons = [
+            (Rect::new(p.x + 24.0, y, 150.0, 34.0), "Make one"),
+            (Rect::new(p.x + 186.0, y, 190.0, 34.0), "Choose a picture…"),
+            (Rect::new(p.x + p.w - 124.0, y, 100.0, 34.0), "Cancel"),
+        ];
+        let mut chosen = None;
+        for (k, (r, label)) in buttons.iter().enumerate() {
+            let over = r.contains(mouse);
+            draw_button(*r, label, over, k == 0, 1.0);
+            if over && is_mouse_button_pressed(MouseButton::Left) {
+                chosen = Some(k);
+            }
+        }
+        if is_key_pressed(KeyCode::Enter) {
+            chosen = Some(0);
+        }
+        if is_key_pressed(KeyCode::Escape) {
+            chosen = Some(2);
+        }
+        match chosen {
+            Some(0) => {
+                self.sheet_prompt = None;
+                self.make_first_sheet(who);
+            }
+            Some(1) => {
+                self.sheet_prompt = None;
+                self.choose_sheet(Owner::Char(who));
+            }
+            Some(_) => self.sheet_prompt = None,
+            None => {}
+        }
+        let dt = get_frame_time();
+        self.toasts.update(dt);
+        self.toasts.draw(0.0, &[], dt);
+    }
+
+    /// `c`'s first sheet, made from the game's own drawing of them, then
+    /// the editor on it.
+    fn make_first_sheet(&mut self, c: Character) {
+        let made = maker::from_drawing(c);
+        match self.keep_made(c, &made).and_then(|png| sheet::Sheet::install_for(&png, c)) {
+            Ok(_) => {
+                self.toasts.success(format!("{}'s sheet made from the game's drawing", c.label()));
+                self.sonic_sheet_tried = true;
+                self.load_sonic_sheet();
+                self.open_regions(Some(Owner::Char(c)));
+            }
+            Err(e) => self.toasts.error(format!("Could not make the sheet: {e}")),
+        }
+    }
+
+    /// A sheet just made, kept with its regions among the pictures: where.
+    fn keep_made(&self, c: Character, made: &maker::Made) -> Result<std::path::PathBuf, String> {
+        let dir = config::screenshot_dir().ok_or("no folder to keep the sheet in")?;
+        let stem = format!("{}-sheet", c.short().to_lowercase());
+        let free = (1..).map(|k| if k == 1 { stem.clone() } else { format!("{stem}-{k}") });
+        let name = free.take(999).find(|n| !dir.join(format!("{n}.png")).exists()).ok_or("too many sheets")?;
+        let (png, json) = (dir.join(format!("{name}.png")), dir.join(format!("{name}.regions.json")));
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        made.image.save(&png).map_err(|e| e.to_string())?;
+        std::fs::write(&json, made.regions.to_json()).map_err(|e| e.to_string())?;
+        Ok(png)
     }
 
     /// Choose any picture to be `c`'s sheet, then edit it.

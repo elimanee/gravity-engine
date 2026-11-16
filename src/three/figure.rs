@@ -275,6 +275,10 @@ pub struct Props {
     pub crawler: Vec<Mesh>,
     pub flyer: Vec<Mesh>,
     pub shadow: Vec<Mesh>,
+    /// What a badnik bursts into, a blast's fire, and a cloud.
+    pub puff: Vec<Mesh>,
+    pub flame: Vec<Mesh>,
+    pub cloud: Vec<Mesh>,
     pub crate_: Vec<Mesh>,
     pub ball: Vec<Mesh>,
     pub barrel: Vec<Mesh>,
@@ -376,6 +380,27 @@ impl Props {
             }
             s.meshes(None)
         };
+        let puff = sphere(Vec3::ZERO, Vec3::splat(0.5), 6, 8, Color::new(1.0, 0.98, 0.9, 1.0)).meshes(None);
+        let flame = {
+            let mut s = sphere(Vec3::ZERO, Vec3::splat(0.5), 6, 8, Color::new(1.0, 0.55, 0.1, 1.0));
+            s.append(
+                &sphere(vec3(0.0, 0.1, 0.0), Vec3::splat(0.36), 5, 8, Color::new(1.0, 0.9, 0.35, 1.0)),
+                Mat4::IDENTITY,
+            );
+            s.meshes(None)
+        };
+        let cloud = {
+            let white = Color::new(1.0, 1.0, 1.0, 1.0);
+            let mut s = sphere(Vec3::ZERO, vec3(22.0, 5.0, 12.0), 6, 10, white);
+            for (at, size) in [
+                (vec3(-16.0, -1.0, 4.0), vec3(14.0, 4.0, 9.0)),
+                (vec3(15.0, -1.5, -3.0), vec3(16.0, 3.5, 10.0)),
+                (vec3(2.0, 3.0, 0.0), vec3(11.0, 4.5, 8.0)),
+            ] {
+                s.append(&sphere(at, size, 5, 9, white), Mat4::IDENTITY);
+            }
+            s.meshes(None)
+        };
         let wood = Color::new(0.7, 0.48, 0.25, 1.0);
         let crate_ = {
             let mut s = cuboid(Vec3::splat(-0.5), Vec3::splat(0.5), wood);
@@ -406,6 +431,9 @@ impl Props {
             crawler,
             flyer,
             shadow,
+            puff,
+            flame,
+            cloud,
             crate_,
             ball,
             barrel,

@@ -69,6 +69,7 @@ impl App {
             spawn: pressed(&[KeyCode::N]),
             blast: pressed(&[KeyCode::B]),
             again: pressed(&[KeyCode::Space, KeyCode::Enter]) || self.pad.pressed(Button::South),
+            pause: pressed(&[KeyCode::P]) || self.pad.pressed(Button::Start),
         };
         let Some(t) = &mut self.three else { return };
         if t.world.over && hands.again {
@@ -97,6 +98,7 @@ impl App {
                 Noise::Pop => (Sound::Pop, 0.7),
                 Noise::Boom => (Sound::Boom, 0.6),
                 Noise::Thud => (Sound::Pop, 0.3),
+                Noise::Mark => (Sound::Post, 0.6),
             };
             self.sound(sound, centre, volume);
         }

@@ -23,6 +23,9 @@ pub(super) struct SonicRun {
     pub rings: u32,
     /// Held by the pointer: where it was last frame.
     held: Option<Vec2>,
+    /// How long he has pushed at a wall that breaks or a monitor (s);
+    /// negative once he has been told how to get through.
+    stuck: f32,
 }
 
 impl App {
@@ -61,7 +64,7 @@ impl App {
     pub(super) fn spawn_sonic(&mut self, at: Vec2) {
         self.sonic_sheets_once();
         let sonic = Sonic::as_character(at, self.s.character);
-        self.sonic = Some(SonicRun { sonic, acc: 0.0, jump: false, action: false, rings: 0, held: None });
+        self.sonic = Some(SonicRun { sonic, acc: 0.0, jump: false, action: false, rings: 0, held: None, stuck: 0.0 });
     }
 
     /// The sprite sheets, the first time they are wanted.
@@ -221,6 +224,22 @@ impl App {
             run.sonic.ysp = run.sonic.ysp.min(0.0);
         }
         let s = run.sonic.clone();
+        // Pushing at a wall that breaks or a monitor and getting nowhere: say how.
+        let pushing = s.grounded && s.pushing;
+        let at_wall = pushing && self.game.as_ref().is_some_and(|g| g.things.at_wall(s.pos));
+        let at_monitor = pushing && self.game.as_ref().is_some_and(|g| g.at_monitor(s.pos));
+        if run.stuck >= 0.0 {
+            run.stuck = if at_wall || at_monitor { run.stuck + step } else { 0.0 };
+            if run.stuck > 1.0 {
+                run.stuck = -1.0;
+                let how = if at_wall {
+                    "Roll into the wall to break it: ↓ on the run, or ↓ + Space for a spin dash"
+                } else {
+                    "Jump on the monitor to open it (Space), or roll into it"
+                };
+                self.toasts.status("stuck", how);
+            }
+        }
         // Fell out of the world: back to the start (a level takes a life instead).
         if self.game.is_none()
             && (s.pos.x < -300.0 || s.pos.x > aw + 300.0 || s.pos.y > ah + 300.0 || s.pos.y < -1500.0)

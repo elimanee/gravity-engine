@@ -64,7 +64,7 @@ const COLUMNS: &[&[(&str, &str)]] = &[
         ("↓ + Space", "Spin dash"),
         ("Shift+N", "Tails, Knuckles, Amy, Sonic.exe"),
         ("X", "Action (Amy's hammer)"),
-        ("E → Sonic", "Acts, your levels, level editor"),
+        ("E → Sonic", "Acts, 3D run and zone, your levels"),
         ("Settings", "Sprite regions: edit or make sheets"),
         ("Pad", "Stick, A jump, X action, Select"),
     ],

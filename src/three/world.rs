@@ -35,6 +35,25 @@ pub struct Panel {
     pub at: Vec3,
     pub dir: Vec3,
     pub up: Vec3,
+    /// How far it reaches to either side (a row of them across a road).
+    pub half: f32,
+}
+
+impl Panel {
+    /// Whether someone at `p` is on it.
+    pub fn under(&self, p: Vec3) -> bool {
+        let d = p - self.at;
+        let right = self.dir.cross(self.up);
+        d.dot(self.dir).abs() < 1.3 && d.dot(right).abs() < self.half && d.dot(self.up).abs() < 1.6
+    }
+
+    /// Where each of its plates lies, side by side.
+    fn plates(&self) -> impl Iterator<Item = Vec3> + '_ {
+        let n = (self.half / 0.9).round().max(1.0) as i32;
+        let right = self.dir.cross(self.up).normalize_or_zero();
+        let step = self.half * 2.0 / n as f32;
+        (0..n).map(move |k| self.at + right * ((k as f32 + 0.5) * step - self.half))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,6 +188,8 @@ pub enum Noise {
     Pop,
     Boom,
     Thud,
+    /// A milestone of the run passed.
+    Mark,
 }
 
 /// The camera that chases him.
@@ -180,6 +201,12 @@ struct Chase {
     eye: Vec3,
     /// Frames since the player turned it.
     manual: u32,
+    /// Round a loop it stands off to the side, to see him all the way
+    /// round: how far it has swung out (0‥1) and where to.
+    aside: f32,
+    aside_eye: Vec3,
+    /// The view widens with speed (degrees).
+    fov: f32,
 }
 
 impl Chase {
@@ -202,6 +229,7 @@ pub struct Input {
     pub spawn: bool,
     pub blast: bool,
     pub again: bool,
+    pub pause: bool,
 }
 
 pub trait Maker {
@@ -246,6 +274,10 @@ pub struct World3 {
     acc: f32,
     /// The sea far below the run (its height follows the road's).
     sea: f32,
+    pub paused: bool,
+    /// The run's last milestone passed (m) and for how many frames it has
+    /// been shown.
+    milestone: (u32, u32),
 }
 
 /// Looks: the figures and props, and the ground's textures.
@@ -286,6 +318,10 @@ const BADNIK_REACH: f32 = 1.2;
 const AHEAD: f32 = 260.0;
 /// How far behind it is kept.
 const BEHIND: f32 = 60.0;
+/// The run's milestones (m).
+const MILESTONE: u32 = 500;
+/// The square the clouds are scattered over (m).
+const CLOUDS: f32 = 700.0;
 
 impl World3 {
     pub fn new(maker: Box<dyn Maker>, character: Character, best: f32) -> World3 {
@@ -315,6 +351,9 @@ impl World3 {
                 at: start.0,
                 eye: start.0 - start.1 * 7.0 + Vec3::Y * 2.5,
                 manual: 0,
+                aside: 0.0,
+                aside_eye: start.0,
+                fov: 58.0,
             },
             sky: Sky::DAY,
             ring_count: 0,
@@ -330,6 +369,8 @@ impl World3 {
             noises: vec![],
             acc: 0.0,
             sea: start.0.y - 35.0,
+            paused: false,
+            milestone: (0, u32::MAX),
         };
         w.fill();
         w.phys.refresh();
@@ -424,8 +465,72 @@ impl World3 {
         (w.length() > 1.0).then(|| vec3(w.x, 0.0, w.z).normalize_or_zero())
     }
 
+    /// (For tests.) How far to the side of the way he is.
+    #[cfg(test)]
+    pub fn off_road(&self) -> f32 {
+        let Some((p, _)) = self.along(self.runner.pos) else { return 0.0 };
+        let d = self.runner.pos - p;
+        vec3(d.x, 0.0, d.z).length()
+    }
+
+    /// (For tests.) A badnik is right ahead on the ground: time to jump on it.
+    #[cfg(test)]
+    pub fn badnik_ahead(&self) -> bool {
+        let r = &self.runner;
+        let v = vec3(r.vel.x, 0.0, r.vel.z).normalize_or_zero();
+        r.grounded
+            && self.badniks.iter().any(|(b, _)| {
+                let to = b.at - r.pos;
+                let along = to.dot(v);
+                (0.0..7.0).contains(&along) && (to - v * along).length() < 2.5
+            })
+    }
+
+    /// (For tests.) The stick that follows the way: towards its point
+    /// `ahead` metres on (straight on round a loop).
+    #[cfg(test)]
+    pub fn autopilot(&self, ahead: f32) -> Vec2 {
+        let f = self.cam.forward();
+        if self.guide.is_some() {
+            return vec2(0.0, 1.0);
+        }
+        let Some((_, d)) = self.along(self.runner.pos) else { return vec2(0.0, 1.0) };
+        let target = self
+            .pieces
+            .iter()
+            .flat_map(|p| p.path.iter())
+            .min_by(|a, b| (a.1 - d - ahead).abs().total_cmp(&(b.1 - d - ahead).abs()))
+            .map(|p| p.0);
+        let Some(t) = target else { return vec2(0.0, 1.0) };
+        let to = t - self.runner.pos;
+        let to = vec3(to.x, 0.0, to.z).normalize_or(f);
+        let right = vec3(-f.z, 0.0, f.x);
+        vec2(to.dot(right), to.dot(f))
+    }
+
+    /// On the run, going on without steering: eased back towards the
+    /// middle of the road (the further out, the more), so that holding
+    /// forward follows its bends. Steering yourself turns it off.
+    fn keep_to_the_road(&self, dir: Vec3, stick: Vec2) -> Vec3 {
+        if !self.maker.endless() || self.guide.is_some() || stick.y < 0.3 || stick.x.abs() > 0.2 {
+            return dir;
+        }
+        let (Some((p, _)), Some(way)) = (self.along(self.runner.pos), self.way(self.runner.pos)) else { return dir };
+        let off = self.runner.pos - p;
+        let off = vec3(off.x, 0.0, off.z);
+        let side = off - way * off.dot(way);
+        let pull = (side.length() / 4.0).min(1.0) * 0.45;
+        (dir - side.normalize_or_zero() * pull).normalize_or(dir) * dir.length()
+    }
+
     /// Time passes: steps at 60 Hz.
     pub fn update(&mut self, dt: f32, input: Input) {
+        if input.pause && !self.over {
+            self.paused = !self.paused;
+        }
+        if self.paused {
+            return;
+        }
         self.acc = (self.acc + dt).min(4.0 / 60.0);
         let mut first = true;
         while self.acc >= 1.0 / 60.0 - 1e-4 {
@@ -438,6 +543,7 @@ impl World3 {
                 i.blast = false;
                 i.again = false;
             }
+            i.pause = false;
             first = false;
             self.step(i);
         }
@@ -456,6 +562,7 @@ impl World3 {
         if dir.length() > 1.0 {
             dir = dir.normalize();
         }
+        let dir = self.keep_to_the_road(dir, input.stick);
         let c = Controls {
             dir,
             jump: input.jump,
@@ -499,7 +606,13 @@ impl World3 {
         if self.maker.endless() {
             self.fill();
             self.clear_behind();
+            let mark = self.distance as u32 / MILESTONE * MILESTONE;
+            if mark > self.milestone.0 {
+                self.milestone = (mark, 0);
+                self.noises.push(Noise::Mark);
+            }
         }
+        self.milestone.1 = self.milestone.1.saturating_add(1);
         self.phys.refresh();
         // Fell: below everything near.
         let floor = self.along(self.runner.pos).map_or(-60.0, |p| p.0.y - 40.0);
@@ -581,7 +694,7 @@ impl World3 {
         }
         if self.runner.grounded {
             for (pn, _) in &self.panels {
-                if (p - pn.at).length() < 1.6 {
+                if pn.under(p) {
                     let v = self.runner.vel;
                     let speed = v.length().max(12.0);
                     self.runner.vel = pn.dir * speed;
@@ -736,10 +849,10 @@ impl World3 {
         let road = if self.maker.endless() { self.way(self.runner.pos) } else { None };
         let r = &self.runner;
         let cam = &mut self.cam;
-        if turn.abs() > 0.05 {
+        if turn.abs() > 0.05 && self.guide.is_none() {
             cam.yaw += turn * 0.045;
             cam.manual = 90;
-        } else if cam.manual > 0 {
+        } else if cam.manual > 0 && self.guide.is_none() {
             cam.manual -= 1;
         } else {
             let guided = self.guide.map(|(i, _)| self.loops[i].0.forward);
@@ -762,14 +875,26 @@ impl World3 {
         let back = -f * cam.dist * cam.pitch.cos() + Vec3::Y * (cam.dist * cam.pitch.sin() + 0.8);
         let mut eye = cam.at + back;
         // Not through the ground (but out of a loop he is going round).
-        if self.guide.is_none() {
+        if self.guide.is_none() && cam.aside <= 0.0 {
             if let Some(h) = self.phys.ray(cam.at, back.normalize(), back.length()) {
                 if h.moving.is_none() && h.dist > 1.5 {
                     eye = h.point + h.normal * 0.4;
                 }
             }
         }
+        // Round a loop: out to the side it does not go to, level with its middle.
+        if let Some((i, _)) = self.guide {
+            let l = self.loops[i].0;
+            cam.aside_eye = l.centre() - l.side * (l.width / 2.0 + l.radius * 2.4) - l.forward * (l.radius * 0.4);
+            cam.aside = (cam.aside + 0.06).min(1.0);
+        } else {
+            cam.aside = (cam.aside - 0.04).max(0.0);
+        }
+        let k = cam.aside * cam.aside * (3.0 - 2.0 * cam.aside);
+        let eye = eye.lerp(cam.aside_eye, k);
         cam.eye += (eye - cam.eye) * 0.3;
+        let fast = ((r.speed() - TOP) / 8.0).clamp(0.0, 1.0);
+        cam.fov += (58.0 + fast * 12.0 - cam.fov) * 0.05;
     }
 
     /// Restart the run (a new course) or the zone.
@@ -793,7 +918,7 @@ impl World3 {
             position: self.cam.eye,
             target: self.cam.at,
             up: Vec3::Y,
-            fovy: 58f32.to_radians(),
+            fovy: self.cam.fov.to_radians(),
             z_near: 0.1,
             z_far: 900.0,
             ..Default::default()
@@ -814,6 +939,18 @@ impl World3 {
                     draw_mesh(m);
                 }
             }
+        }
+        // Clouds: scattered over a square that goes round with the view.
+        let e = self.cam.eye;
+        for k in 0..18 {
+            let h = |n: u32| ((k * 7919 + n * 104_729) % 1000) as f32 / 1000.0;
+            let wrap = |at: f32, eye: f32| (at - eye).rem_euclid(CLOUDS) - CLOUDS / 2.0 + eye;
+            let at = vec3(wrap(h(1) * CLOUDS, e.x), self.sea + 120.0 + h(3) * 60.0, wrap(h(2) * CLOUDS, e.z));
+            let size = 0.8 + h(4) * 1.2;
+            draw_at(
+                &looks.props.cloud,
+                Mat4::from_translation(at) * Mat4::from_rotation_y(h(5) * 6.0) * Mat4::from_scale(Vec3::splat(size)),
+            );
         }
         if self.maker.endless() {
             let (e, s) = (self.cam.eye, 1500.0);
@@ -863,13 +1000,15 @@ impl World3 {
         }
         for (pn, _) in &self.panels {
             let right = pn.dir.cross(pn.up).normalize_or_zero();
-            let m = Mat4::from_cols(
-                pn.dir.extend(0.0),
-                pn.up.extend(0.0),
-                right.extend(0.0),
-                (pn.at + pn.up * 0.02).extend(1.0),
-            );
-            draw_at(&props.panel, m);
+            for at in pn.plates() {
+                let m = Mat4::from_cols(
+                    pn.dir.extend(0.0),
+                    pn.up.extend(0.0),
+                    right.extend(0.0),
+                    (at + pn.up * 0.02).extend(1.0),
+                );
+                draw_at(&props.panel, m);
+            }
         }
         for (b, _) in &self.badniks {
             let d = b.dir.normalize_or(Vec3::X);
@@ -911,13 +1050,15 @@ impl World3 {
             }
         }
         // Badniks bursting, and blasts: bits flying out.
-        let bursts = self.pops.iter().map(|(p, t)| (*p, *t as f32 / 24.0, 6, 1.5, 0.3));
-        let bursts = bursts.chain(self.blasts.iter().map(|(p, t)| (*p, *t as f32 / 30.0, 14, 7.0, 0.6)));
-        for (p, k, n, reach, size) in bursts {
+        let bursts = self.pops.iter().map(|(p, t)| (*p, *t as f32 / 24.0, 7, 1.6, 0.55, &props.puff));
+        let bursts = bursts.chain(self.blasts.iter().map(|(p, t)| (*p, *t as f32 / 30.0, 16, 6.0, 1.3, &props.flame)));
+        for (p, k, n, reach, size, mesh) in bursts {
+            let out = 1.0 - (1.0 - k) * (1.0 - k);
             for j in 0..n {
-                let a = j as f32 / n as f32 * std::f32::consts::TAU;
-                let at = p + vec3(a.cos(), 0.6 + k, a.sin()) * k * reach;
-                draw_at(&props.ball, Mat4::from_translation(at) * Mat4::from_scale(Vec3::splat(size * (1.0 - k))));
+                let a = j as f32 / n as f32 * std::f32::consts::TAU + p.x;
+                let rise = if j % 2 == 0 { 0.9 } else { 0.3 };
+                let at = p + vec3(a.cos(), rise, a.sin()) * out * reach;
+                draw_at(mesh, Mat4::from_translation(at) * Mat4::from_scale(Vec3::splat(size * (1.0 - k))));
             }
         }
         // His shadow, and him (blinking while he cannot be hurt).
@@ -998,8 +1139,47 @@ impl World3 {
         }
         let speed = self.runner.speed() * K * 60.0 * 3.6;
         shadowed(&format!("{:.0} km/h", speed), 24.0, screen_height() - 24.0, 18.0, Color::new(1.0, 1.0, 1.0, 0.8));
+        let (w, h) = (screen_width(), screen_height());
+        // A milestone just passed.
+        let (mark, shown) = self.milestone;
+        if mark > 0 && shown < 120 && !self.over {
+            let a = (1.0 - shown as f32 / 120.0).min(1.0);
+            let size = 44.0 + (1.0 - a) * 10.0;
+            text_bold_centered(
+                &format!("{mark} m"),
+                w / 2.0 + 2.0,
+                h * 0.24 + 2.0,
+                size,
+                Color::new(0.0, 0.0, 0.0, 0.5 * a),
+            );
+            text_bold_centered(&format!("{mark} m"), w / 2.0, h * 0.24, size, Color::new(1.0, 0.86, 0.2, a));
+        }
+        // How to play, for the first seconds.
+        if self.frames < 540 && !self.over && !self.paused {
+            let a = ((540 - self.frames) as f32 / 60.0).min(1.0);
+            let mut hint =
+                "Arrows: run  ·  Space: jump  ·  Shift: roll, spin dash  ·  Q / E: camera  ·  P: pause".to_string();
+            if !self.maker.endless() {
+                hint.push_str("  ·  N: drop a thing  ·  B: blast");
+            }
+            text_bold_centered(&hint, w / 2.0 + 1.0, h - 23.0, 15.0, Color::new(0.0, 0.0, 0.0, 0.5 * a));
+            text_bold_centered(&hint, w / 2.0, h - 24.0, 15.0, Color::new(1.0, 1.0, 1.0, 0.9 * a));
+        }
+        if self.paused {
+            draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+            text_bold_centered("Paused", w / 2.0, h / 2.0 - 70.0, 44.0, WHITE);
+            let lines = [
+                "Arrows or WASD: run the way the camera looks  ·  Space: jump (again in the air: each character's move)",
+                "Shift, X or C: roll at speed  ·  standing: hold it, tap Space to rev a spin dash, let go to dash",
+                "Q / E or right-drag: turn the camera  ·  N: drop a thing  ·  B: blast",
+                "P: go on  ·  Esc: back to the library",
+            ];
+            for (k, line) in lines.iter().enumerate() {
+                let c = if k == 3 { yellow } else { Color::new(1.0, 1.0, 1.0, 0.9) };
+                text_bold_centered(line, w / 2.0, h / 2.0 - 16.0 + k as f32 * 26.0, 15.0, c);
+            }
+        }
         if self.over {
-            let (w, h) = (screen_width(), screen_height());
             draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.35));
             text_bold_centered(&format!("{} m", self.distance as u32), w / 2.0, h / 2.0 - 30.0, 48.0, WHITE);
             let line = if self.distance > self.best && self.best >= 20.0 {
@@ -1051,5 +1231,138 @@ fn anim_for(r: &Runner) -> (&'static str, f32) {
         ("RUN_", 0.12 + speed * 0.025)
     } else {
         ("DASH", 0.4)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::three::gfx::cuboid;
+
+    /// A flat floor with things on it, he at the origin facing +x.
+    struct Flat {
+        stretch: Option<Stretch>,
+    }
+
+    impl Maker for Flat {
+        fn next(&mut self) -> Option<Stretch> {
+            self.stretch.take()
+        }
+        fn start(&self) -> (Vec3, Vec3) {
+            (Vec3::ZERO, Vec3::X)
+        }
+        fn endless(&self) -> bool {
+            false
+        }
+    }
+
+    fn world(fill: impl FnOnce(&mut Stretch)) -> World3 {
+        let mut st = Stretch::default();
+        st.ground.push((cuboid(vec3(-50.0, -1.0, -50.0), vec3(200.0, 0.0, 50.0), WHITE), Skin::Grass));
+        fill(&mut st);
+        World3::new(Box::new(Flat { stretch: Some(st) }), Character::Sonic, 0.0)
+    }
+
+    fn forward() -> Input {
+        Input { stick: vec2(0.0, 1.0), ..Input::default() }
+    }
+
+    fn run(w: &mut World3, input: Input, frames: usize) {
+        for _ in 0..frames {
+            w.step(input);
+        }
+    }
+
+    #[test]
+    fn rings_are_picked_up_and_panels_and_springs_send_him_off() {
+        let mut w = world(|st| {
+            st.rings.extend((0..5).map(|k| vec3(4.0 + k as f32 * 2.0, 1.0, 0.0)));
+            st.rings.push(vec3(8.0, 1.0, 20.0));
+            st.panels.push(Panel { at: vec3(16.0, 0.0, 0.0), dir: Vec3::X, up: Vec3::Y, half: 3.0 });
+            st.springs.push(Spring { at: vec3(40.0, 0.0, 0.0), up: Vec3::Y, power: 10.0, red: false, squash: 0.0 });
+        });
+        run(&mut w, forward(), 150);
+        assert_eq!(w.ring_count, 5, "the rings on his way, not the one aside");
+        assert!(w.noises.contains(&Noise::Ring) && w.score == 50);
+        // The panel: off at speed.
+        while w.runner.pos.x < 18.0 {
+            w.step(forward());
+        }
+        assert!(w.runner.speed() >= 12.0 - 0.1 && w.noises.contains(&Noise::Dash), "dashed: {}", w.runner.speed());
+        // The spring: up he goes, keeping his speed along.
+        let mut top: f32 = 0.0;
+        for _ in 0..200 {
+            w.step(forward());
+            top = top.max(w.runner.pos.y);
+        }
+        assert!(w.noises.contains(&Noise::Spring) && top > 6.0, "sprung to {top} m");
+        assert!(w.runner.pos.x > 60.0);
+    }
+
+    #[test]
+    fn a_panel_reaches_right_across_and_no_further() {
+        let p = Panel { at: Vec3::ZERO, dir: Vec3::X, up: Vec3::Y, half: 5.0 };
+        for z in [-4.9f32, -2.0, 0.0, 1.1, 3.3, 4.9] {
+            assert!(p.under(vec3(0.2, 0.76, z)), "on it at {z}");
+        }
+        assert!(!p.under(vec3(0.0, 0.76, 5.3)) && !p.under(vec3(2.0, 0.76, 0.0)) && !p.under(vec3(0.0, 3.0, 0.0)));
+        assert_eq!(p.plates().count(), 6);
+    }
+
+    #[test]
+    fn a_badnik_hurts_scatters_his_rings_and_bursts_when_he_is_a_ball() {
+        let crawler = |x: f32| Badnik {
+            kind: BadnikKind::Crawler,
+            at: vec3(x, 0.0, 0.0),
+            home: vec3(x, 0.0, 0.0),
+            dir: Vec3::ZERO,
+            t: 0.0,
+        };
+        // Running into one with rings: they scatter, he is thrown back, unhurt for a while.
+        let mut w = world(|st| {
+            st.rings.extend((0..3).map(|k| vec3(3.0 + k as f32 * 1.5, 1.0, 0.0)));
+            st.badniks.push(crawler(14.0));
+        });
+        while !w.noises.contains(&Noise::Scatter) && w.frames < 400 {
+            w.step(forward());
+        }
+        assert!(w.noises.contains(&Noise::Scatter), "hit");
+        assert!(w.ring_count == 0 && w.spilled.len() == 3 && w.invincible > 0 && w.runner.hurt);
+        assert_eq!(w.badniks.len(), 1, "it is still there");
+        // The rings bounce about and can be caught again.
+        run(&mut w, Input::default(), 80);
+        assert!(
+            w.spilled.iter().all(|s| s.at.y > -0.1),
+            "they stay on the ground: {:?}",
+            w.spilled.iter().map(|s| s.at.y).collect::<Vec<_>>()
+        );
+        // Rolling into one bursts it.
+        let mut w = world(|st| st.badniks.push(crawler(30.0)));
+        while w.runner.pos.x < 12.0 {
+            w.step(forward());
+        }
+        w.step(Input { action: true, action_pressed: true, ..forward() });
+        assert!(w.runner.rolling);
+        run(&mut w, forward(), 150);
+        assert!(w.badniks.is_empty() && w.score == 100 && w.noises.contains(&Noise::Pop));
+        // With no rings, a hit in the zone sends him back to the start.
+        let mut w = world(|st| st.badniks.push(crawler(14.0)));
+        run(&mut w, forward(), 200);
+        assert!(w.noises.contains(&Noise::Hurt) && !w.over && w.runner.pos.x < 14.0);
+    }
+
+    #[test]
+    fn things_dropped_fall_and_a_blast_throws_them() {
+        let mut w = world(|st| st.things.push((Solid::Box(Vec3::splat(0.5)), vec3(3.0, 0.5, 0.0))));
+        w.step(Input { spawn: true, ..Input::default() });
+        assert_eq!(w.things.len(), 2);
+        run(&mut w, Input::default(), 120);
+        let resting: Vec<f32> = w.things.iter().map(|t| w.phys.pose(t.body).unwrap().0.y).collect();
+        assert!(resting.iter().all(|y| (0.3..1.7).contains(y)), "at rest on the floor: {resting:?}");
+        w.step(Input { blast: true, ..Input::default() });
+        run(&mut w, Input::default(), 10);
+        let (at, _) = w.phys.pose(w.things[0].body).unwrap();
+        assert!(at.x > 3.2 || at.y > 0.8, "thrown: {at:?}");
+        assert!(w.noises.contains(&Noise::Boom));
     }
 }

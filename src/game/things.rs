@@ -487,6 +487,11 @@ impl Things {
     pub fn is_wall(&self, collider: ColliderHandle) -> bool {
         self.walls.iter().any(|w| w.collider == collider)
     }
+
+    /// A breakable wall stands right in front of someone at `pos`.
+    pub fn at_wall(&self, pos: Vec2) -> bool {
+        self.walls.iter().any(|w| (w.pos.x - pos.x).abs() < WALL.x / 2.0 + 30.0 && (w.pos.y - pos.y).abs() < WALL.y)
+    }
 }
 
 #[cfg(test)]

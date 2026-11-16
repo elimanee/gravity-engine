@@ -60,9 +60,17 @@ pub struct Course {
     at: Frame,
     along: f32,
     yaw_rate: f32,
+    /// How fast the road comes round to what is asked of it (0‥1 a step):
+    /// gently as a rule, quickly before a ramp, a loop or a step.
+    ease: f32,
     count: u32,
     last: Option<Feature>,
 }
+
+/// The road's usual ease, and its ease where it must be straight and level
+/// soon.
+const GENTLE: f32 = 0.08;
+const QUICK: f32 = 0.3;
 
 impl Course {
     pub fn new(seed: u32) -> Course {
@@ -71,6 +79,7 @@ impl Course {
             at: Frame { pos: Vec3::ZERO, yaw: 0.0, pitch: 0.0, bank: 0.0 },
             along: 0.0,
             yaw_rate: 0.0,
+            ease: GENTLE,
             count: 0,
             last: None,
         }
@@ -151,9 +160,9 @@ impl Course {
         let mut out = vec![(self.at, self.along)];
         let steps = (len / STEP).ceil() as usize;
         for _ in 0..steps {
-            self.yaw_rate += (yaw_rate - self.yaw_rate) * 0.08;
+            self.yaw_rate += (yaw_rate - self.yaw_rate) * self.ease;
             self.at.yaw += self.yaw_rate * STEP;
-            self.at.pitch += (pitch - self.at.pitch) * 0.08;
+            self.at.pitch += (pitch - self.at.pitch) * self.ease;
             let lean = bank.unwrap_or((-self.yaw_rate * 9.0).clamp(-0.4, 0.4));
             self.at.bank += (lean - self.at.bank) * 0.15;
             self.at.pos += self.at.forward() * STEP;
@@ -162,6 +171,11 @@ impl Course {
             st.path.push((self.at.pos, self.along));
         }
         out
+    }
+
+    /// Dash panels right across the road (no way round them).
+    fn panels(st: &mut Stretch, f: &Frame) {
+        st.panels.push(Panel { at: f.pos, dir: f.forward(), up: f.up(), half: WIDTH / 2.0 });
     }
 
     /// A line of rings over frames `from..to` (every few), `side` metres
@@ -220,11 +234,12 @@ impl Course {
                 self.decor(st, &all);
             }
             Feature::Gap => {
-                // Straighten, a dash panel, a ramp, the gap, land lower.
+                // Straight and level, dash panels, a ramp, the gap, and the
+                // road again a little lower.
+                self.ease = QUICK;
                 let mut fr = self.go(st, 24.0, 0.0, 0.0, Some(0.0));
-                let p = fr[3].0;
-                st.panels.push(Panel { at: p.pos, dir: p.forward(), up: p.up() });
-                fr.extend(self.go(st, 12.0, 0.0, 0.32, Some(0.0))[1..].iter().copied());
+                Self::panels(st, &fr[5].0);
+                fr.extend(self.go(st, 12.0, 0.0, 0.3, Some(0.0))[1..].iter().copied());
                 Self::road(st, &fr);
                 let lip = self.at;
                 let gap = self.range(8.0, 13.0);
@@ -236,20 +251,21 @@ impl Course {
                     st.rings.push(f.pos + Vec3::Y * (2.5 + (t * std::f32::consts::PI).sin() * 3.0));
                 }
                 self.at.pos.y = lip.pos.y - self.range(1.0, 3.0);
-                let land = self.go(st, 30.0, 0.0, -0.05, Some(0.0));
+                let land = self.go(st, 36.0, 0.0, 0.0, Some(0.0));
                 Self::road(st, &land);
+                self.ease = GENTLE;
             }
             Feature::Loop => {
+                self.ease = QUICK;
                 let mut fr = self.go(st, 30.0, 0.0, 0.0, Some(0.0));
                 self.at.pitch = 0.0;
                 self.at.bank = 0.0;
                 if let Some(last) = fr.last_mut() {
                     last.0 = self.at;
                 }
-                let p = fr[2].0;
-                st.panels.push(Panel { at: p.pos, dir: p.forward(), up: p.up() });
+                Self::panels(st, &fr[5].0);
                 Self::road(st, &fr);
-                Self::rings(st, &fr[4..fr.len() - 2], 0.0);
+                Self::rings(st, &fr[7..fr.len() - 2], 0.0);
                 let shift = WIDTH + 2.0;
                 let (top, under, l) = loop_shape(self.at.pos, self.at.flat_forward(), 7.5, WIDTH, shift);
                 st.ground.push((top, Skin::Soil));
@@ -271,19 +287,43 @@ impl Course {
                 st.path.push((self.at.pos, self.along));
                 let out = self.go(st, 24.0, 0.0, 0.0, Some(0.0));
                 Self::road(st, &out);
+                self.ease = GENTLE;
             }
             Feature::StepUp => {
+                // Springs right across the road throw him up and on, onto
+                // the road that goes on higher up past the wall.
+                self.ease = QUICK;
                 let fr = self.go(st, 30.0, 0.0, 0.0, Some(0.0));
-                let p = fr[fr.len() - 3].0;
-                st.springs.push(Spring { at: p.pos, up: Vec3::Y, power: 10.5, red: false, squash: 0.0 });
+                let p = fr[fr.len() - 4].0;
+                let throw = p.flat_forward() * 4.0 + Vec3::Y * 13.0;
+                for k in 0..6 {
+                    st.springs.push(Spring {
+                        at: p.pos + p.right() * (k as f32 * 1.7 - 4.25),
+                        up: throw.normalize(),
+                        power: throw.length(),
+                        red: true,
+                        squash: 0.0,
+                    });
+                }
                 Self::road(st, &fr);
-                self.at.pos += self.at.forward() * 1.0;
-                self.at.pos.y += self.range(5.0, 7.0);
-                let rate = self.range(-0.015, 0.015);
-                let up = self.go(st, 36.0, rate, 0.0, None);
-                // Rings up where the spring sends him.
-                for k in 0..5 {
-                    st.rings.push(p.pos + p.forward() * (2.0 + k as f32 * 2.2) + Vec3::Y * (3.0 + k as f32 * 1.2));
+                // The wall: from under the road he is on up to the one above.
+                let rise = self.range(5.0, 7.0);
+                let (low, r) = (self.at, self.at.right() * (WIDTH / 2.0));
+                let mut wall = Shape::default();
+                let (a, b) = (low.pos - r - Vec3::Y * DEPTH, low.pos + r - Vec3::Y * DEPTH);
+                let up = Vec3::Y * (rise + DEPTH);
+                let uv = [vec2(0.0, 0.0), vec2(2.5, 0.0), vec2(2.5, 3.0), vec2(0.0, 3.0)];
+                wall.quad([b, a, a + up, b + up], uv, WHITE);
+                st.ground.push((wall, Skin::Soil));
+                self.at.pos.y += rise;
+                self.ease = GENTLE;
+                let rate = self.range(-0.01, 0.01);
+                let up = self.go(st, 40.0, rate, 0.0, None);
+                // Rings up where the springs send him.
+                for k in 1..6 {
+                    let t = k as f32 * 0.22;
+                    let at = p.pos + Vec3::Y * 1.5 + throw * (t * 2.4) - Vec3::Y * (15.75 * t * t);
+                    st.rings.push(at);
                 }
                 Self::road(st, &up);
                 self.decor(st, &up);
@@ -292,8 +332,7 @@ impl Course {
                 let rate = self.range(-0.02, 0.02);
                 let fr = self.go(st, 60.0, rate, -0.08, None);
                 for k in [2, 14] {
-                    let p = fr[k].0;
-                    st.panels.push(Panel { at: p.pos, dir: p.forward(), up: p.up() });
+                    Self::panels(st, &fr[k].0);
                 }
                 Self::road(st, &fr);
                 Self::rings(st, &fr[4..], -2.5);
@@ -368,6 +407,66 @@ mod tests {
         let (sa, sb) = (a.next().unwrap(), b.next().unwrap());
         let (pa, pb) = (sa.path.last().unwrap().0, sb.path.last().unwrap().0);
         assert!((pa - pb).length() > 0.5);
+    }
+
+    /// Which stretch is at `along` metres of the course from `seed`.
+    fn feature_at(seed: u32, along: f32) -> (Feature, f32) {
+        let mut c = Course::new(seed);
+        loop {
+            let from = c.along;
+            c.next();
+            if c.along >= along {
+                return (c.last.unwrap(), along - from);
+            }
+        }
+    }
+
+    #[test]
+    fn someone_who_follows_the_road_gets_a_long_way_on_any_course() {
+        use super::super::world::{Input, World3};
+        use crate::sonic::Character;
+        let mut short = vec![];
+        for seed in 13..=20 {
+            let mut w = World3::new(Box::new(Course::new(seed)), Character::Sonic, 0.0);
+            let mut was = false;
+            for _ in 0..60 * 150 {
+                let stick = w.autopilot(12.0);
+                // Jumps on the badniks in the way, as anyone would.
+                let jump = w.badnik_ahead();
+                w.step(Input { stick, jump, jump_pressed: jump && !was, ..Input::default() });
+                was = jump;
+                if w.over || w.distance > 2500.0 {
+                    break;
+                }
+            }
+            if w.distance < 2500.0 {
+                short.push((seed, w.distance, feature_at(seed, w.distance), w.over, w.runner.pos));
+            }
+        }
+        assert!(short.is_empty(), "runs that ended early: {short:#?}");
+    }
+
+    #[test]
+    fn holding_forward_alone_follows_the_road_a_long_way() {
+        use super::super::world::{Input, World3};
+        use crate::sonic::Character;
+        let mut short = vec![];
+        for seed in 1..=12 {
+            let mut w = World3::new(Box::new(Course::new(seed)), Character::Sonic, 0.0);
+            let mut was = false;
+            for _ in 0..60 * 150 {
+                let jump = w.badnik_ahead();
+                w.step(Input { stick: vec2(0.0, 1.0), jump, jump_pressed: jump && !was, ..Input::default() });
+                was = jump;
+                if w.over || w.distance > 2500.0 {
+                    break;
+                }
+            }
+            if w.distance < 2500.0 {
+                short.push((seed, w.distance, feature_at(seed, w.distance), w.runner.pos, w.off_road()));
+            }
+        }
+        assert!(short.is_empty(), "runs that ended early: {short:#?}");
     }
 
     #[test]

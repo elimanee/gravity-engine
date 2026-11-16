@@ -35,6 +35,10 @@ pub const STEEPEST: f32 = 0.7;
 const ROOMY: f32 = 300.0;
 /// A ledge's top is half its thickness above its line.
 const LEDGE_HALF: f32 = 8.0;
+/// How far on from the start of a stretch of ground the character can come
+/// down on it (running off a drop at speed): nothing that cannot be seen
+/// in time goes there.
+const LANDING: f32 = 260.0;
 
 /// The widest gap a jump gets over going up `rise` px (down when negative).
 pub fn reach(rise: f32) -> f32 {
@@ -693,7 +697,10 @@ impl Course {
                     out.push(Danger::Walker(kind, x, f.y));
                 }
                 5 | 6 if level >= 1 && roomy => out.push(Danger::Flyer(x, f.y - rng.range(120.0, 200.0))),
-                7 | 8 if x1 - x0 > 160.0 => out.push(Danger::Spikes(x, f.y)),
+                // Spikes well on from where the ground starts: its start is
+                // where the character comes down from a jump or a drop,
+                // too late to see them.
+                7 | 8 if x1 - x0 > LANDING + 60.0 => out.push(Danger::Spikes(rng.range(x0 + LANDING, x1 - 30.0), f.y)),
                 _ if rng.chance(0.3) => out.push(Danger::Monitor(MonitorKind::Rings, x, f.y)),
                 _ => {}
             }
@@ -883,19 +890,23 @@ mod tests {
             Floor { x0: 600.0, x1: 800.0, y: 300.0, upper: true },
             floor(1000.0, 1100.0, 500.0),
         ];
+        let long = [floor(100.0, 1400.0, 500.0)];
         let mut course = Course::new(3);
-        for _ in 0..200 {
-            for d in course.dangers(&floors, 5) {
+        let mut spikes = 0;
+        for k in 0..400 {
+            for d in course.dangers(if k % 2 == 0 { &floors } else { &long }, 5) {
                 match d {
-                    Danger::Walker(_, x, y) | Danger::Spikes(x, y) => {
-                        assert!((100.0..=400.0).contains(&x) && y == 500.0)
+                    Danger::Walker(_, x, y) => assert!((100.0..=1400.0).contains(&x) && y == 500.0),
+                    Danger::Spikes(x, y) => {
+                        spikes += 1;
+                        // Never where the character comes down onto the ground.
+                        assert!((100.0 + LANDING..=1400.0).contains(&x) && y == 500.0, "spikes at {x}");
                     }
-                    Danger::Flyer(x, y) => assert!((100.0..=400.0).contains(&x) && y < 500.0),
-                    Danger::Monitor(_, x, y) => assert!(
-                        ((100.0..=800.0).contains(&x) || (1000.0..=1100.0).contains(&x)) && (y == 500.0 || y == 300.0)
-                    ),
+                    Danger::Flyer(x, y) => assert!((100.0..=1400.0).contains(&x) && y < 500.0),
+                    Danger::Monitor(_, x, y) => assert!((100.0..=1400.0).contains(&x) && (y == 500.0 || y == 300.0)),
                 }
             }
         }
+        assert!(spikes > 5, "spikes on long ground: {spikes}");
     }
 }

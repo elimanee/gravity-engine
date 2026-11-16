@@ -186,6 +186,8 @@ pub struct App {
     /// its sprites are tried, what to come back to.
     regions: Option<regions::RegionEditor>,
     region_test: Option<regions::RegionTest>,
+    /// A character with no sheet was to be edited: asking what to do.
+    sheet_prompt: Option<crate::sonic::Character>,
     /// The web version saves the settings as they change (closing the tab
     /// does not run `Drop`): what was saved last, and when to look again.
     autosaved: String,
@@ -330,6 +332,7 @@ impl App {
             three: None,
             regions: None,
             region_test: None,
+            sheet_prompt: None,
             autosaved: String::new(),
             autosave_in: 2.0,
             game: None,
@@ -461,6 +464,11 @@ impl App {
         }
         if self.regions.is_some() && self.region_test.is_none() {
             self.regions_frame(dt);
+            self.audio.tick();
+            return;
+        }
+        if self.sheet_prompt.is_some() {
+            self.sheet_prompt_frame();
             self.audio.tick();
             return;
         }

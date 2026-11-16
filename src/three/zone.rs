@@ -175,7 +175,7 @@ impl Maker for Zone {
         for k in 0..6 {
             st.rings.push(at + vec3(-18.0 + k as f32 * 2.0, 1.0, 0.0));
         }
-        st.panels.push(Panel { at: at + vec3(-22.0, 0.0, 0.0), dir: Vec3::X, up: Vec3::Y });
+        st.panels.push(Panel { at: at + vec3(-22.0, 0.0, 0.0), dir: Vec3::X, up: Vec3::Y, half: 2.7 });
         // Ramps out in the hills, with rings in the air beyond them.
         for (k, (x, z, dir)) in
             [(c - 20.0, c + 50.0, vec3(0.0, 0.0, 1.0)), (c + 40.0, c - 50.0, vec3(1.0, 0.0, -1.0).normalize())]
@@ -184,7 +184,7 @@ impl Maker for Zone {
         {
             let at = base(x, z);
             st.ground.push((ramp(at, dir, 10.0, 3.5 + k as f32, 6.0), Skin::Soil));
-            st.panels.push(Panel { at: at - dir * 6.0 + Vec3::Y * 0.05, dir, up: Vec3::Y });
+            st.panels.push(Panel { at: at - dir * 6.0 + Vec3::Y * 0.05, dir, up: Vec3::Y, half: 2.7 });
             for r in 0..6 {
                 let t = r as f32 * 2.5;
                 st.rings.push(at + dir * (13.0 + t) + Vec3::Y * (5.0 + 2.5 - (t - 6.0).powi(2) * 0.07));

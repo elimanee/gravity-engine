@@ -796,6 +796,13 @@ impl Game {
         self.monitors.iter().any(|m| m.collider == Some(collider))
     }
 
+    /// A monitor not opened yet stands right in front of someone at `pos`.
+    pub fn at_monitor(&self, pos: Vec2) -> bool {
+        self.monitors
+            .iter()
+            .any(|m| m.collider.is_some() && (m.pos.x - pos.x).abs() < 60.0 && (m.pos.y - pos.y).abs() < 60.0)
+    }
+
     /// Sonic got hit by something at `from` (world px).
     pub fn hurt(&mut self, sonic: &mut Sonic, from: Vec2, out: &mut Vec<Effect>) {
         if self.invulnerable > 0.0 || self.sturdy(sonic) || sonic.dead || self.phase != Phase::Playing {
