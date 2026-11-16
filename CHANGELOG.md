@@ -14,6 +14,7 @@ described on the [releases page](https://github.com/elimanee/gravity-engine/rele
 - The best run's ghost (which raced you on the same course every time) is now a **flag** on the course where your record is, with *Past your record!* when you get beyond it; `ghost.json` is not used any more
 - Crumbling ledges wait half a second before they start to go, and go a piece at a time more slowly, so running on keeps ahead of them
 - The level editor shows the sprite sheets and the zone's tiles from the start, before anything is played
+- **Momentum**: holding the way they go, the characters keep their speed over a jump (the air drag near the top of a jump only slows them when you let go: a jump at speed used to land a third slower) and while rolling (it used to slow to a crawl in a few seconds); Amy swings her hammer on the run instead of stopping, and can only keep going or brake meanwhile
 - At night in the endless run (the Twilight zone), **lanterns** stand either side of every pit and the character's light reaches ahead, so the pits show before you are on them
 - In the random acts and the endless run, badniks are only put where there is room: no more walker or flyer on a short bit of ground between two pits, where the character lands (a hit there threw them back into the pit)
 

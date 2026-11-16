@@ -208,9 +208,17 @@ impl Sonic {
             if self.hammer_hits() {
                 self.hammer_smash(world, env, events);
             }
-            // She stops to swing.
-            self.gsp -= self.gsp.abs().min(0.25) * self.gsp.signum();
-            return Input { left: false, right: false, up: false, down: false, jump_pressed: false, ..input };
+            // She swings on the run, keeping her speed (still, she swings
+            // where she stands): she can only keep going or brake.
+            let onward = |d: f32| self.gsp * d > 0.0;
+            return Input {
+                left: input.left && onward(-1.0),
+                right: input.right && onward(1.0),
+                up: false,
+                down: false,
+                jump_pressed: false,
+                ..input
+            };
         }
         input
     }
@@ -619,5 +627,12 @@ mod tests {
         assert!(a.hammer.is_none() && !a.attacking());
         jump_then(&mut a, &w, Input::default(), 10);
         assert!(a.hammer_air && a.attacking(), "spins it in the air");
+        // Running, she swings without stopping.
+        let mut a = standing(Character::Amy, 300.0);
+        let right = Input { right: true, ..Input::default() };
+        a.gsp = 6.0;
+        run(&mut a, &w, Input { action_pressed: true, ..right }, 1);
+        run(&mut a, &w, right, HAMMER as usize);
+        assert!(a.gsp > 5.9, "kept her speed: {}", a.gsp);
     }
 }

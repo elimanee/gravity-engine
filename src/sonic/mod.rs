@@ -769,7 +769,12 @@ impl Sonic {
             if right && self.gsp < 0.0 {
                 self.gsp += ROLL_DEC * grip;
             }
-            self.gsp -= self.gsp.abs().min(c.frc * 0.5 * grip) * self.gsp.signum();
+            // Holding the way he rolls keeps his speed (the momentum); let
+            // go and he slows down as in the games.
+            let onward = (right && self.gsp > 0.0) || (left && self.gsp < 0.0);
+            if !onward {
+                self.gsp -= self.gsp.abs().min(c.frc * 0.5 * grip) * self.gsp.signum();
+            }
             if self.gsp.abs() < ROLL_END {
                 self.curl(false);
                 self.rolling = false;
@@ -1017,8 +1022,10 @@ impl Sonic {
             }
             self.facing = -1.0;
         }
-        // Air drag near the top of a jump.
-        if steer && self.ysp < 0.0 && self.ysp > -4.0 {
+        // Air drag near the top of a jump, unless he pushes on the way he
+        // goes: then he keeps his speed (the momentum) over a jump.
+        let onward = (input.right && self.xsp > 0.0) || (input.left && self.xsp < 0.0);
+        if steer && !onward && self.ysp < 0.0 && self.ysp > -4.0 {
             self.xsp -= (self.xsp / 0.125).trunc() / 256.0;
         }
         let step = vec2(self.xsp, self.ysp);
@@ -1174,6 +1181,37 @@ mod tests {
         assert_eq!(s.poses(), ["spindash", "roll"]);
         assert_eq!((s.pose, s.pose_frames), ("spindash", 0), "a new pose starts its clock again");
         assert_eq!(s.pose_anim, s.anim);
+    }
+
+    #[test]
+    fn speed_carries_over_jumps_and_rolls_while_he_pushes_on() {
+        let w = world();
+        let right = Input { right: true, ..Input::default() };
+        // A jump at speed (from a slope, say) lands as fast as it left.
+        for start in [6.0f32, 9.0, 12.0] {
+            let mut s = standing(300.0);
+            (s.gsp, s.xsp) = (start, start);
+            s.frame(&w, &walls, Input { jump: true, jump_pressed: true, ..right }, None, 1.0);
+            while !s.grounded {
+                s.frame(&w, &walls, Input { jump: true, ..right }, None, 1.0);
+                assert!(s.xsp >= start - 0.01, "kept {start} in the air: {}", s.xsp);
+            }
+            assert!((s.gsp - start).abs() < 0.01, "lands at {start}: {}", s.gsp);
+        }
+        // Let go of the way he goes and the air slows him near the top.
+        let mut s = standing(300.0);
+        (s.gsp, s.xsp) = (9.0, 9.0);
+        s.frame(&w, &walls, Input { jump: true, jump_pressed: true, ..Input::default() }, None, 1.0);
+        run(&mut s, &w, &walls, Input { jump: true, ..Input::default() }, 30);
+        assert!(s.xsp < 8.0, "slowed: {}", s.xsp);
+        // Rolling while pushing on keeps the speed; let go and it slows.
+        let mut s = standing(300.0);
+        s.gsp = 8.0;
+        run(&mut s, &w, &walls, Input { down: true, ..right }, 1);
+        run(&mut s, &w, &walls, right, 120);
+        assert!(s.rolling && s.gsp > 7.9, "rolled on at {}", s.gsp);
+        run(&mut s, &w, &walls, Input::default(), 120);
+        assert!(s.gsp < 5.5, "slowed down rolling: {}", s.gsp);
     }
 
     #[test]
