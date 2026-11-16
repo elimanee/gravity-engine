@@ -2057,7 +2057,6 @@ impl App {
         if self.player_body.is_some() {
             self.render_player_body(input.world);
         }
-        self.render_endless_ghost();
         let (sw, sh) = (screen_width(), screen_height());
         let screen = vec2(sw, sh);
         let (aw, ah) = self.arena();
@@ -2112,7 +2111,7 @@ impl App {
         self.draw_player_body();
         self.draw_game();
         self.draw_level_editor(m);
-        self.draw_endless_ghost();
+        self.draw_endless_record();
         self.draw_sonic();
         self.draw_game_over_sonic();
         self.draw_gadgets();

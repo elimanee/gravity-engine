@@ -383,6 +383,13 @@ impl Builder {
                 (x0 + (x1 - x0) * t, along - hump * (std::f32::consts::PI * t).sin().powi(2))
             })
             .collect();
+        self.surface(&surface, rgb, edge);
+    }
+
+    /// Ground under the line through `surface` (its top, left to right),
+    /// down to the bottom of the world, with a strip of `edge` along the
+    /// top: in pieces of 15 points, so their sprites stay small.
+    pub fn surface(&mut self, surface: &[(f32, f32)], rgb: [u8; 3], edge: [u8; 3]) {
         let m = Material { flammable: false, friction: 0.6, bounce: 0.05, ..Material::DEFAULT };
         for piece in
             surface.chunks(15).enumerate().map(|(k, c)| &surface[k * 15..(k * 15 + c.len() + 1).min(surface.len())])

@@ -163,17 +163,17 @@ While someone plays, `X` is the action button (the Winamp player is on `X` other
 
 ### Random acts
 
-**Library → Sonic → Random act** makes a new act each time it is played, from a seed: the start, sixteen stretches one after another, a star post every few of them and the goal. The ground goes up and down (hills, slopes, a cliff with a spring to climb it, drops), **pits** come with a way across (a jump, a bridge, a swinging platform, ledges in the air, a ledge that crumbles, a log with spikes), and some stretches have **two paths**: a spring up to a row of ledges with the monitors on them, or the ground below with the badniks. Loops, walls to roll through and rocks come up too, and the badniks and spikes get more numerous towards the goal. Every pit can be jumped or crossed. With a zone's sheet (see [The zone's sheet](#the-zones-sheet)), the ground and the gimmicks are drawn with its tiles.
+**Library → Sonic → Random act** makes a new act each time it is played, from a seed: the start, a dozen sections, a star post every few of them and the goal. The ground is **generated as it goes**, not put together from ready-made blocks: flats, slopes, hills and dips of any length and height, drifting up and down towards heights picked at random. Between runs of it comes something chosen at random (never the same as the last few): a **pit** of any width, landing higher, lower or level, or a run of them; a bridge, a swinging platform, stepping stones in the air, a ledge that crumbles, a log with spikes; a cliff with a spring to climb it, a drop, a loop, walls to roll through and rocks, a dip with spikes at the bottom, a dash panel before a long jump; or **two levels**: a spring up to a route of ledges with the monitors on them, over ground below (sometimes with pits) where the badniks are. The badniks and spikes get more numerous towards the goal, and only where there is room for them. Every pit can be jumped or crossed, and the slopes can be run up. With a zone's sheet (see [The zone's sheet](#the-zones-sheet)), the ground and the gimmicks are drawn with its tiles.
 
 Its *Edit* button opens the last random act played in the level editor (named *Random act* and its number): change it if you like, and *Save* keeps it in *My levels*.
 
 ### A richer endless run
 
-![The Twilight zone at night: Sonic lit up among crates, the best run's ghost glowing beside him and rings gleaming](docs/screenshots/endless-twilight.png)
+![The Twilight zone at night: Sonic lit up and rings gleaming](docs/screenshots/endless-twilight.png)
 
-The *Endless run* example (Sonic in the infinite world, on a course made ahead of him by the same generator as the [random acts](#random-acts): hills and slopes, pits with a way across, two paths, loops, springs, walls to roll through and rings) now goes through **five zones** — Meadow, Twilight (at night: Sonic carries a light and the rings gleam), Snowfield (snow), Lagoon (water) and Storm peak (rain and lightning) — each with its own colours and sky, and round again. The further you go, the more **badniks, flyers, crabs and spikes**, with the odd monitor.
+The *Endless run* example (Sonic in the infinite world, on a course made ahead of him by the same generator as the [random acts](#random-acts), **a new one every run**) now goes through **five zones** — Meadow, Twilight (at night: Sonic carries a light and the rings gleam), Snowfield (snow), Lagoon (water) and Storm peak (rain and lightning) — each with its own colours and sky, and round again. The further you go, the more **badniks, flyers, crabs and spikes**, with the odd monitor.
 
-One life: at the first one lost (a hit without rings, or a fall into a pit) the run is over and starts again. The best run is kept as a **ghost** that races you on the same course next time (`ghost.json`); the distance, your best and the zone are shown under the counters.
+One life: at the first one lost (a hit without rings, or a fall into a pit) the run is over and starts again, on a new course. A **flag** on the course marks how far your best run went (*Past your record!* when you get beyond it); the distance, your record and the zone are shown under the counters.
 
 ### Controllers
 
@@ -475,8 +475,8 @@ Without them, everything is drawn with shapes.
 - **Special stages** — 50 rings at a goal open a giant ring to a Blue Spheres stage; win the seven **chaos emeralds** and turn **super** (any character)
 - **Music** — chiptune songs and jingles for Sonic's mode, made by the program
 - **Level editor** (Library → Sonic → *New level*) — make Sonic levels, try them and keep them in *My levels*
-- **Random acts** (Library → Sonic → *Random act*) — a new act made each time: hills and slopes, pits to cross, two paths, the zone's gimmicks; keep the ones you like
-- **Endless run** — a course made as you go (hills, pits, two paths), five zones, more and more badniks, and the best run's ghost to race
+- **Random acts** (Library → Sonic → *Random act*) — a new act made each time, its ground generated as it goes: hills, slopes, pits of every sort, two levels, the zone's gimmicks; keep the ones you like
+- **Endless run** — a new course every run, made as you go, through five zones with more and more badniks, and a flag where your record is
 - **Game controllers** — play with a pad (Linux and Windows; it rumbles on Windows)
 - **Weather and night** (`Shift+H` / `Shift+T`) — rain, snow and storms with lightning; a night lit by lamps with shadows, fire and lasers
 - **Screenshots** (`F12`) and **GIF recording** (`F11`, up to 30 s) of the scene, without the interface
@@ -574,7 +574,6 @@ Everything lives in `~/.config/gravity_engine/` (or `$XDG_CONFIG_HOME/gravity_en
 | `challenges/` | Challenges made in the editor (`.gchallenge`), listed in Library → *My challenges* |
 | `levels/` | Sonic levels made in the level editor (`.gscene`), listed in Library → *Sonic* |
 | `sonic/` | Your sprite sheets for Sonic, Tails, Knuckles, Amy, Sonic.exe, the game's objects and the zone (`zone.png`), and the regions edited on them (`<character>.regions.json`, `zone.regions.json`; see *Sonic sprite sheets*) |
-| `ghost.json` | The endless run's best run, raced as a ghost |
 | `skins/` | Extra Winamp / Audacious skins (`.wsz` files or folders) for the classic player |
 | `sgdb_key` | SteamGridDB API key for the logo fetcher (or set `SGDB_API_KEY`) |
 

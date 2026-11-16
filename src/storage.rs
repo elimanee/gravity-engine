@@ -1,5 +1,5 @@
-//! The player's files (settings, levels, challenges, scenes, the endless
-//! run's ghost): plain files on the desktop; in the web version the same
+//! The player's files (settings, levels, challenges, scenes): plain files
+//! on the desktop; in the web version the same
 //! paths are keys in the browser's local storage (see `web/gravity_web.js`),
 //! under a made-up config folder, so the rest of the program is the same.
 

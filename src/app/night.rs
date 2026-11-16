@@ -106,9 +106,9 @@ impl App {
                 l.glow(h.pos - vec2(-h.facing * 6.0, 18.0), 60.0, Color::new(1.0, 0.1, 0.05, 0.9));
             }
         }
-        // The best run's ghost shows faintly.
-        if let Some(ghost) = self.ghost_now() {
-            l.glow(ghost.pos, 70.0, Color::new(0.6, 0.75, 1.0, 0.45));
+        // The best run's flag shows.
+        if let Some(flag) = self.record_flag() {
+            l.glow(flag - vec2(-30.0, 40.0), 90.0, Color::new(1.0, 0.85, 0.35, 0.6));
         }
         for r in self.rings.iter().filter(|r| visible.contains(**r)) {
             l.glow(*r, 30.0, Color::new(1.0, 0.85, 0.3, 0.55));

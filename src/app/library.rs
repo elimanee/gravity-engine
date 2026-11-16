@@ -131,7 +131,7 @@ impl App {
         let mut b = crate::library::Builder::at(aw / 2.0 - 600.0, ah);
         b.scene.border = crate::physics::borders::BorderMode::Open;
         b.scene.world_size = Some(4);
-        let name = crate::library::procedural::act(&mut b, seed, 16);
+        let name = crate::library::procedural::act(&mut b, seed, 12);
         (b.scene, name)
     }
 

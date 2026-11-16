@@ -1,33 +1,28 @@
-//! Sonic's endless run, in the infinite world: a level made from a seed as
-//! he goes (see [`procedural`]: hills, slopes, cliffs, pits to get over on
-//! bridges, swings, platforms or crumbling ledges, loops, walls, two
-//! paths) and cleared away behind him, through themed zones (meadow,
-//! twilight, snowfield, lagoon, storm) with more and more badniks and
-//! spikes the further he gets. There is nothing under the ground: a pit
-//! ends the run. It is played as a level with one life; the best run is
-//! kept as a ghost that races him on the same course next time.
+//! Sonic's endless run, in the infinite world: a level made as he goes
+//! (see [`procedural`]: ground generated without end, with pits to get
+//! over in all sorts of ways, cliffs, loops, walls and routes on two
+//! levels), a new one each run, cleared away behind him, through themed
+//! zones (meadow, twilight, snowfield, lagoon, storm) with more and more
+//! badniks and spikes the further he gets. There is nothing under the
+//! ground: a pit ends the run. It is played as a level with one life; a
+//! flag on the course marks how far the best run went.
 
 use super::*;
 use crate::background::LevelSky;
 use crate::game::{EnemyKind, LevelSpec, MONITOR, SPIKES};
-use crate::library::procedural::{self, Danger, Kind, Look, Rng};
+use crate::library::procedural::{self, Course, Danger, Look};
 use crate::library::{Builder, CORAL, LEAF, SKY, SNOW, STONE, VIOLET};
 use crate::physics::borders::BorderMode;
 use crate::weather::Weather;
-use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
 /// Terrain kept ready ahead of him, and kept behind him (px).
 const AHEAD: f32 = 2600.0;
 const BEHIND: f32 = 1800.0;
-/// The ghost's track is sampled this often (per second).
-const GHOST_RATE: f32 = 15.0;
 /// Seconds between the end of a run and the next.
 const RESTART: f32 = 3.0;
 /// Seconds the sky takes to turn into the next zone's.
 const SKY_TURN: f32 = 2.5;
-/// Size of the ghost's texture (px).
-const GHOST_PX: f32 = 200.0;
 
 /// A zone of the run: its name, length (m), colours and sky.
 struct Zone {
@@ -107,38 +102,6 @@ fn zone_at(d: f32) -> usize {
     0
 }
 
-/// Ghosts of courses made the way they are made now (older ones raced
-/// on other courses).
-const GHOST_VERSION: u32 = 2;
-
-/// The best run: its course and where the character was, sampled.
-#[derive(Serialize, Deserialize, Clone, Default)]
-pub(super) struct Ghost {
-    #[serde(default)]
-    version: u32,
-    seed: u64,
-    distance: f32,
-    character: crate::sonic::Character,
-    /// (x from the start, y from the floor, facing, curled up) per sample.
-    track: Vec<[f32; 4]>,
-}
-
-fn ghost_path() -> Option<std::path::PathBuf> {
-    crate::config::config_dir().map(|c| c.join("ghost.json"))
-}
-
-impl Ghost {
-    fn load() -> Option<Ghost> {
-        let g: Ghost = serde_json::from_str(&crate::storage::read_to_string(&ghost_path()?).ok()?).ok()?;
-        (g.version == GHOST_VERSION).then_some(g)
-    }
-
-    fn save(&self) -> Result<(), String> {
-        let path = ghost_path().ok_or("no config folder")?;
-        crate::storage::write(&path, serde_json::to_string(self).map_err(|e| e.to_string())?)
-    }
-}
-
 struct Stretch {
     x1: f32,
     bodies: Vec<RigidBodyHandle>,
@@ -148,29 +111,21 @@ pub(super) struct Endless {
     /// Where the next stretch starts and where the run started (px).
     next: f32,
     start: f32,
-    floor: f32,
     stretches: VecDeque<Stretch>,
     made: u32,
-    last_kind: Kind,
-    /// The ground's top where the next stretch starts (design px).
-    ground: f32,
+    /// What lays the ground ahead (a new one each run).
+    course: Course,
     /// Furthest point reached (px).
     pub reached: f32,
-    seed: u64,
-    rng: Rng,
     /// The zone he is in, and the sky the player had before the run.
     zone: usize,
     before: (Weather, bool, bool, f32, BorderMode),
     /// The sky turning from the last zone's (0 → 1).
     sky_from: LevelSky,
     sky_t: f32,
-    /// This run so far, and the best one racing him.
-    clock: f32,
-    track: Vec<[f32; 4]>,
-    character: crate::sonic::Character,
-    ghost: Option<Ghost>,
-    /// The ghost is drawn here first, to show it see-through in one piece.
-    ghost_target: Option<RenderTarget>,
+    /// The best run before this one (m), and whether he has got past it.
+    record: f32,
+    passed: bool,
     /// Seconds since the run ended.
     over: Option<f32>,
 }
@@ -190,16 +145,10 @@ impl Endless {
         ((self.reached - self.start) / PPM).max(0.0)
     }
 
-    /// Keep this run as the ghost if it is the best one yet (only once):
-    /// the distance, or why it could not be saved.
-    fn keep_if_best(&mut self) -> Option<Result<f32, String>> {
-        let d = self.distance();
-        if self.track.is_empty() || d <= 20.0 || self.ghost.as_ref().is_some_and(|g| d <= g.distance) {
-            return None;
-        }
-        let track = std::mem::take(&mut self.track);
-        let ghost = Ghost { version: GHOST_VERSION, seed: self.seed, distance: d, character: self.character, track };
-        Some(ghost.save().map(|()| d))
+    /// Where the best run ended, on this course (px), once there is one
+    /// worth showing.
+    pub fn record_x(&self) -> Option<f32> {
+        (self.record >= 20.0).then_some(self.start + self.record * PPM)
     }
 }
 
@@ -213,8 +162,11 @@ impl App {
         let floor = Builder::at(0.0, ah).to_world(0.0, procedural::BASE).y;
         let x = aw / 2.0;
         let start = vec2(x, floor - 40.0);
-        let ghost = Ghost::load().filter(|g| !g.track.is_empty());
-        let seed = ghost.as_ref().map_or_else(|| (get_time() * 1e6) as u64 ^ 0x9e37_79b9_7f4a_7c15, |g| g.seed);
+        // A new course every run (the benchmark's is always the same).
+        let seed = match self.bench {
+            Some(_) => 0x5eed,
+            None => ((get_time() * 1e6) as u64 ^ 0x9e37_79b9_7f4a_7c15).wrapping_mul(0x2545_f491_4f6c_dd1d),
+        };
         let before = self
             .endless
             .as_ref()
@@ -231,23 +183,16 @@ impl App {
         self.endless = Some(Endless {
             next: x - 500.0,
             start: x,
-            floor,
             stretches: VecDeque::new(),
             made: 0,
-            last_kind: Kind::Flat,
-            ground: procedural::BASE,
+            course: Course::new(seed),
             reached: x,
-            seed,
-            rng: Rng::new(seed),
             zone: usize::MAX,
             before,
             sky_from: LevelSky::DAY,
             sky_t: 1.0,
-            clock: 0.0,
-            track: vec![],
-            character: crate::sonic::Character::Sonic,
-            ghost,
-            ghost_target: self.endless.as_mut().and_then(|e| e.ghost_target.take()),
+            record: self.s.sonic_best,
+            passed: false,
             over: None,
         });
         // Ground under him before he can fall.
@@ -256,30 +201,17 @@ impl App {
         }
     }
 
-    /// The run is over: keep it if it is the best and give the player
-    /// their sky back.
+    /// The run is over: give the player their sky back.
     pub(super) fn end_endless(&mut self) {
-        if let Some(mut e) = self.endless.take() {
+        if let Some(e) = self.endless.take() {
             let border;
             (self.s.weather, self.s.night, self.s.water, self.s.water_level, border) = e.before;
             self.s.border = border;
             self.world.set_border(border);
-            // The benchmark leaves the player's ghost alone.
-            if self.bench.is_none() {
-                self.ghost_toast(e.keep_if_best());
-            }
         }
     }
 
-    fn ghost_toast(&mut self, kept: Option<Result<f32, String>>) {
-        match kept {
-            Some(Ok(d)) => self.toasts.success(format!("New best: {d:.0} m  ·  your ghost races you next time")),
-            Some(Err(err)) => self.toasts.warn(format!("Could not keep the ghost: {err}")),
-            None => {}
-        }
-    }
-
-    /// Once a step: terrain ahead, clean-up behind, zones, the record and the ghost.
+    /// Once a step: terrain ahead, clean-up behind, zones and the record.
     pub(super) fn update_endless(&mut self, step: f32) {
         let Some(sx) = self.sonic.as_ref().map(|r| r.sonic.pos.x) else {
             self.end_endless();
@@ -294,21 +226,16 @@ impl App {
         }
         self.endless_zone(step);
         let over = self.game.as_ref().is_some_and(|g| g.phase != crate::game::Phase::Playing);
-        let Some(run) = &self.sonic else { return };
-        let (p, facing, ball) = (run.sonic.pos, run.sonic.facing, run.sonic.is_ball());
-        let character = run.sonic.character;
+        let quiet = self.bench.is_some();
         let Some(e) = &mut self.endless else { return };
         if !over {
             e.reached = e.reached.max(sx);
-            e.character = character;
-            // Sample the track for the ghost.
-            let before = (e.clock * GHOST_RATE) as usize;
-            e.clock += step;
-            if (e.clock * GHOST_RATE) as usize != before {
-                e.track.push([p.x - e.start, p.y - e.floor, facing, if ball { 1.0 } else { 0.0 }]);
-            }
         }
         let d = e.distance();
+        // Past the flag: a new record on the way.
+        let passed = !e.passed && !over && e.record >= 20.0 && d > e.record;
+        e.passed |= passed;
+        let ended = over && e.over.is_none();
         let mut old = vec![];
         while e.stretches.front().is_some_and(|s| s.x1 < sx - BEHIND) {
             old.extend(e.stretches.pop_front().map(|s| s.bodies).unwrap_or_default());
@@ -316,18 +243,23 @@ impl App {
         if d > self.s.sonic_best {
             self.s.sonic_best = d;
         }
-        // The run is over: keep it if it is the best, then go again.
+        let record = e.record;
+        // The run is over: then go again, on a new course.
         if over {
             let t = e.over.map_or(0.0, |t| t + step);
             e.over = Some(t);
-            let kept = if self.bench.is_none() { e.keep_if_best() } else { None };
-            self.ghost_toast(kept);
+            if ended && !quiet && d > record.max(20.0) {
+                self.toasts.success(format!("New record: {d:.0} m"));
+            }
             if t > RESTART {
                 self.clear_objects();
                 self.rings.clear();
                 self.start_endless();
                 return;
             }
+        }
+        if passed && !quiet {
+            self.toasts.success(format!("Past your record of {record:.0} m!"));
         }
         for body in old {
             if let Some(i) = self.objects.iter().position(|o| o.body == body) {
@@ -396,7 +328,7 @@ impl App {
     fn make_stretch(&mut self) {
         let (_, ah) = self.arena();
         let Some(e) = &mut self.endless else { return };
-        let (x0, ground, last) = (e.next, e.ground, e.last_kind);
+        let x0 = e.next;
         let first = e.made == 0;
         let quiet = e.made <= 2;
         e.made += 1;
@@ -405,15 +337,17 @@ impl App {
         let zone = &ZONES[zone_at(d)];
         let look = Look { ground: zone.ground, edge: zone.edge };
         let level = (d / 150.0) as u32;
-        let mut rng = e.rng.clone();
+        let mut course = e.course.clone();
         let mut b = Builder::at(x0, ah);
-        let (kind, piece) = if first {
-            (Kind::Flat, procedural::start(&mut b, 0.0, ground, 1400.0, &look))
-        } else {
-            let kind = procedural::pick(&mut rng, last, ground);
-            (kind, procedural::piece(&mut b, kind, 0.0, ground, &look, &mut rng))
+        let section = match first {
+            true => course.start(&mut b, 0.0, 1400.0, &look),
+            false => course.section(&mut b, 0.0, &look, level),
         };
-        let dangers = if quiet { vec![] } else { procedural::dangers(&piece.floors, level, &mut rng) };
+        // Its own dangers (spikes in a dip), and badniks once under way.
+        let mut dangers = section.dangers.clone();
+        if !quiet {
+            dangers.extend(course.dangers(&section.floors, level));
+        }
         // Its gimmicks are the game's (bridges, swings, walls…).
         if let (Some(g), Some(spec)) = (self.game.as_mut(), b.scene.game.as_ref()) {
             g.add_things(&mut self.world, spec);
@@ -426,11 +360,9 @@ impl App {
             self.endless_danger(&b, d);
         }
         if let Some(e) = &mut self.endless {
-            e.rng = rng;
-            e.last_kind = kind;
-            e.ground = piece.end;
-            e.next = x0 + piece.width;
-            e.stretches.push_back(Stretch { x1: x0 + piece.width, bodies });
+            e.course = course;
+            e.next = x0 + section.width;
+            e.stretches.push_back(Stretch { x1: x0 + section.width, bodies });
         }
     }
 
@@ -445,69 +377,41 @@ impl App {
         }
     }
 
-    /// Where the best run's ghost is now, as a character to draw.
-    pub(super) fn ghost_now(&self) -> Option<crate::sonic::Sonic> {
-        let e = self.endless.as_ref()?;
-        let g = e.ghost.as_ref()?;
-        let last = g.track.len().checked_sub(1)?;
-        let k = (e.clock * GHOST_RATE).min(last as f32);
-        let (i, f) = (k as usize, k.fract());
-        let (a, b) = (g.track[i], g.track[(i + 1).min(last)]);
-        let pos = vec2(e.start + a[0] + (b[0] - a[0]) * f, e.floor + a[1] + (b[1] - a[1]) * f);
-        let mut who = crate::sonic::Sonic::as_character(pos, g.character);
-        who.facing = a[2];
-        who.jumping = a[3] > 0.5;
-        who.grounded = !who.jumping;
-        who.gsp = (b[0] - a[0]) * GHOST_RATE / crate::sonic::FPS / crate::sonic::SCALE;
-        who.spin = e.clock * 12.0;
-        who.anim = e.clock * 8.0;
-        Some(who)
+    /// The flag where the best run ended, in the world (on the ground
+    /// line of the view's top third), if it is in view.
+    pub(super) fn record_flag(&self) -> Option<Vec2> {
+        let x = self.endless.as_ref()?.record_x()?;
+        let seen = self.view().visible();
+        (x > seen.x - 100.0 && x < seen.right() + 100.0).then(|| vec2(x, seen.y + seen.h * 0.22))
     }
 
-    /// Draw the ghost into its texture (before the frame's other drawing).
-    pub(super) fn render_endless_ghost(&mut self) {
-        let Some(who) = self.ghost_now() else { return };
-        let Some(e) = &mut self.endless else { return };
-        let rt = e
-            .ghost_target
-            .get_or_insert_with(|| {
-                let rt = render_target(GHOST_PX as u32, GHOST_PX as u32);
-                rt.texture.set_filter(FilterMode::Linear);
-                rt
-            })
-            .clone();
-        let half = GHOST_PX / 2.0;
-        let mut cam = Camera2D::from_display_rect(Rect::new(who.pos.x - half, who.pos.y - half, GHOST_PX, GHOST_PX));
-        cam.render_target = Some(rt);
-        set_camera(&cam);
-        clear_background(BLANK);
-        match self.sonic_sheet.get(who.character) {
-            Some(sheet) => sheet.draw(&who),
-            None => crate::sonic::art::draw(&who),
+    /// The best run's mark: a line down the view and a flag with the
+    /// distance (world pass, before him).
+    pub(super) fn draw_endless_record(&self) {
+        let (Some(flag), Some(e)) = (self.record_flag(), self.endless.as_ref()) else { return };
+        let seen = self.view().visible();
+        let gold = Color::new(1.0, 0.84, 0.25, 1.0);
+        let faint = Color::new(1.0, 0.84, 0.25, 0.45);
+        let mut y = flag.y;
+        while y < seen.bottom() {
+            draw_line(flag.x, y, flag.x, (y + 18.0).min(seen.bottom()), 3.0, faint);
+            y += 30.0;
         }
-        set_default_camera();
-    }
-
-    /// The best run's ghost, see-through (world pass, before him).
-    pub(super) fn draw_endless_ghost(&self) {
-        let Some(who) = self.ghost_now() else { return };
-        let Some(rt) = self.endless.as_ref().and_then(|e| e.ghost_target.as_ref()) else { return };
-        let half = GHOST_PX / 2.0;
-        draw_texture_ex(
-            &rt.texture,
-            who.pos.x - half,
-            who.pos.y - half,
-            Color::new(0.7, 0.85, 1.0, 0.5),
-            DrawTextureParams { dest_size: Some(vec2(GHOST_PX, GHOST_PX)), flip_y: true, ..Default::default() },
-        );
-        theme::text_bold_centered("BEST", who.pos.x, who.pos.y - 46.0, 11.0, Color::new(1.0, 1.0, 1.0, 0.6));
+        // The pole and the flag, with the distance on it.
+        draw_line(flag.x, flag.y - 70.0, flag.x, flag.y, 4.0, gold);
+        let label = format!("RECORD {:.0} m", e.record);
+        let w = theme::measure_bold(&label, 14.0) + 20.0;
+        let r = Rect::new(flag.x + 2.0, flag.y - 70.0, w, 28.0);
+        draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.08, 0.06, 0.02, 0.75));
+        draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, gold);
+        theme::text_bold(&label, r.x + 10.0, r.y + 19.0, 14.0, gold);
     }
 
     /// Distance, record and zone (screen pass, under the counters).
     pub(super) fn draw_endless_hud(&self, top: f32) {
         let Some(e) = &self.endless else { return };
         let zone = ZONES.get(e.zone).map_or("", |z| z.name);
-        let line = format!("{:.0} m   ·   best {:.0} m   ·   {zone}", e.distance(), self.s.sonic_best);
+        let line = format!("{:.0} m   ·   record {:.0} m   ·   {zone}", e.distance(), self.s.sonic_best);
         let y = top + 100.0;
         theme::text_bold(&line, 18.0, y + 2.0, 15.0, Color::new(0.0, 0.0, 0.0, 0.6));
         theme::text_bold(&line, 16.0, y, 15.0, Color::new(0.85, 0.95, 1.0, 1.0));
@@ -550,23 +454,36 @@ mod tests {
     fn nothing_on_the_course_falls_or_rolls_about() {
         let zone = &ZONES[0];
         let look = Look { ground: zone.ground, edge: zone.edge };
-        let mut rng = Rng::new(7);
-        for kind in Kind::ALL {
+        let mut course = Course::new(7);
+        let mut seen = std::collections::HashSet::new();
+        for i in 0..200 {
             let mut b = Builder::at(0.0, 1440.0);
-            procedural::piece(&mut b, kind, 0.0, procedural::BASE, &look, &mut rng);
-            assert!(b.scene.objects.iter().all(|o| o.pinned), "{kind:?} has something loose");
+            let s = course.section(&mut b, 0.0, &look, i / 10);
+            seen.extend(s.feature);
+            assert!(b.scene.objects.iter().all(|o| o.pinned), "{:?} has something loose", s.feature);
         }
+        assert_eq!(seen.len(), procedural::Feature::ALL.len(), "every feature was tried");
     }
 
     #[test]
-    fn a_seed_makes_the_same_course_again() {
-        let (mut a, mut b) = (Rng(42), Rng(42));
-        let xs: Vec<u32> = (0..20).map(|_| a.below(5)).collect();
-        let ys: Vec<u32> = (0..20).map(|_| b.below(5)).collect();
-        assert_eq!(xs, ys);
-        let mut c = Rng(43);
-        assert!((0..20).map(|_| c.below(5)).collect::<Vec<_>>() != xs);
-        let r = a.range(2.0, 3.0);
-        assert!((2.0..3.0).contains(&r));
+    fn the_record_is_marked_where_the_best_run_ended() {
+        let e = Endless {
+            next: 0.0,
+            start: 1000.0,
+            stretches: VecDeque::new(),
+            made: 0,
+            course: Course::new(1),
+            reached: 1000.0,
+            zone: 0,
+            before: (Weather::Clear, false, false, 0.0, BorderMode::Open),
+            sky_from: LevelSky::DAY,
+            sky_t: 1.0,
+            record: 150.0,
+            passed: false,
+            over: None,
+        };
+        assert_eq!(e.record_x(), Some(1000.0 + 150.0 * PPM));
+        let short = Endless { record: 12.0, ..e };
+        assert_eq!(short.record_x(), None, "not for a run that hardly began");
     }
 }
