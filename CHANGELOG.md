@@ -18,6 +18,7 @@ described on the [releases page](https://github.com/elimanee/gravity-engine/rele
 - In the random acts and the endless run, badniks are only put where there is room: no more walker or flyer on a short bit of ground between two pits, where the character lands (a hit there threw them back into the pit)
 
 ### Fixed
+- The ground's solid shape now follows its drawn top exactly: it was cut into convex parts only approximately, and as the ground goes all the way down that filled its dips (up to 20 px), so the character ran on air at the bottom of a slope and could not get on
 - A character coming down on the corner of the ground with their middle just above its top could slip into the ground and fall through it; they now land on the edge (and, lower down, the side stops them)
 - In the infinite world, pinned things moved twice as far as everything else whenever the world was brought back under the view: in the endless run the ground vanished from under the character after 200 m, and in the sandbox pinned objects jumped
 

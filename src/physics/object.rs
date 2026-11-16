@@ -120,6 +120,9 @@ impl Outline {
             }
             Outline::Concave(pts) => {
                 let verts = scale(pts);
+                if let Some(ground) = columns(&verts) {
+                    return ColliderBuilder::new(ground);
+                }
                 let n = verts.len() as u32;
                 let idx: Vec<[u32; 2]> = (0..n).map(|i| [i, (i + 1) % n]).collect();
                 let shape = SharedShape::convex_decomposition(&verts, &idx);
@@ -142,6 +145,42 @@ impl Outline {
             }
         }
     }
+}
+
+/// Ground as the levels make it, a line along the top (left to right)
+/// over a flat bottom: cut exactly into a four-sided column under each
+/// stretch of the line. (An approximate decomposition fills its dips,
+/// tall as the ground is, and the character runs on air over them.)
+fn columns(verts: &[na::Point2<f32>]) -> Option<SharedShape> {
+    const EPS: f32 = 1e-3;
+    let mut v = verts.to_vec();
+    if v.len() > 1 && (v[0] - v[v.len() - 1]).norm() < EPS {
+        v.pop();
+    }
+    let n = v.len();
+    if n < 4 {
+        return None;
+    }
+    // [top…, bottom right, bottom left]
+    let (top, right, left) = (&v[..n - 2], v[n - 2], v[n - 1]);
+    let bottom = left.y;
+    let (first, last) = (top[0], top[top.len() - 1]);
+    let fits = (right.y - bottom).abs() < EPS
+        && (right.x - last.x).abs() < EPS
+        && (left.x - first.x).abs() < EPS
+        && top.windows(2).all(|w| w[1].x > w[0].x + EPS)
+        && top.iter().all(|p| p.y > bottom + EPS);
+    if !fits {
+        return None;
+    }
+    let parts: Vec<(Isometry<f32>, SharedShape)> = top
+        .windows(2)
+        .filter_map(|w| {
+            let quad = [w[0], point![w[0].x, bottom], point![w[1].x, bottom], w[1]];
+            SharedShape::convex_hull(&quad).map(|s| (Isometry::identity(), s))
+        })
+        .collect();
+    (parts.len() == top.len() - 1).then(|| SharedShape::compound(parts))
 }
 
 /// What of a zone an object is, drawn with the zone's tiles when there is
@@ -711,5 +750,78 @@ mod hull_tests {
         let pts = [[0.0, 0.0], [1.0, 0.0], [0.5, 0.5], [1.0, 1.0], [0.0, 1.0], [0.2, 0.7]];
         let h = super::convex_hull(&pts);
         assert_eq!(h, vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+    }
+}
+
+#[cfg(test)]
+mod ground_tests {
+    use super::*;
+
+    /// The height of the collider's top at x (phys units), from above.
+    fn top_at(shape: &ColliderBuilder, x: f32) -> Option<f32> {
+        let s = shape.shape.clone();
+        let ray = Ray::new(point![x, 100.0], vector![0.0, -1.0]);
+        s.cast_local_ray(&ray, 1000.0, true).map(|t| 100.0 - t)
+    }
+
+    #[test]
+    fn ground_is_solid_exactly_under_its_top_dips_and_all() {
+        // A piece of ground as the levels make it: a top line (high, down
+        // a slope, low) over a bottom far below, normalised to its box.
+        let (w, h) = (600.0f32, 1000.0f32);
+        let mut top: Vec<(f32, f32)> = vec![];
+        for i in 0..=14 {
+            let x = i as f32 * w / 14.0;
+            let t = ((x - 150.0) / 300.0).clamp(0.0, 1.0);
+            top.push((x, 40.0 * t * t * (3.0 - 2.0 * t)));
+        }
+        let mut outline = top.clone();
+        outline.extend([(w, h), (0.0, h), top[0]]);
+        // Normalised: u from -0.5 to 0.5, v up.
+        let pts: Vec<[f32; 2]> = outline.iter().map(|&(x, y)| [x / w - 0.5, 0.5 - y / h]).collect();
+        let (hw, hh) = (w / 2.0 / PPM, h / 2.0 / PPM);
+        let col = Outline::Concave(pts).collider(hw, hh);
+        for &(x, y) in &top {
+            let got = top_at(&col, (x - w / 2.0) / PPM).expect("solid there");
+            let want = (h / 2.0 - y) / PPM;
+            assert!(
+                (got - want).abs() * PPM < 1.0,
+                "at x = {x}: the top is at {} px, drawn at {} px",
+                (h / 2.0 - got * PPM),
+                y
+            );
+        }
+    }
+
+    #[test]
+    fn the_levels_ground_is_solid_right_under_its_top() {
+        use crate::library::procedural::{Course, Look};
+        use crate::library::{Builder, LEAF};
+        use crate::scene::SceneSource;
+        let mut b = Builder::at(0.0, 1440.0);
+        let mut course = Course::new(4);
+        let look = Look { ground: [1, 2, 3], edge: LEAF };
+        let mut x = 0.0;
+        for i in 0..30 {
+            x += course.section(&mut b, x, &look, i / 3).width;
+        }
+        let mut checked = 0;
+        for so in b.scene.objects.iter().filter(|o| o.material.skin == Skin::Ground) {
+            let SceneSource::Drawing(d) = &so.source else { continue };
+            let (hw, hh) = (so.w.max(4.0) / 2.0 / PPM, so.h.max(4.0) / 2.0 / PPM);
+            let col = Outline::Concave(d.points.clone()).collider(hw, hh);
+            // Its top: all but the two bottom corners and the closing point.
+            let top = &d.points[..d.points.len() - 3];
+            for w in top.windows(2) {
+                for t in [0.0, 0.5] {
+                    let (u, v) = (w[0][0] + (w[1][0] - w[0][0]) * t, w[0][1] + (w[1][1] - w[0][1]) * t);
+                    let got = top_at(&col, u * 2.0 * hw).expect("solid there");
+                    let off = (got - v * 2.0 * hh) * PPM;
+                    assert!(off.abs() < 1.0, "the solid top is {off} px off the drawn one");
+                }
+            }
+            checked += 1;
+        }
+        assert!(checked > 50, "{checked} pieces of ground");
     }
 }
