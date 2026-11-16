@@ -134,6 +134,10 @@ pub enum Action {
     LevelContinue,
     /// Play one of Sonic's built-in acts.
     OpenAct(usize),
+    /// The 3D mode: the endless run or the open zone.
+    Play3d {
+        zone: bool,
+    },
     /// Play a new random act, or open the last one in the level editor (to keep it).
     RandomAct {
         edit: bool,

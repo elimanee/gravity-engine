@@ -15,6 +15,8 @@ path = "src/main.rs"
 macroquad   = "0.4"
 # Physics
 rapier2d    = { version = "0.22", features = ["default"] }
+# The 3D mode's physics
+rapier3d    = { version = "0.22", features = ["default"] }
 # Image loading: png, jpeg, gif, webp, bmp, tiff, ico, tga, qoi, hdr, exr,
 # pnm (ppm/pgm/pbm), dds and farbfeld (no AVIF encoder, which the web
 # version could not link)

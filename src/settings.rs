@@ -130,6 +130,8 @@ pub struct Settings {
     pub show_title: bool,
     /// Longest endless run (m).
     pub sonic_best: f32,
+    /// Longest 3D run (m).
+    pub run_3d_best: f32,
     /// Who plays: Sonic, Tails, Knuckles or Amy.
     pub character: crate::sonic::Character,
     /// Best score per Sonic act cleared (by act name).
@@ -214,6 +216,7 @@ impl Default for Settings {
             slow_motion: true,
             show_title: true,
             sonic_best: 0.0,
+            run_3d_best: 0.0,
             act_scores: Default::default(),
             emeralds: 0,
             character: Default::default(),

@@ -5,7 +5,7 @@
 //! the full list of controls.
 //!
 //! Usage: `gravity_engine [--no-title] [--benchmark] [--act=N] [--special-stage=N]
-//! [--sprite-regions[=CHARACTER]] [FILES…]` — files may be images, audio
+//! [--3d[=run|zone]] [--sprite-regions[=CHARACTER]] [FILES…]` — files may be images, audio
 //! (tracker modules, mp3/flac/ogg/…, .pls playlists) or `.gscene` scenes.
 
 // No console window behind the game on Windows release builds.
@@ -36,6 +36,7 @@ mod skin;
 mod sonic;
 mod special;
 mod storage;
+mod three;
 mod ui;
 mod util;
 mod weather;
@@ -69,6 +70,7 @@ async fn main() {
     let mut benchmark = false;
     let mut act = None;
     let mut special = None;
+    let mut three = None;
     let mut regions = None;
     let mut files = vec![];
     for arg in std::env::args().skip(1) {
@@ -83,6 +85,9 @@ async fn main() {
             a if a.starts_with("--special-stage=") => {
                 special = a[16..].parse::<usize>().ok().and_then(|n| n.checked_sub(1));
             }
+            // Straight into the 3D mode: the endless run or the open zone.
+            "--3d" | "--3d=run" => three = Some(false),
+            "--3d=zone" => three = Some(true),
             // Straight into the sprite region editor (on this character's sheet).
             "--sprite-regions" => regions = Some(None),
             a if a.starts_with("--sprite-regions=") => {
@@ -92,10 +97,11 @@ async fn main() {
             "-h" | "--help" => {
                 println!(
                     "usage: gravity_engine [--no-title] [--benchmark] [--act=N] [--special-stage=N] \
-                     [--sprite-regions[=CHARACTER]] [FILES…]\n\n  \
+                     [--3d[=run|zone]] [--sprite-regions[=CHARACTER]] [FILES…]\n\n  \
                      --benchmark        run stress scenes, print frame times and quit\n  \
                      --act=N            play Sonic act N (1-7)\n  \
                      --special-stage=N  play special stage N (1-7)\n  \
+                     --3d[=run|zone]    play the 3D mode: the endless run or the open zone\n  \
                      --sprite-regions   edit the characters' sprite sheet regions (sonic, tails,\n                     \
                      knuckles, amy or exe) or the zone's tiles (zone)\n\n\
                      Press F1 in the app for controls."
@@ -126,6 +132,9 @@ async fn main() {
     }
     if let Some(i) = special {
         app.play_special(i);
+    }
+    if let Some(zone) = three {
+        app.play_3d(zone);
     }
     if let Some(c) = regions {
         app.edit_regions(c);

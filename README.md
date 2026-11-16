@@ -14,6 +14,17 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
 
+## What's new in 3.6: the 3D mode
+
+| The endless 3D run | The 3D zone |
+|---|---|
+| ![Sonic, built from simple shapes, running on a green checkered road that hangs over the sea and leans into its bend, rings and sunflowers along it, a loop ahead](docs/screenshots/3d-run.png) | ![Sonic on an earth track in green hills, a crate and a barrel just dropped in front of him, a stack of crates, a big ball, a loop and palm trees beyond](docs/screenshots/3d-zone.png) |
+
+- **Sonic in 3D** (Library → Sonic → *3D run* or *3D zone*, or `--3d=run` / `--3d=zone`), with the 2D game's physics carried over: the same acceleration, braking, friction, jump, rolling and spin dash, slopes that speed him up and slow him down, and the momentum rules (holding the way he goes keeps his speed over jumps and rolls). He runs along whatever is under his feet, **round loops and up walls** when he is fast enough, and turns smoothly so a bend keeps his speed. Every character plays, with their own move (Tails flies, Knuckles glides, Amy swings her hammer, Sonic.exe teleports).
+- **The 3D run**: an endless road over the sea, **a new one every run**, made as you go. It bends, climbs, dips and leans into its bends, with ramps over gaps, loops (coming out beside the way in), springs up to a higher road, dash panels, lines of rings and badniks. Fall off and the run is over; your record is kept.
+- **The 3D zone**: green hills to roam freely, ringed by mountains, with a loop, ramps, platforms reached by springs, rings, badniks and trees, and **things to knock over**: a stack of crates, barrels and a big ball (3D physics with rapier3d). `N` drops another, `B` blows up everything near.
+- **Your own 3D models**: the characters, badniks, rings and springs can be drawn from a model pack made for *Sonic Robo Blast 2* (MD3 models, with their animations and their colours), put in your `sonic/` folder; see [3D models](#3d-models). Without one, they are built from simple shapes, as in the pictures. *(No models from any game are included.)*
+
 ## What's new in 3.5: zone gimmicks, a zone's sheet and a fuller sprite region editor
 
 ![Sonic, drawn by the game, on a bridge of logs that dips under him, a platform swinging on its chain above, a cracked wall to roll through and a rock beyond](docs/screenshots/zone-gimmicks.png)
@@ -483,6 +494,10 @@ Without them, everything is drawn with shapes.
 - **Debug overlay** (`D`) — FPS, collider outlines, velocities and details of the object under the cursor
 - **In the browser** — the [web version](https://elimanee.github.io/gravity-engine/) runs the same program (without the features that need files or the network)
 
+### 3D models
+
+The 3D mode draws the characters, the badniks, the rings and the springs from a **model pack made for Sonic Robo Blast 2 2.2** if you have one: MD3 models with a `models.dat` listing them. Put the pack's `models.dat` and its `models/` folder in `~/.config/gravity_engine/sonic/` (or both in `…/sonic/models/`), and start the 3D mode. It takes `PLAY/SONIC.md3`, `TAILS`, `KNUCKLES` and `AMY` for the characters, `ENMY/POSS.md3` and `BUZZ` for the badniks, `OBJE/RING.md3`, `SPRY` and `SPRR` for the rings and springs, wherever `models.dat` says they are, each with its picture (`SONIC.png`) and the colour put on through its `_blend` map as SRB2 does. Sonic.exe uses a pack's `EXE_` model if there is one (a model of poses, like 2011X's), else Sonic's in darker colours. The animations are SRB2's (standing, waiting, walking, running, dashing, rolling, the spin dash, springing up, falling, skidding, hurt, Tails' tails). Whatever is missing is built from simple shapes. The models are read from your files only and never shipped with the game.
+
 ## Controls
 
 Press **F1** in the app for the full list.
@@ -499,6 +514,7 @@ Press **F1** in the app for the full list.
 | `Shift+N` / `X` | Next character (Sonic, Tails, Knuckles, Amy, Sonic.exe) / action button while someone plays (Amy's hammer) |
 | `Space` twice | In the air with all seven emeralds and 50 rings: turn super |
 | Special stage | `←` `→` turn at the next crossing · `Space` jump · `↑` run forward again after a bumper · `Esc` leave |
+| 3D mode | Arrows / `WASD` run (the way the camera looks) · `Space` jump · `Shift` / `X` / `C` action: roll at speed; standing, hold it and tap `Space` to rev a spin dash, let go to dash · `Q` / `E` or right-drag turn the camera · `N` drop a thing · `B` blast · `Esc` back to the library. Controller: stick run · A / B / Y jump · X action · LB / RB camera · Select back |
 | Controller | Stick or d-pad: run · A / B / Y: jump · X: action · Select: next character · Start: pause |
 | `U` / `Shift+U` | Jelly / cloth (over an object: it turns to jelly / is hung as a flag) |
 | `E` / `Shift+E` | Library (examples, challenges, Sonic's acts and levels) / challenge editor |
@@ -547,7 +563,7 @@ sudo apt install pkg-config libopenmpt-dev libasound2-dev libx11-dev libxi-dev \
 cargo run --release
 ```
 
-Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins. `--act=N` and `--special-stage=N` go straight into Sonic act N (1–7) or special stage N (1–7), and `--sprite-regions[=CHARACTER]` into the sprite region editor (`sonic`, `tails`, `knuckles`, `amy` or `exe`, or `zone` for the zone's tiles).
+Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins. `--act=N` and `--special-stage=N` go straight into Sonic act N (1–7) or special stage N (1–7), `--3d=run` and `--3d=zone` into the 3D mode, and `--sprite-regions[=CHARACTER]` into the sprite region editor (`sonic`, `tails`, `knuckles`, `amy` or `exe`, or `zone` for the zone's tiles).
 
 `gravity_engine --benchmark` runs five stress scenes for a few seconds each at a fixed 60 Hz and prints the frame times (average, 95th percentile, worst), the bodies still moving, the time spent waiting for the screen and where each frame's time goes, then quits without saving anything.
 
@@ -573,7 +589,7 @@ Everything lives in `~/.config/gravity_engine/` (or `$XDG_CONFIG_HOME/gravity_en
 | `scenes/` | Default folder for saved scenes |
 | `challenges/` | Challenges made in the editor (`.gchallenge`), listed in Library → *My challenges* |
 | `levels/` | Sonic levels made in the level editor (`.gscene`), listed in Library → *Sonic* |
-| `sonic/` | Your sprite sheets for Sonic, Tails, Knuckles, Amy, Sonic.exe, the game's objects and the zone (`zone.png`), and the regions edited on them (`<character>.regions.json`, `zone.regions.json`; see *Sonic sprite sheets*) |
+| `sonic/` | Your sprite sheets for Sonic, Tails, Knuckles, Amy, Sonic.exe, the game's objects and the zone (`zone.png`), and the regions edited on them (`<character>.regions.json`, `zone.regions.json`; see *Sonic sprite sheets*); and a 3D model pack for the 3D mode (`models.dat` and `models/`; see *3D models*) |
 | `skins/` | Extra Winamp / Audacious skins (`.wsz` files or folders) for the classic player |
 | `sgdb_key` | SteamGridDB API key for the logo fetcher (or set `SGDB_API_KEY`) |
 
@@ -609,6 +625,8 @@ src/
 ├── game/              Sonic's game mode: badniks, monitors, spikes, star posts, the bosses, air and
 │                      bubbles, lives and score, and its objects drawn with shapes or from sprite sheets
 ├── special/           special stages: the globe of spheres, its seven layouts and its drawing
+├── three/             the 3D mode: the character's 3D physics, rapier3d, the lit drawing, the endless
+│                      run and the zone, MD3 model packs and the characters built from shapes
 ├── gamepad.rs         game controllers (Linux joystick devices, XInput)
 ├── profile.rs         the benchmark's frame profiler
 ├── window_tracker.rs  window shake
@@ -620,7 +638,7 @@ src/
 web/                   the web version's page, its WebAudio / storage plugin and build script
 ```
 
-`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, snow, jelly, cloth, laser beams, gadgets, planets, rope reeling, weather, night light, Sonic's running, jumping, spin dash, underwater speed and loops, Tails' flight, Knuckles' glide and climb, Amy's hammer, Sonic.exe's teleport and his hunt, finding sprites on a sheet, the regions edited on it, pictures held and animations played once, the poses a sheet draws, badniks, monitors, rings, lives and the bosses, air and bubbles, Super Sonic, the special stages, the acts, the music, sprite sheets, the endless run's zones, controllers, the profiler, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
+`cargo test` runs the unit tests (decoding, shapes, drawings, links, glue, motors, conveyors, magnets, zones, water, grains, snow, jelly, cloth, laser beams, gadgets, planets, rope reeling, weather, night light, Sonic's running, jumping, spin dash, underwater speed and loops, Tails' flight, Knuckles' glide and climb, Amy's hammer, Sonic.exe's teleport and his hunt, finding sprites on a sheet, the regions edited on it, pictures held and animations played once, the poses a sheet draws, badniks, monitors, rings, lives and the bosses, air and bubbles, Super Sonic, the special stages, the acts, the music, sprite sheets, the endless run's zones, the 3D mode (running round loops and up slopes, the spin dash, each character's move, the generated road and zone, MD3 models and their colours), controllers, the profiler, fracture, particles, sound synthesis, camera, scenes, challenge files, the built-in library, undo, GIF encoding, settings, playlist parsing, scraping…).
 
 `gravity_engine --verify-challenges` (needs a display) checks that every built-in challenge can be solved.
 

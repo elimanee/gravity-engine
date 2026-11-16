@@ -119,6 +119,9 @@ impl App {
         if self.special.is_some() {
             return Some(Song::Special);
         }
+        if let Some(t) = &self.three {
+            return (!t.world.over).then_some(if t.zone { Song::Meadow } else { Song::Lagoon });
+        }
         let g = self.game.as_ref()?;
         if matches!(g.phase, crate::game::Phase::Over(_)) {
             return None;

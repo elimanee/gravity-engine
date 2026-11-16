@@ -75,6 +75,7 @@ mod skins;
 mod soft;
 mod sonic;
 mod special;
+mod three;
 mod verify;
 mod weather;
 
@@ -179,6 +180,8 @@ pub struct App {
     music: music::Music,
     /// A special stage being played (it takes the whole screen).
     special: Option<special::SpecialRun>,
+    /// The 3D mode being played (it takes the whole screen).
+    three: Option<three::Three>,
     /// The sprite region editor (it takes the whole screen too), and while
     /// its sprites are tried, what to come back to.
     regions: Option<regions::RegionEditor>,
@@ -324,6 +327,7 @@ impl App {
             bench: None,
             music: Default::default(),
             special: None,
+            three: None,
             regions: None,
             region_test: None,
             autosaved: String::new(),
@@ -438,6 +442,13 @@ impl App {
             return;
         }
 
+        if self.three.is_some() {
+            self.poll_pad();
+            self.three_frame(dt);
+            self.audio.tick();
+            self.update_music();
+            return;
+        }
         if self.special.is_some() {
             self.poll_pad();
             self.special_frame(dt);
@@ -1311,6 +1322,7 @@ impl App {
             Action::LevelContinue => self.level_continue(),
             Action::OpenAct(i) => self.open_act(i),
             Action::RandomAct { edit } => self.random_act(edit),
+            Action::Play3d { zone } => self.play_3d(zone),
             Action::OpenLevel(i) => self.open_level(i),
             Action::EditLevel(i) => self.open_level_editor(i),
             Action::Level(cmd) => self.level_cmd(cmd),
@@ -2317,6 +2329,7 @@ impl App {
                 character: self.s.character,
                 levels: &levels,
                 random: self.random_act,
+                best_3d: self.s.run_3d_best,
             };
             self.library.draw(&data, m);
         }
