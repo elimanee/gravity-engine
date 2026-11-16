@@ -1075,8 +1075,12 @@ impl Sonic {
             return false;
         }
         let down = vec2(0.0, 1.0);
-        let Some(hit) = self.floor(world, env, down, self.ysp + 2.0, self.ysp + 8.0 + LIFT) else { return false };
-        if hit.dist > 0.0 || hit.dist < -(self.ysp + 8.0) {
+        // Coming down on a corner with his middle above its top as the
+        // frame began (the wall sensors pass over it), he lands on it,
+        // however far his feet are below the top: else he would slip into it.
+        let deepest = (self.ysp + 8.0).max(self.radii().1 + self.ysp);
+        let Some(hit) = self.floor(world, env, down, self.ysp + 2.0, deepest + LIFT) else { return false };
+        if hit.dist > 0.0 || hit.dist < -deepest {
             return false;
         }
         self.pos.y += hit.dist * SCALE;
@@ -1170,6 +1174,40 @@ mod tests {
         assert_eq!(s.poses(), ["spindash", "roll"]);
         assert_eq!((s.pose, s.pose_frames), ("spindash", 0), "a new pose starts its clock again");
         assert_eq!(s.pose_anim, s.anim);
+    }
+
+    #[test]
+    fn coming_down_on_a_corner_lands_on_it_and_never_slips_inside() {
+        let mut w = world();
+        // A block from x = 700 to 1100, its top at y = 680, deep below.
+        let ground = w.bodies.insert(RigidBodyBuilder::fixed());
+        let (cx, cy) = to_phys(900.0, 880.0);
+        let block = ColliderBuilder::cuboid(200.0 / PPM, 200.0 / PPM).translation(vector![cx, cy]);
+        w.colliders.insert_with_parent(block, ground, &mut w.bodies);
+        w.refresh_queries();
+        let inside = |s: &Sonic| s.pos.x > 702.0 && s.pos.y > 682.0;
+        // His middle just over the top, his feet below it, one foot over
+        // the block: he lands on its edge.
+        for (dx, above, xsp) in
+            [(-10.0, 8.0, 2.0), (-4.0, 8.0, 2.0), (2.0, 2.0, 2.0), (-12.0, 12.0, 2.0), (-4.0, 3.0, 6.0)]
+        {
+            let mut s = Sonic::new(vec2(700.0 + dx, 680.0 - above));
+            (s.grounded, s.xsp, s.ysp) = (false, xsp, 3.0);
+            for _ in 0..40 {
+                s.frame(&w, &walls, Input { right: true, ..Input::default() }, None, 1.0);
+                assert!(!inside(&s), "slipped into the block from {dx}, {above}: {:?}", s.pos);
+            }
+            assert!(s.grounded && (s.pos.y - (680.0 - 19.0 * SCALE)).abs() < 1.5, "on top: {:?}", s.pos);
+        }
+        // His middle below the top: the side of the block stops him, and
+        // he falls past it.
+        let mut s = Sonic::new(vec2(686.0, 690.0));
+        (s.grounded, s.xsp, s.ysp) = (false, 3.0, 2.0);
+        for _ in 0..40 {
+            s.frame(&w, &walls, Input { right: true, ..Input::default() }, None, 1.0);
+            assert!(!inside(&s), "went into the side: {:?}", s.pos);
+        }
+        assert!(s.pos.y > 760.0 && s.pos.x < 700.0, "down the side: {:?}", s.pos);
     }
 
     #[test]

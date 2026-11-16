@@ -92,9 +92,18 @@ impl App {
             l.glow(p, r, Color::new(1.0, 0.55, 0.22, 0.75 * k));
         }
         self.effects.lights(|p, r, c| l.glow(p, r, c));
-        // Sonic carries a soft light, and his rings gleam.
+        // Sonic carries a soft light, and his rings gleam; in the endless
+        // run it reaches ahead of him too, and lanterns show the pits.
         if let Some(run) = &self.sonic {
             l.glow(run.sonic.pos, 230.0, Color::new(0.85, 0.9, 1.0, 0.55));
+            if self.endless.is_some() {
+                let ahead = run.sonic.pos + vec2(run.sonic.facing * 300.0, 40.0);
+                l.glow(ahead, 280.0, Color::new(0.85, 0.9, 1.0, 0.4));
+            }
+        }
+        for p in self.endless_lanterns() {
+            let flicker = 0.9 + 0.1 * (t * 9.0 + p.x * 0.05).sin();
+            l.glow(p - vec2(0.0, 40.0), 170.0 * flicker, Color::new(1.0, 0.75, 0.35, 0.75));
         }
         // Jack-o'-lanterns, and Sonic.exe's eyes.
         if let Some(g) = &self.game {

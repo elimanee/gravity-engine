@@ -171,7 +171,7 @@ Its *Edit* button opens the last random act played in the level editor (named *R
 
 ![The Twilight zone at night: Sonic lit up and rings gleaming](docs/screenshots/endless-twilight.png)
 
-The *Endless run* example (Sonic in the infinite world, on a course made ahead of him by the same generator as the [random acts](#random-acts), **a new one every run**) now goes through **five zones** — Meadow, Twilight (at night: Sonic carries a light and the rings gleam), Snowfield (snow), Lagoon (water) and Storm peak (rain and lightning) — each with its own colours and sky, and round again. The further you go, the more **badniks, flyers, crabs and spikes**, with the odd monitor.
+The *Endless run* example (Sonic in the infinite world, on a course made ahead of him by the same generator as the [random acts](#random-acts), **a new one every run**) now goes through **five zones** — Meadow, Twilight (at night: Sonic carries a light, the rings gleam and lanterns mark the edges of the pits), Snowfield (snow), Lagoon (water) and Storm peak (rain and lightning) — each with its own colours and sky, and round again. The further you go, the more **badniks, flyers, crabs and spikes**, with the odd monitor.
 
 One life: at the first one lost (a hit without rings, or a fall into a pit) the run is over and starts again, on a new course. A **flag** on the course marks how far your best run went (*Past your record!* when you get beyond it); the distance, your record and the zone are shown under the counters.
 

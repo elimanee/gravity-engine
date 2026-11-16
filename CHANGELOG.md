@@ -14,9 +14,11 @@ described on the [releases page](https://github.com/elimanee/gravity-engine/rele
 - The best run's ghost (which raced you on the same course every time) is now a **flag** on the course where your record is, with *Past your record!* when you get beyond it; `ghost.json` is not used any more
 - Crumbling ledges wait half a second before they start to go, and go a piece at a time more slowly, so running on keeps ahead of them
 - The level editor shows the sprite sheets and the zone's tiles from the start, before anything is played
+- At night in the endless run (the Twilight zone), **lanterns** stand either side of every pit and the character's light reaches ahead, so the pits show before you are on them
 - In the random acts and the endless run, badniks are only put where there is room: no more walker or flyer on a short bit of ground between two pits, where the character lands (a hit there threw them back into the pit)
 
 ### Fixed
+- A character coming down on the corner of the ground with their middle just above its top could slip into the ground and fall through it; they now land on the edge (and, lower down, the side stops them)
 - In the infinite world, pinned things moved twice as far as everything else whenever the world was brought back under the view: in the endless run the ground vanished from under the character after 200 m, and in the sandbox pinned objects jumped
 
 ## [3.5.1]

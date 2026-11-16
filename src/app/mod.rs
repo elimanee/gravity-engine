@@ -2112,6 +2112,7 @@ impl App {
         self.draw_game();
         self.draw_level_editor(m);
         self.draw_endless_record();
+        self.draw_endless_lanterns();
         self.draw_sonic();
         self.draw_game_over_sonic();
         self.draw_gadgets();

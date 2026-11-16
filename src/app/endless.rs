@@ -10,7 +10,7 @@
 use super::*;
 use crate::background::LevelSky;
 use crate::game::{EnemyKind, LevelSpec, MONITOR, SPIKES};
-use crate::library::procedural::{self, Course, Danger, Look};
+use crate::library::procedural::{self, Course, Crossing, Danger, Look};
 use crate::library::{Builder, CORAL, LEAF, SKY, SNOW, STONE, VIOLET};
 use crate::physics::borders::BorderMode;
 use crate::weather::Weather;
@@ -123,6 +123,9 @@ pub(super) struct Endless {
     /// The sky turning from the last zone's (0 → 1).
     sky_from: LevelSky,
     sky_t: f32,
+    /// Lanterns at the edges of the pits (px): at night they show where
+    /// the ground stops.
+    lanterns: VecDeque<Vec2>,
     /// The best run before this one (m), and whether he has got past it.
     record: f32,
     passed: bool,
@@ -137,6 +140,9 @@ impl Endless {
         self.reached -= dx;
         for s in &mut self.stretches {
             s.x1 -= dx;
+        }
+        for l in &mut self.lanterns {
+            l.x -= dx;
         }
     }
 
@@ -191,6 +197,7 @@ impl App {
             before,
             sky_from: LevelSky::DAY,
             sky_t: 1.0,
+            lanterns: VecDeque::new(),
             record: self.s.sonic_best,
             passed: false,
             over: None,
@@ -270,6 +277,9 @@ impl App {
             g.forget_before(&mut self.world, sx - BEHIND);
         }
         self.rings.retain(|r| r.x > sx - BEHIND);
+        if let Some(e) = &mut self.endless {
+            e.lanterns.retain(|l| l.x > sx - BEHIND);
+        }
     }
 
     /// The song of the endless run's zone.
@@ -343,6 +353,13 @@ impl App {
             true => course.start(&mut b, 0.0, 1400.0, &look),
             false => course.section(&mut b, 0.0, &look, level),
         };
+        // A lantern either side of each pit, on the ground.
+        let lanterns: Vec<Vec2> = section
+            .pits
+            .iter()
+            .filter(|p| p.how != Crossing::Ledge)
+            .flat_map(|p| [b.to_world(p.x0 - 16.0, p.y0), b.to_world(p.x1 + 16.0, p.y1)])
+            .collect();
         // Its own dangers (spikes in a dip), and badniks once under way.
         let mut dangers = section.dangers.clone();
         if !quiet {
@@ -363,6 +380,7 @@ impl App {
             e.course = course;
             e.next = x0 + section.width;
             e.stretches.push_back(Stretch { x1: x0 + section.width, bodies });
+            e.lanterns.extend(lanterns);
         }
     }
 
@@ -383,6 +401,24 @@ impl App {
         let x = self.endless.as_ref()?.record_x()?;
         let seen = self.view().visible();
         (x > seen.x - 100.0 && x < seen.right() + 100.0).then(|| vec2(x, seen.y + seen.h * 0.22))
+    }
+
+    /// The lanterns at the pits' edges in view, at night (where they stand).
+    pub(super) fn endless_lanterns(&self) -> Vec<Vec2> {
+        let Some(e) = self.endless.as_ref().filter(|_| self.s.night) else { return vec![] };
+        let seen = self.view().visible();
+        e.lanterns.iter().copied().filter(|l| l.x > seen.x - 200.0 && l.x < seen.right() + 200.0).collect()
+    }
+
+    /// Lanterns at the pits' edges (world pass, at night).
+    pub(super) fn draw_endless_lanterns(&self) {
+        let t = get_time() as f32;
+        for l in self.endless_lanterns() {
+            let flicker = 0.85 + 0.15 * (t * 9.0 + l.x * 0.05).sin();
+            draw_line(l.x, l.y, l.x, l.y - 34.0, 3.0, Color::new(0.25, 0.2, 0.18, 1.0));
+            draw_rectangle(l.x - 6.0, l.y - 46.0, 12.0, 14.0, Color::new(0.2, 0.15, 0.12, 1.0));
+            draw_rectangle(l.x - 4.0, l.y - 44.0, 8.0, 10.0, Color::new(1.0, 0.75 * flicker, 0.3, 1.0));
+        }
     }
 
     /// The best run's mark: a line down the view and a flag with the
@@ -478,11 +514,18 @@ mod tests {
             before: (Weather::Clear, false, false, 0.0, BorderMode::Open),
             sky_from: LevelSky::DAY,
             sky_t: 1.0,
+            lanterns: VecDeque::from([vec2(1500.0, 600.0)]),
             record: 150.0,
             passed: false,
             over: None,
         };
         assert_eq!(e.record_x(), Some(1000.0 + 150.0 * PPM));
+        // Everything moves back with the world.
+        let mut moved = Endless { lanterns: e.lanterns.clone(), course: e.course.clone(), ..e };
+        moved.shift(400.0);
+        assert_eq!(moved.record_x(), Some(600.0 + 150.0 * PPM));
+        assert_eq!(moved.lanterns[0], vec2(1100.0, 600.0));
+        let e = moved;
         let short = Endless { record: 12.0, ..e };
         assert_eq!(short.record_x(), None, "not for a run that hardly began");
     }
