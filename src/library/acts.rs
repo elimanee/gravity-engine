@@ -125,10 +125,13 @@ fn test_track(b: &mut Builder) {
     b.breakable_wall(-60.0, G);
     b.rock(60.0, G);
     rings(b, 300.0, G - 40.0, 4);
+    // Something to try moves on (a homing attack, a stomp, a throw).
+    b.walker(EnemyKind::Crawler, 600.0, G);
     b.block(720.0, 780.0, G - 60.0, G, ROCK, STONE);
     b.monitor(MonitorKind::Rings, 1000.0, G);
     b.hill(1250.0, 2050.0, G, 100.0, DIRT, LEAF);
     arc(b, 1450.0, G - 160.0, 7, 400.0, 30.0);
+    b.enemy(EnemyKind::Flyer, 1800.0, G - 300.0);
     let r = 110.0;
     b.sonic_loop(2500.0, G - r, r, STONE);
     b.walker(EnemyKind::Crawler, 3000.0, G);
@@ -432,7 +435,7 @@ mod tests {
         let game = sc.game.as_ref().unwrap();
         assert!(sc.sonic.is_some() && !sc.rings.is_empty());
         assert!(game.goal.is_none() && game.boss.is_none(), "it ends when Esc says so");
-        assert!(game.enemies.len() == 1 && game.monitors.len() == 2);
+        assert!(game.enemies.len() == 3 && game.monitors.len() == 2);
         assert!(!ALL.iter().any(|a| a.name == TEST_TRACK.name), "not part of the campaign");
     }
 

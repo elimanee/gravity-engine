@@ -134,6 +134,8 @@ pub enum Action {
     LevelContinue,
     /// Play one of Sonic's built-in acts.
     OpenAct(usize),
+    /// The character editor: characters of the player's own.
+    EditCharacters,
     /// The 3D mode: the endless run or the open zone.
     Play3d {
         zone: bool,

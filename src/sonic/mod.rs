@@ -15,6 +15,8 @@
 //! larger in the world.
 
 pub mod art;
+pub mod custom;
+pub mod kit;
 pub mod maker;
 mod moves;
 pub mod regions;
@@ -181,6 +183,19 @@ pub enum Event {
     Teleport {
         from: Vec2,
     },
+    /// A second jump, a dash through the air (at something, or not), a
+    /// stomp begun and its landing.
+    DoubleJump,
+    AirDash,
+    Stomp,
+    Stomped,
+    /// Something thrown from `from` (world px), this way (±1), this fast
+    /// (guide px a frame).
+    Shoot {
+        from: Vec2,
+        dir: f32,
+        speed: f32,
+    },
 }
 
 /// A sensor's find.
@@ -283,6 +298,25 @@ pub struct Sonic {
     pub drowned: bool,
     /// The act is cleared: standing still, he cheers.
     pub cheering: bool,
+    /// How he moves and his moves (see [`kit`]).
+    pub kit: kit::Kit,
+    /// The moves used this jump (one bit each, by their place in the kit).
+    used: u8,
+    /// How long a flight lasts (frames), and whether a glide grabs walls.
+    fly_time: u32,
+    glide_climb: bool,
+    /// Frames into a second jump (for the drawing), a dash through the
+    /// air, and a throw.
+    pub doubled: Option<u32>,
+    pub dashing: Option<u32>,
+    pub throwing: Option<u32>,
+    /// Homing in on this (world px).
+    pub homing: Option<Vec2>,
+    /// Stomping down at this speed.
+    pub stomping: Option<f32>,
+    /// What a homing attack can go for (world px): badniks and monitors,
+    /// told him by the game.
+    pub targets: Vec<Vec2>,
 }
 
 /// Unit vector "down" for his feet in each ground mode.
@@ -365,12 +399,22 @@ impl Sonic {
             cheering: false,
             warp: None,
             warped: false,
+            kit: kit::Kit::default(),
+            used: 0,
+            fly_time: 480,
+            glide_climb: true,
+            doubled: None,
+            dashing: None,
+            throwing: None,
+            homing: None,
+            stomping: None,
+            targets: vec![],
         }
     }
 
     /// `character` standing at `at`.
     pub fn as_character(at: Vec2, character: Character) -> Self {
-        Sonic { character, ..Sonic::new(at) }
+        Sonic { character, kit: character.kit(), ..Sonic::new(at) }
     }
 
     /// Back at `at` after losing a life: the same character, fresh.
@@ -407,6 +451,15 @@ impl Sonic {
     /// Bounced off something he destroyed in the air.
     pub fn rebound(&mut self) {
         if self.grounded {
+            return;
+        }
+        // Out of a homing attack: up off it, every move ready again (to
+        // go for the next one).
+        if self.homing.take().is_some() || self.dashing.take().is_some() {
+            self.xsp *= 0.25;
+            self.ysp = -5.5;
+            self.jumping = true;
+            self.used = 0;
             return;
         }
         if self.ysp > 0.0 {
@@ -585,6 +638,16 @@ impl Sonic {
         } else {
             DRY
         };
+        let k = self.kit.physics;
+        let c = Consts {
+            acc: c.acc * k.accel,
+            top: c.top * k.speed,
+            air: c.air * k.air,
+            grv: c.grv * k.gravity,
+            jmp: c.jmp * k.jump,
+            release: c.release * k.jump,
+            ..c
+        };
         let grv = if self.hurt { 0.1875 } else { c.grv } * gravity.max(0.0);
         let input = if self.hurt { Input::default() } else { input };
         let (was_grounded, was_ball) = (self.grounded, self.is_ball());
@@ -647,6 +710,10 @@ impl Sonic {
             (self.hammer.is_some() && self.hammer_air, "hammer_air"),
             (self.hammer.is_some() && !self.hammer_air, "hammer"),
             (self.warp.is_some(), "warp"),
+            (self.stomping.is_some(), "stomp"),
+            (self.dashing.is_some() || self.homing.is_some(), "air_dash"),
+            (self.throwing.is_some(), "throw"),
+            (self.doubled.is_some(), "double_jump"),
             (self.spindash.is_some(), "spindash"),
         ] {
             if when {
@@ -725,14 +792,15 @@ impl Sonic {
             }
         }
         if input.jump_pressed {
-            if self.crouching && self.gsp.abs() < 0.5 {
+            if self.crouching && self.gsp.abs() < 0.5 && self.kit.spin_dash {
                 self.curl(true);
                 self.spindash = Some(2.0);
                 events.push(Event::Rev);
                 return;
             }
             // Jump straight out from the surface.
-            let jmp = self.jump_speed(c);
+            let jmp = c.jmp;
+            self.used = 0;
             self.xsp -= jmp * sin;
             self.ysp -= jmp * cos;
             self.grounded = false;
@@ -803,7 +871,7 @@ impl Sonic {
             } else {
                 self.gsp -= self.gsp.abs().min(c.frc * grip) * self.gsp.signum();
             }
-            if input.down && self.gsp.abs() >= ROLL_START && !locked {
+            if input.down && self.gsp.abs() >= ROLL_START && !locked && self.kit.roll {
                 self.curl(true);
                 self.rolling = true;
                 events.push(Event::Roll);
@@ -1007,7 +1075,7 @@ impl Sonic {
         self.looking_up = false;
         self.skidding = false;
         self.pushing = false;
-        let steer = self.air_moves(world, env, input, events);
+        let steer = self.air_moves(world, env, input, c.jmp, events);
         if self.jumping && !input.jump && self.ysp < -c.release {
             self.ysp = -c.release;
         }
@@ -1120,7 +1188,7 @@ impl Sonic {
             self.hurt = false;
             self.gsp = 0.0;
         }
-        self.land_moves();
+        self.land_moves(events);
         self.grounded = true;
         self.jumping = false;
         self.rolling = false;

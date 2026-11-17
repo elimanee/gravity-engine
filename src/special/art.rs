@@ -216,8 +216,11 @@ fn colour(who: Character, golden: bool) -> Color {
     if golden {
         return Color::new(1.0, 0.85, 0.25, 1.0);
     }
-    match who {
-        Character::Sonic => Color::new(0.12, 0.36, 0.9, 1.0),
+    if let Some([m, _, _]) = who.colours() {
+        return Color::new(m[0] as f32 / 255.0, m[1] as f32 / 255.0, m[2] as f32 / 255.0, 1.0);
+    }
+    match who.base() {
+        Character::Sonic | Character::Custom(_) => Color::new(0.12, 0.36, 0.9, 1.0),
         Character::Tails => Color::new(0.98, 0.62, 0.15, 1.0),
         Character::Knuckles => Color::new(0.88, 0.16, 0.18, 1.0),
         Character::Amy => Color::new(0.98, 0.5, 0.7, 1.0),
@@ -271,8 +274,8 @@ fn runner(p: Vec2, r: f32, who: Character, golden: bool, s: &Stage, t: f32) {
         draw_circle(hand.x, hand.y, r * 0.11, glove);
     }
     let head = p - vec2(0.0, r * 0.38);
-    match who {
-        Character::Sonic | Character::Exe => {
+    match who.base() {
+        Character::Sonic | Character::Exe | Character::Custom(_) => {
             // Quills sweeping back and down.
             for (dx, dy) in [(-0.42f32, 0.25f32), (0.42, 0.25), (-0.25, 0.45), (0.25, 0.45), (0.0, 0.55)] {
                 let tip = head + vec2(dx, dy) * r;

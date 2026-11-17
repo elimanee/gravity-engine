@@ -29,12 +29,15 @@ pub struct Ramp {
 
 impl Ramp {
     pub fn of(c: Character) -> Ramp {
-        let main = match c {
+        if let Some([m, _, _]) = c.colours() {
+            return Ramp { main: Color::new(m[0] as f32 / 255.0, m[1] as f32 / 255.0, m[2] as f32 / 255.0, 1.0) };
+        }
+        let main = match c.base() {
             Character::Sonic => Color::new(0.1, 0.32, 0.92, 1.0),
             Character::Tails => Color::new(0.98, 0.62, 0.15, 1.0),
             Character::Knuckles => Color::new(0.86, 0.14, 0.16, 1.0),
             Character::Amy => Color::new(1.0, 0.5, 0.7, 1.0),
-            Character::Exe => Color::new(0.05, 0.13, 0.42, 1.0),
+            Character::Exe | Character::Custom(_) => Color::new(0.05, 0.13, 0.42, 1.0),
         };
         Ramp { main }
     }
@@ -294,6 +297,27 @@ pub fn parse_dat(text: &str) -> HashMap<String, (String, f32)> {
     out
 }
 
+/// The models a pack names in its models.dat (those whose files are
+/// there), in order: what a made-up character's 3D model can be.
+pub fn names() -> Vec<String> {
+    if cfg!(target_arch = "wasm32") {
+        return vec![];
+    }
+    let mut out: Vec<String> = roots()
+        .into_iter()
+        .flat_map(|root| {
+            let dat = std::fs::read_to_string(root.join("models.dat")).map(|t| parse_dat(&t)).unwrap_or_default();
+            dat.into_iter()
+                .filter(|(_, (path, _))| [root.join("models"), root.clone()].iter().any(|d| d.join(path).is_file()))
+                .map(|(name, _)| name)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Where packs are looked for.
 fn roots() -> Vec<PathBuf> {
     let Some(base) = crate::config::config_dir().map(|c| c.join("sonic")) else { return vec![] };
@@ -362,8 +386,17 @@ pub fn load(character: Character) -> Pack {
     // Sonic.exe: his own model when there is one (a pack's EXE_), else
     // Sonic's, darker.
     let exe = matches!(character, Character::Exe).then(|| load_one("EXE_", "EXE_/RAGE.md3", None)).flatten();
-    let (name, file) = match character {
-        Character::Sonic | Character::Exe => ("SONIC", "PLAY/SONIC.md3"),
+    // A made-up character's own model, by its name in models.dat.
+    let own = match character {
+        Character::Custom(i) => crate::sonic::custom::get(i)
+            .map(|c| c.model)
+            .filter(|m| !m.is_empty())
+            .and_then(|m| load_one(&m.to_ascii_uppercase(), "", Some(Ramp::of(character)))),
+        _ => None,
+    };
+    let exe = exe.or(own);
+    let (name, file) = match character.base() {
+        Character::Sonic | Character::Exe | Character::Custom(_) => ("SONIC", "PLAY/SONIC.md3"),
         Character::Tails => ("TAILS", "PLAY/TAILS.md3"),
         Character::Knuckles => ("KNUCKLES", "PLAY/KNUCKLES.md3"),
         Character::Amy => ("AMY", "PLAY/AMY.md3"),

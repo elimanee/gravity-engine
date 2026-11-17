@@ -44,9 +44,20 @@ const COMMON: &[(&str, &str)] = &[
     ("victory", "Past the goal, standing still"),
 ];
 
-/// Each character's own animations.
-fn extras(c: Character) -> &'static [(&'static str, &'static str)] {
-    match c {
+/// Each character's own animations (a made-up one's, its moves').
+fn extras(c: Character) -> Vec<(&'static str, &'static str)> {
+    if c.is_custom() {
+        let mut out: Vec<(&'static str, &'static str)> = vec![];
+        for b in c.kit().blocks {
+            for &a in b.ability.animations() {
+                if !out.iter().any(|(n, _)| *n == a.0) {
+                    out.push(a);
+                }
+            }
+        }
+        return out;
+    }
+    let own: &[(&str, &str)] = match c {
         Character::Sonic => &[],
         Character::Tails => &[("fly", "Flying (Space in the air)"), ("fly_tired", "Flying, tired out")],
         Character::Knuckles => &[
@@ -62,7 +73,9 @@ fn extras(c: Character) -> &'static [(&'static str, &'static str)] {
             ("chase", "Hunting you (Halloween act)"),
             ("laugh", "Laughing after catching you"),
         ],
-    }
+        Character::Custom(_) => &[],
+    };
+    own.to_vec()
 }
 
 /// Animations drawn with the character's centre in the middle of the
@@ -599,13 +612,13 @@ fn pace(fps: Option<f32>) -> String {
 
 impl RegionEditor {
     pub fn new(owner: Owner, available: Vec<Owner>, mut sheet: Editable) -> Self {
-        let own: &[(&str, &str)] = match owner {
+        let own: Vec<(&str, &str)> = match owner {
             Owner::Char(c) => extras(c),
-            Owner::Zone => &[],
+            Owner::Zone => vec![],
         };
         let listed = if owner == Owner::Zone { zone::TILES } else { COMMON };
         let mut names: Vec<(String, &'static str)> =
-            listed.iter().chain(own).map(|&(n, what)| (n.to_string(), what)).collect();
+            listed.iter().chain(own.iter()).map(|&(n, what)| (n.to_string(), what)).collect();
         let mut more: Vec<String> =
             sheet.anims.keys().filter(|k| !names.iter().any(|(n, _)| n == *k)).cloned().collect();
         more.sort();
@@ -1417,9 +1430,13 @@ impl RegionEditor {
         };
         // The characters, after the title.
         let mut x = 16.0 + measure_bold("Sprite regions", 18.0) + 24.0;
-        for o in Owner::ALL {
-            push(Rect::new(x, 10.0, 70.0, 32.0), o.short(), Cmd::Owner(o), o == self.owner, true);
-            x += 75.0;
+        // A made-up character edited comes after the others.
+        let mine = matches!(self.owner, Owner::Char(c) if c.is_custom()).then_some(self.owner);
+        let step = if mine.is_some() { 66.0 } else { 75.0 };
+        for o in Owner::ALL.into_iter().chain(mine) {
+            let label = crate::ui::library::fit(o.short(), step - 12.0, 13.0);
+            push(Rect::new(x, 10.0, step - 5.0, 32.0), &label, Cmd::Owner(o), o == self.owner, true);
+            x += step;
         }
         let mut x = top.w - 16.0;
         let dirty = self.dirty();
@@ -3004,7 +3021,8 @@ impl App {
     /// Open the sprite region editor on `c`'s sheet (else the character
     /// played, else the first with a sheet; with none, ask for one).
     pub(super) fn open_regions(&mut self, c: Option<Owner>) {
-        let available: Vec<Owner> = Owner::ALL.into_iter().filter(|&o| sheet::has_sheet(o)).collect();
+        let customs = Character::every().into_iter().filter(|c| c.is_custom()).map(Owner::Char);
+        let available: Vec<Owner> = Owner::ALL.into_iter().chain(customs).filter(|&o| sheet::has_sheet(o)).collect();
         let wanted = c.unwrap_or(Owner::Char(self.s.character));
         let c = if available.contains(&wanted) {
             wanted
@@ -3099,9 +3117,9 @@ impl App {
     }
 
     /// A sheet just made, kept with its regions among the pictures: where.
-    fn keep_made(&self, c: Character, made: &maker::Made) -> Result<std::path::PathBuf, String> {
+    pub(super) fn keep_made(&self, c: Character, made: &maker::Made) -> Result<std::path::PathBuf, String> {
         let dir = config::screenshot_dir().ok_or("no folder to keep the sheet in")?;
-        let stem = format!("{}-sheet", c.short().to_lowercase());
+        let stem = format!("{}-sheet", crate::sonic::custom::slug(c.short()));
         let free = (1..).map(|k| if k == 1 { stem.clone() } else { format!("{stem}-{k}") });
         let name = free.take(999).find(|n| !dir.join(format!("{n}.png")).exists()).ok_or("too many sheets")?;
         let (png, json) = (dir.join(format!("{name}.png")), dir.join(format!("{name}.regions.json")));
@@ -3112,7 +3130,7 @@ impl App {
     }
 
     /// Choose any picture to be `c`'s sheet, then edit it.
-    fn choose_sheet(&mut self, c: Owner) {
+    pub(super) fn choose_sheet(&mut self, c: Owner) {
         let types = ["png", "PNG", "webp", "WEBP", "gif", "GIF", "bmp", "BMP", "jpg", "JPG", "jpeg", "JPEG"];
         let Some(path) = FileDialog::new().add_filter("Sprite sheet", &types).pick_file() else { return };
         match sheet::Sheet::install_for(&path, c) {
@@ -3219,7 +3237,7 @@ impl App {
             self.toasts.error("No folder to keep the sheet in");
             return;
         };
-        let stem = format!("{}-sheet", c.short().to_lowercase());
+        let stem = format!("{}-sheet", crate::sonic::custom::slug(c.short()));
         let free = (1..).map(|k| if k == 1 { stem.clone() } else { format!("{stem}-{k}") });
         let Some(name) = free.take(999).find(|n| !dir.join(format!("{n}.png")).exists()) else { return };
         let (png, json) = (dir.join(format!("{name}.png")), dir.join(format!("{name}.regions.json")));
@@ -3277,23 +3295,7 @@ impl App {
             return;
         }
         let (owner, edited) = (ed.owner, ed.sheet.sheet());
-        let water =
-            self.s.water.then_some(scene::SceneWater { level: self.s.water_level, density: self.s.water_density });
-        let mut sc = scene::capture(&self.world, &self.objects, &self.links, &self.zones, water);
-        sc.gadgets = scene::capture_gadgets(&self.objects, &self.gadgets);
-        sc.night = Some(self.s.night);
-        sc.weather = Some(self.s.weather);
-        sc.world_size = Some(self.s.world_size);
-        sc.sonic =
-            self.sonic.as_ref().filter(|_| self.game.is_none()).map(|r| to_phys(r.sonic.pos.x, r.sonic.pos.y).into());
-        self.region_test = Some(RegionTest {
-            scene: sc,
-            world_size: self.s.world_size,
-            character: self.s.character,
-            camera: (self.camera.center, self.camera.zoom),
-            act: self.act,
-            level: self.level.clone(),
-        });
+        self.region_test = Some(self.scene_to_come_back_to());
         // Every sheet as saved, but this one as edited.
         self.sonic_sheets_once();
         match owner {
@@ -3320,9 +3322,40 @@ impl App {
         self.toasts.info(format!("{what}{whom}  ·  Esc: back to the editor"));
     }
 
+    /// What is played now, to come back to after trying something.
+    pub(super) fn scene_to_come_back_to(&self) -> RegionTest {
+        let water =
+            self.s.water.then_some(scene::SceneWater { level: self.s.water_level, density: self.s.water_density });
+        let mut sc = scene::capture(&self.world, &self.objects, &self.links, &self.zones, water);
+        sc.gadgets = scene::capture_gadgets(&self.objects, &self.gadgets);
+        sc.night = Some(self.s.night);
+        sc.weather = Some(self.s.weather);
+        sc.world_size = Some(self.s.world_size);
+        sc.sonic =
+            self.sonic.as_ref().filter(|_| self.game.is_none()).map(|r| to_phys(r.sonic.pos.x, r.sonic.pos.y).into());
+        RegionTest {
+            scene: sc,
+            world_size: self.s.world_size,
+            character: self.s.character,
+            camera: (self.camera.center, self.camera.zoom),
+            act: self.act,
+            level: self.level.clone(),
+        }
+    }
+
     /// Esc while trying: back to the editor and the scene as it was.
     pub(super) fn end_region_test(&mut self) {
         let Some(t) = self.region_test.take() else { return };
+        self.come_back_to(t);
+        // The sheets as saved again.
+        self.load_sonic_sheet();
+        if let Some(ed) = self.regions.as_mut() {
+            ed.fresh = true;
+        }
+    }
+
+    /// Back to what was played before trying something.
+    pub(super) fn come_back_to(&mut self, t: RegionTest) {
         self.stop_game();
         self.sonic = None;
         self.s.character = t.character;
@@ -3341,11 +3374,6 @@ impl App {
             }
         }
         self.paused = false;
-        // The sheets as saved again.
-        self.load_sonic_sheet();
-        if let Some(ed) = self.regions.as_mut() {
-            ed.fresh = true;
-        }
     }
 
     /// While trying: how to come back.

@@ -14,7 +14,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
 
-## What's new in 3.6: the 3D mode
+## What's new in 3.6: the 3D mode and characters of your own
 
 | The endless 3D run | The 3D zone |
 |---|---|
@@ -24,6 +24,11 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **The 3D run**: an endless road over the sea, **a new one every run**, made as you go. It bends, climbs, dips and leans into its bends, with ramps over gaps, loops (coming out beside the way in), springs up to a higher road, dash panels, lines of rings and badniks. Holding forward alone follows the road; steer to pick up rings and dodge. Fall off and the run is over; your record is kept.
 - **The 3D zone**: green hills to roam freely, ringed by mountains, with a loop, ramps, platforms reached by springs, rings, badniks and trees, and **things to knock over**: a stack of crates, barrels and a big ball (3D physics with rapier3d). `N` drops another, `B` blows up everything near.
 - **Your own 3D models**: the characters, badniks, rings and springs can be drawn from a model pack made for *Sonic Robo Blast 2* (MD3 models, with their animations and their colours), put in your `sonic/` folder; see [3D models](#3d-models). Without one, they are built from simple shapes, as in the pictures. *(No models from any game are included.)*
+
+![The character editor: Ember, an orange character drawn like Knuckles, gliding in the preview; beside it its colours, its physics (faster, quicker, floatier in the air) and its three moves: an air dash and a glide on the jump button, a stomp on X](docs/screenshots/character-editor.png)
+
+- **Characters of your own** (Library → Sonic → *Characters*, or `--characters`): give one a name, the look of a built-in character in **colours of your choosing**, how it runs and jumps (top speed, acceleration, jump, gravity, air control), and **up to six moves to mix**, each on the jump button (in the air) or on `X`: a **double jump**, an **air dash**, a **homing attack** that goes for the nearest badnik or monitor (and bounces off it, ready for the next), a **stomp** straight down that breaks the badniks where it lands, something to **throw** that breaks badniks and monitors, and the built-in characters' own: flying, gliding (climbing or not), the hammer and the teleport. Each has its setting (how high, how fast, how far). The preview plays every move; **Try in 2D** and **Try in 3D** play the character as it is, saved or not, and `Esc` comes back. They play everywhere the others do: the acts, your levels, the endless run, the special stages, the sandbox and the 3D mode, chosen with *Yours* under *Play as* or `Shift+N`.
+- For a look of their own: **Make from drawing** makes them a sprite sheet from the game's drawing, in their colours, to paint over in the sprite region editor, or **Choose a picture…** takes any sheet; in 3D, any model of your model pack, by its name in `models.dat`, coloured like them. See [Characters of your own](#characters-of-your-own).
 
 ## What's new in 3.5: zone gimmicks, a zone's sheet and a fuller sprite region editor
 
@@ -163,6 +168,19 @@ Gravity Engine 3.0 is also a Sonic game: Sonic and his friends play in the sandb
 | **Sonic.exe** | runs like Sonic; Space again in the air: teleport forward (once a jump) |
 
 While someone plays, `X` is the action button (the Winamp player is on `X` otherwise). The controller's A, B and Y jump.
+
+### Characters of your own
+
+![The character editor](docs/screenshots/character-editor.png)
+
+**Library → Sonic → Characters** (or `--characters`) opens the character editor over the whole window. *New character* starts one; your characters are listed on the left (they are kept in `~/.config/gravity_engine/characters/`, one `.json` each, easy to share).
+
+- **Looks like**: the built-in character it is drawn as (its shape and size, its sprite sheet's layout), and **its colours**: the body, the belly and muzzle, the shoes, picked from the palette (*Base's colours* puts the built-in's back).
+- **How they move**: top speed, acceleration, jump, gravity and air control, as multiples of Sonic's (the Sonic Physics Guide's), and whether they roll and spin dash.
+- **Moves**: up to six blocks, each a move (◀ ▶ to choose), the button it is on (*Jump again*: `Space` in the air; *Action*: `X`, on the ground for the hammer, the throw and the teleport, in the air for the rest) and its setting. A press tries them in order and uses the first one not used yet in this jump, so two blocks on the same button chain (a double jump, then a homing attack); landing, or hitting something with the homing attack, makes them ready again. ▲ moves a block up; *…'s moves* copies the built-in character's. The moves are a **double jump**, an **air dash**, a **homing attack** (at the nearest badnik or monitor ahead within its reach, else a dash forward), a **stomp** (straight down; landing breaks the badniks on the ground close by, and in 3D knocks things away), a **throw** (something that flies ahead and breaks the first badnik or monitor it meets; in 3D it knocks things over), **fly**, **glide**, **hammer** and **teleport**.
+- **Try in 2D** plays the character on the test track (with badniks to try the moves on), **Try in 3D** in the 3D zone, as edited, saved or not; `Esc` comes back to the editor. **Play as ▶** keeps it and chooses it.
+- **3D model**: by default the base's model, in their colours. With a model pack (see [3D models](#3d-models)), ◀ ▶ go through the names in its `models.dat`, or type one.
+- **Sprite sheet**: the game draws them as their base in their colours. *Make from drawing* makes a sheet of them from that drawing, every animation their moves need included (`custom-<name>.png` in the Sonic folder, with its regions), to play as it is or paint over in the sprite region editor (*Edit regions*); *Choose a picture…* makes any picture their sheet, to lay out there.
 
 ### Make your own levels
 
@@ -511,10 +529,10 @@ Press **F1** in the app for the full list.
 | `←` `↑` `→` `↓` | Drive motors, work the gadgets set to an arrow (a grappling hook shoots at the pointer) |
 | `O` | Drop a ragdoll (over an image: it becomes the head) |
 | `Shift+O` | Sonic joins (or leaves): `←` `→` run, `↓` roll, `Space` jump, `↓` + `Space` spin dash, `Shift+Space` pause |
-| `Shift+N` / `X` | Next character (Sonic, Tails, Knuckles, Amy, Sonic.exe) / action button while someone plays (Amy's hammer) |
+| `Shift+N` / `X` | Next character (Sonic, Tails, Knuckles, Amy, Sonic.exe, then yours) / action button while someone plays (Amy's hammer, your characters' moves on *Action*) |
 | `Space` twice | In the air with all seven emeralds and 50 rings: turn super |
 | Special stage | `←` `→` turn at the next crossing · `Space` jump · `↑` run forward again after a bumper · `Esc` leave |
-| 3D mode | Arrows / `WASD` run (the way the camera looks) · `Space` jump · `Shift` / `X` / `C` action: roll at speed; standing, hold it and tap `Space` to rev a spin dash, let go to dash · `Q` / `E` or right-drag turn the camera · `N` drop a thing · `B` blast · `P` pause · `Esc` back to the library. Controller: stick run · A / B / Y jump · X action · LB / RB camera · Start pause · Select back |
+| 3D mode | Arrows / `WASD` run (the way the camera looks) · `Space` jump · `Shift` / `X` / `C` action: roll at speed; standing, hold it and tap `Space` to rev a spin dash, let go to dash (Amy, and your characters with a ground move on *Action*, do that move instead) · `Q` / `E` or right-drag turn the camera · `N` drop a thing · `B` blast · `P` pause · `Esc` back to the library. Controller: stick run · A / B / Y jump · X action · LB / RB camera · Start pause · Select back |
 | Controller | Stick or d-pad: run · A / B / Y: jump · X: action · Select: next character · Start: pause |
 | `U` / `Shift+U` | Jelly / cloth (over an object: it turns to jelly / is hung as a flag) |
 | `E` / `Shift+E` | Library (examples, challenges, Sonic's acts and levels) / challenge editor |
@@ -563,7 +581,7 @@ sudo apt install pkg-config libopenmpt-dev libasound2-dev libx11-dev libxi-dev \
 cargo run --release
 ```
 
-Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins. `--act=N` and `--special-stage=N` go straight into Sonic act N (1–7) or special stage N (1–7), `--3d=run` and `--3d=zone` into the 3D mode, and `--sprite-regions[=CHARACTER]` into the sprite region editor (`sonic`, `tails`, `knuckles`, `amy` or `exe`, or `zone` for the zone's tiles).
+Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins. `--act=N` and `--special-stage=N` go straight into Sonic act N (1–7) or special stage N (1–7), `--3d=run` and `--3d=zone` into the 3D mode, `--sprite-regions[=CHARACTER]` into the sprite region editor (`sonic`, `tails`, `knuckles`, `amy` or `exe`, or `zone` for the zone's tiles), and `--characters` into the character editor.
 
 `gravity_engine --benchmark` runs five stress scenes for a few seconds each at a fixed 60 Hz and prints the frame times (average, 95th percentile, worst), the bodies still moving, the time spent waiting for the screen and where each frame's time goes, then quits without saving anything.
 
@@ -589,7 +607,8 @@ Everything lives in `~/.config/gravity_engine/` (or `$XDG_CONFIG_HOME/gravity_en
 | `scenes/` | Default folder for saved scenes |
 | `challenges/` | Challenges made in the editor (`.gchallenge`), listed in Library → *My challenges* |
 | `levels/` | Sonic levels made in the level editor (`.gscene`), listed in Library → *Sonic* |
-| `sonic/` | Your sprite sheets for Sonic, Tails, Knuckles, Amy, Sonic.exe, the game's objects and the zone (`zone.png`), and the regions edited on them (`<character>.regions.json`, `zone.regions.json`; see *Sonic sprite sheets*); and a 3D model pack for the 3D mode (`models.dat` and `models/`; see *3D models*) |
+| `characters/` | Your own characters, made in the character editor (one `.json` each: name, look, colours, physics, moves, 3D model) |
+| `sonic/` | Your sprite sheets for Sonic, Tails, Knuckles, Amy, Sonic.exe, your own characters (`custom-<name>.png`), the game's objects and the zone (`zone.png`), and the regions edited on them (`<character>.regions.json`, `zone.regions.json`; see *Sonic sprite sheets*); and a 3D model pack for the 3D mode (`models.dat` and `models/`; see *3D models*) |
 | `skins/` | Extra Winamp / Audacious skins (`.wsz` files or folders) for the classic player |
 | `sgdb_key` | SteamGridDB API key for the logo fetcher (or set `SGDB_API_KEY`) |
 
@@ -608,8 +627,8 @@ src/
 │                      building tools, selection, impacts and shattering, fire, jelly and
 │                      cloth, gadgets, grappling hooks, weather, night lights, the physical
 │                      player, sounds and slow motion, challenge mode, challenge editor and verifier,
-│                      Sonic's game, the level editor, the sprite region editor, the endless run and
-│                      the benchmark
+│                      Sonic's game, the level editor, the sprite region editor, the character
+│                      editor, the endless run and the benchmark
 ├── camera.rs          zoom / pan and the world ↔ screen mapping
 ├── config.rs          constants and paths          settings.rs   persisted preferences
 ├── skin.rs            Winamp 2 / Audacious skins (.wsz, folders, skin.hints)
@@ -620,8 +639,8 @@ src/
 ├── effects.rs         particles                    library/      examples, challenges, acts, levels
 ├── weather.rs         rain, snow and lightning     lighting.rs   the night's light map and shadows
 ├── sonic/             Sonic, Tails, Knuckles and Amy: movement after the Sonic Physics Guide, their
-│                      moves, their drawing with shapes and from sprite sheets (and the regions
-│                      edited on them)
+│                      moves (kits of blocks), the player's own characters, their drawing with shapes
+│                      and from sprite sheets (and the regions edited on them)
 ├── game/              Sonic's game mode: badniks, monitors, spikes, star posts, the bosses, air and
 │                      bubbles, lives and score, and its objects drawn with shapes or from sprite sheets
 ├── special/           special stages: the globe of spheres, its seven layouts and its drawing

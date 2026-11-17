@@ -39,7 +39,7 @@ pub struct LibraryData<'a> {
 }
 
 /// Cells before the acts in the Sonic tab.
-const EXTRA: usize = 4;
+const EXTRA: usize = 5;
 
 #[derive(Clone, Copy, PartialEq, Default)]
 enum Tab {
@@ -66,8 +66,8 @@ impl Library {
             Tab::Examples => examples::ALL.len(),
             Tab::Challenges => challenges::ALL.len(),
             Tab::Mine => mine + 1,
-            // "New level", "Random act", "3D run", "3D zone", the built-in
-            // acts, then the player's levels.
+            // "New level", "Random act", "3D run", "3D zone", "Characters",
+            // the built-in acts, then the player's levels.
             Tab::Sonic => EXTRA + acts::ALL.len() + levels,
         }
     }
@@ -91,15 +91,19 @@ impl Library {
 
     fn tabs(p: Rect) -> [Rect; 4] {
         let y = p.y + 44.0;
-        [0.0, 1.0, 2.0, 3.0].map(|k| Rect::new(p.x + PAD + k * 116.0, y, 110.0, 26.0))
+        [0.0, 1.0, 2.0, 3.0].map(|k| Rect::new(p.x + PAD + k * 104.0, y, 100.0, 26.0))
     }
 
-    /// The character buttons (Sonic tab), right of the tabs.
-    fn characters(p: Rect) -> [Rect; Character::ALL.len()] {
-        let w = 58.0;
+    /// The character buttons (Sonic tab), right of the tabs: the built-in
+    /// ones, then "Yours" (the player's own, in turn).
+    fn characters(p: Rect) -> [Rect; Character::ALL.len() + 1] {
+        let (w, own) = (58.0, 50.0);
         let n = Character::ALL.len() as f32;
-        let x0 = p.x + p.w - PAD - n * (w + 4.0) + 4.0;
-        std::array::from_fn(|k| Rect::new(x0 + k as f32 * (w + 4.0), p.y + 44.0, w, 26.0))
+        let x0 = p.x + p.w - PAD - n * (w + 4.0) - own;
+        std::array::from_fn(|k| {
+            let w = if k < Character::ALL.len() { w } else { own };
+            Rect::new(x0 + k as f32 * (58.0 + 4.0), p.y + 44.0, w, 26.0)
+        })
     }
 
     /// The "Edit" button of a "My challenges" cell.
@@ -122,8 +126,23 @@ impl Library {
         self.scroll = 0;
     }
 
-    /// `mine`: how many of "My challenges" and "My levels" there are.
-    pub fn update(&mut self, dt: f32, mine: (usize, usize), input: &mut Input, actions: &mut Vec<Action>) {
+    /// Open on the Sonic tab.
+    pub fn open_sonic(&mut self) {
+        self.fader.open = true;
+        self.tab = Tab::Sonic;
+        self.scroll = 0;
+    }
+
+    /// `mine`: how many of "My challenges" and "My levels" there are;
+    /// `played`: who plays the acts.
+    pub fn update(
+        &mut self,
+        dt: f32,
+        mine: (usize, usize),
+        played: Character,
+        input: &mut Input,
+        actions: &mut Vec<Action>,
+    ) {
         self.fader.update(dt, 7.0);
         if !self.fader.open {
             return;
@@ -144,10 +163,22 @@ impl Library {
                 self.tab = Tab::Mine;
             } else if tabs[3].contains(input.mouse) {
                 self.tab = Tab::Sonic;
-            } else if let Some(k) = (0..Character::ALL.len())
+            } else if let Some(k) = (0..Character::ALL.len() + 1)
                 .find(|&k| self.tab == Tab::Sonic && Self::characters(p)[k].contains(input.mouse))
             {
-                actions.push(Action::SetCharacter(Character::ALL[k]));
+                let yours = crate::sonic::custom::all();
+                actions.push(match Character::ALL.get(k) {
+                    Some(&c) => Action::SetCharacter(c),
+                    // The player's own in turn (none yet: make one).
+                    None => match yours.iter().position(|&c| c == played) {
+                        _ if yours.is_empty() => Action::EditCharacters,
+                        Some(i) => Action::SetCharacter(yours[(i + 1) % yours.len()]),
+                        None => Action::SetCharacter(yours[0]),
+                    },
+                });
+                if Character::ALL.len() == k && yours.is_empty() {
+                    self.fader.open = false;
+                }
             } else if let Some(slot) = (0..self.count(mine)).find(|&i| Self::cell(p, i).contains(input.mouse)) {
                 let i = self.scroll * COLS + slot;
                 let edit = Self::edit_button(Self::cell(p, slot)).contains(input.mouse);
@@ -161,6 +192,7 @@ impl Library {
                     Tab::Sonic if i == 1 => Action::RandomAct { edit },
                     Tab::Sonic if i == 2 => Action::Play3d { zone: false },
                     Tab::Sonic if i == 3 => Action::Play3d { zone: true },
+                    Tab::Sonic if i == 4 => Action::EditCharacters,
                     Tab::Sonic if i < acts::ALL.len() + EXTRA => Action::OpenAct(i - EXTRA),
                     Tab::Sonic if edit => Action::EditLevel(Some(i - EXTRA - acts::ALL.len())),
                     Tab::Sonic => Action::OpenLevel(i - EXTRA - acts::ALL.len()),
@@ -224,6 +256,8 @@ impl Library {
             for (k, c) in Character::ALL.into_iter().enumerate() {
                 draw_button(r[k], c.short(), r[k].contains(mouse), data.character == c, f);
             }
+            let own = r[Character::ALL.len()];
+            draw_button(own, "Yours", own.contains(mouse), data.character.is_custom(), f);
         }
 
         let t = get_time() as f32;
@@ -311,6 +345,20 @@ impl Library {
                     }
                     text("Play", r.x + r.w - 44.0, r.y + 26.0, 11.0, fade(if hov { ACCENT_HI } else { TEXT_DIM }, f));
                 }
+                Tab::Sonic if i == 4 => {
+                    icons::zone_kind(ZoneKind::Goal, vec2(r.x + 22.0, r.y + 22.0), 18.0, fade(ACCENT_HI, f), t);
+                    text_bold("Characters", r.x + 38.0, r.y + 27.0, 14.0, fade(TEXT, f));
+                    let n = crate::sonic::custom::count();
+                    let about = match (n, data.character.is_custom()) {
+                        (0, _) => "Make your own: looks, physics, moves to mix (homing, throw…)".to_string(),
+                        (n, true) => format!("{n} of yours · playing as {}", data.character.label()),
+                        (n, false) => format!("{n} of yours · \"Yours\" in Play as picks one"),
+                    };
+                    for (k, line) in wrap(&about, r.w - 24.0, 11.0).iter().take(2).enumerate() {
+                        text(line, r.x + 12.0, r.y + 46.0 + k as f32 * 14.0, 11.0, fade(TEXT_MUTED, f));
+                    }
+                    text("Edit", r.x + r.w - 44.0, r.y + 26.0, 11.0, fade(if hov { ACCENT_HI } else { TEXT_DIM }, f));
+                }
                 Tab::Sonic if i >= acts::ALL.len() + EXTRA => {
                     let name = &data.levels[i - EXTRA - acts::ALL.len()];
                     text_bold(&fit(name, r.w - 24.0 - 58.0, 14.0), r.x + 12.0, r.y + 26.0, 14.0, fade(TEXT, f));
@@ -364,7 +412,7 @@ fn draw_stars(cell: Rect, stars: u8, f: f32) {
 }
 
 /// `s` shortened with an ellipsis to fit `width` px in bold.
-fn fit(s: &str, width: f32, size: f32) -> String {
+pub fn fit(s: &str, width: f32, size: f32) -> String {
     if measure_bold(s, size) <= width {
         return s.to_string();
     }

@@ -256,6 +256,14 @@ pub struct Shot {
     pub wave: bool,
 }
 
+/// Something the character threw (a move of theirs): it breaks the first
+/// badnik it meets.
+pub struct Thrown {
+    pub pos: Vec2,
+    pub vel: Vec2,
+    pub life: f32,
+}
+
 /// Air bubbles: small ones rise all the time, big ones can be breathed.
 pub struct Vent {
     pub pos: Vec2,
@@ -413,6 +421,9 @@ pub enum Effect {
     HunterCaught(Vec2),
     /// The giant ring opened at the goal.
     GiantRing(Vec2),
+    /// Something thrown hit this monitor (to be broken, by whoever has the
+    /// physics world).
+    MonitorShot(ColliderHandle),
     GameOver,
     /// Start the level again (after Game Over).
     Restart,
@@ -471,6 +482,7 @@ pub struct Game {
     pub spec: LevelSpec,
     pub enemies: Vec<Enemy>,
     pub shots: Vec<Shot>,
+    pub thrown: Vec<Thrown>,
     pub monitors: Vec<Monitor>,
     pub spikes: Vec<Spike>,
     pub posts: Vec<Post>,
@@ -522,6 +534,7 @@ impl Game {
             spec: spec.clone(),
             enemies: vec![],
             shots: vec![],
+            thrown: vec![],
             monitors: vec![],
             spikes: vec![],
             posts: spec.posts.iter().map(|&p| Post { pos: px(p), lit: None }).collect(),
@@ -662,6 +675,9 @@ impl Game {
         for s in &mut self.shots {
             s.pos -= d;
         }
+        for s in &mut self.thrown {
+            s.pos -= d;
+        }
         for m in &mut self.monitors {
             m.pos -= d;
         }
@@ -767,6 +783,15 @@ impl Game {
 
     /// A broken monitor (Sonic's `Break` event on `collider`); its item.
     pub fn break_monitor(&mut self, world: &mut PhysWorld, collider: ColliderHandle, sonic: &mut Sonic) -> Vec<Effect> {
+        let out = self.open_monitor(world, collider);
+        if !out.is_empty() {
+            sonic.rebound();
+        }
+        out
+    }
+
+    /// A monitor broken (by Sonic, or by something he threw); its item.
+    pub fn open_monitor(&mut self, world: &mut PhysWorld, collider: ColliderHandle) -> Vec<Effect> {
         let Some(i) = self.monitors.iter().position(|m| m.collider == Some(collider)) else { return vec![] };
         let m = &mut self.monitors[i];
         if let Some(b) = m.body.take() {
@@ -776,7 +801,6 @@ impl Game {
         m.broken = Some(0.0);
         let (kind, at) = (m.kind, m.pos);
         self.score += 10;
-        sonic.rebound();
         let mut out = vec![Effect::Monitor(kind, at)];
         match kind {
             MonitorKind::Rings => out.extend(self.add_rings(10)),
@@ -789,6 +813,41 @@ impl Game {
             }
         }
         out
+    }
+
+    /// A stomp landing at `at` (the feet, world px): the badniks on the
+    /// ground close by (not a puffer with its spikes out) are broken.
+    pub fn shock(&mut self, at: Vec2, reach: f32) -> Vec<Effect> {
+        let mut out = vec![];
+        let mut i = 0;
+        while i < self.enemies.len() {
+            let e = &self.enemies[i];
+            let near = (e.pos.x - at.x).abs() < reach && (e.pos.y + e.half().y - at.y).abs() < 24.0;
+            if near && !e.spiky() {
+                let e = self.enemies.remove(i);
+                let score = chain_score(self.chain);
+                self.chain += 1;
+                self.score += score;
+                out.push(Effect::EnemyDown { at: e.pos, score });
+            } else {
+                i += 1;
+            }
+        }
+        out
+    }
+
+    /// Throw something from `from` (world px) at `vel` (px a second).
+    pub fn throw(&mut self, from: Vec2, vel: Vec2) {
+        self.thrown.push(Thrown { pos: from, vel, life: 1.4 });
+        if self.thrown.len() > 12 {
+            self.thrown.remove(0);
+        }
+    }
+
+    /// What a homing attack can go for: badniks, and monitors not opened.
+    pub fn targets(&self) -> Vec<Vec2> {
+        let enemies = self.enemies.iter().map(|e| e.pos);
+        enemies.chain(self.monitors.iter().filter(|m| m.broken.is_none()).map(|m| m.pos)).collect()
     }
 
     /// Is `collider` one of this level's monitors?
@@ -1269,6 +1328,37 @@ impl Game {
                 }
             }
         }
+        // What he threw: on, until a wall, or the first badnik or monitor
+        // it meets (he does not bounce off those, as when he hits them).
+        let mut thrown_hits = vec![];
+        let monitors: Vec<(ColliderHandle, Vec2)> =
+            self.monitors.iter().filter_map(|m| m.collider.map(|c| (c, m.pos))).collect();
+        self.thrown.retain_mut(|s| {
+            s.life -= dt;
+            let step = s.vel * dt;
+            let ahead = s.pos + step;
+            if let Some(&(c, _)) = monitors.iter().find(|(_, at)| overlap(ahead, vec2(10.0, 10.0), *at, MONITOR / 2.0))
+            {
+                out.push(Effect::MonitorShot(c));
+                return false;
+            }
+            if ray(world, solid, s.pos, step.normalize_or_zero(), step.length() + 6.0).is_some() {
+                return false;
+            }
+            s.pos += step;
+            let hit = self.enemies.iter().position(|e| overlap(s.pos, vec2(8.0, 8.0), e.pos, e.half()));
+            if let Some(i) = hit.filter(|i| !killed.iter().any(|(k, _)| k == i)) {
+                thrown_hits.push(i);
+                return false;
+            }
+            s.life > 0.0
+        });
+        for &i in &thrown_hits {
+            if !killed.iter().any(|(k, _)| *k == i) {
+                killed.push((i, true));
+            }
+        }
+        killed.sort_by_key(|(i, _)| *i);
         // Highest index first, so the others stay valid.
         for &(i, by_player) in killed.iter().rev() {
             let e = self.enemies.remove(i);
@@ -1276,7 +1366,9 @@ impl Game {
                 let score = chain_score(self.chain);
                 self.chain += 1;
                 self.score += score;
-                sonic.rebound();
+                if !thrown_hits.contains(&i) {
+                    sonic.rebound();
+                }
                 out.push(Effect::EnemyDown { at: e.pos, score });
             }
         }
@@ -1649,6 +1741,64 @@ mod tests {
         let out = g.add_rings(95);
         assert!(out.contains(&Effect::ExtraLife));
         assert_eq!(g.lives, LIVES + 2);
+    }
+
+    #[test]
+    fn things_thrown_break_badniks_and_monitors_without_bouncing_the_thrower() {
+        let mut w = world();
+        let spec = LevelSpec {
+            enemies: vec![Placed { kind: EnemyKind::Crawler, at: [8.0, 2.0] }],
+            monitors: vec![Placed { kind: MonitorKind::Rings, at: [14.0, 1.0] }],
+            ..LevelSpec::default()
+        };
+        let mut g = Game::new(&spec, &mut w, vec2(0.0, 0.0));
+        // Far off while the badnik settles on the ground.
+        let mut s = Sonic::new(vec2(2600.0, 100.0));
+        for _ in 0..90 {
+            g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        }
+        // In the air, falling, he throws at the badnik.
+        s.pos = g.enemies[0].pos - vec2(200.0, 0.0);
+        (s.grounded, s.ysp) = (false, 2.0);
+        g.throw(s.pos, vec2(600.0, 0.0));
+        let mut down = false;
+        for _ in 0..60 {
+            let out = g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+            down |= out.iter().any(|e| matches!(e, Effect::EnemyDown { .. }));
+        }
+        assert!(down && g.enemies.is_empty(), "the badnik is broken");
+        assert_eq!(s.ysp, 2.0, "and he does not bounce, far from it");
+        assert!(g.thrown.is_empty());
+        // At a monitor: it breaks (whoever has the world opens it).
+        let m = g.monitors[0].pos;
+        g.throw(m - vec2(150.0, 0.0), vec2(600.0, 0.0));
+        let mut shot = None;
+        for _ in 0..60 {
+            let out = g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+            shot = shot.or(out.iter().find_map(|e| if let Effect::MonitorShot(c) = e { Some(*c) } else { None }));
+        }
+        let c = shot.expect("it reaches the monitor");
+        assert!(g.open_monitor(&mut w, c).contains(&Effect::Monitor(MonitorKind::Rings, m)));
+        assert_eq!((g.rings, s.ysp), (10, 2.0));
+    }
+
+    #[test]
+    fn a_stomp_breaks_the_badniks_on_the_ground_close_by() {
+        let mut w = world();
+        let at = |x: f32| Placed { kind: EnemyKind::Crawler, at: [x, 2.0] };
+        let spec = LevelSpec { enemies: vec![at(8.0), at(9.0), at(16.0)], ..LevelSpec::default() };
+        let mut g = Game::new(&spec, &mut w, vec2(0.0, 0.0));
+        let mut s = Sonic::new(vec2(2600.0, 100.0));
+        for _ in 0..90 {
+            g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        }
+        // Landing between the first two: they go, the far one stays.
+        let feet = vec2((g.enemies[0].pos.x + g.enemies[1].pos.x) / 2.0, floor_y());
+        let out = g.shock(feet, 90.0);
+        assert_eq!((out.len(), g.enemies.len()), (2, 1));
+        assert_eq!(g.score, 100 + 200);
+        // Nothing up in the air is touched.
+        assert!(g.shock(feet - vec2(0.0, 200.0), 90.0).is_empty());
     }
 
     #[test]

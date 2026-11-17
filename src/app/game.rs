@@ -112,6 +112,11 @@ impl App {
     pub(super) fn game_effects(&mut self, fx: Vec<Effect>) {
         for e in fx {
             match e {
+                Effect::MonitorShot(collider) => {
+                    let Some(game) = self.game.as_mut() else { continue };
+                    let fx = game.open_monitor(&mut self.world, collider);
+                    self.game_effects(fx);
+                }
                 Effect::EnemyDown { at, score } => {
                     self.boom(at, BoomKind::Puff);
                     self.sound(Sound::Boom, at, 0.35);
@@ -423,8 +428,13 @@ impl App {
         line("RINGS", g.rings.to_string(), top + 72.0, g.rings == 0);
         if !g.endless {
             let y = screen_height() - 24.0;
-            if !self.game_sprites.as_ref().is_some_and(|sp| sp.face(self.player(), vec2(30.0, y - 6.0), 28.0)) {
-                draw_circle(30.0, y - 6.0, 13.0, Color::new(0.12, 0.36, 0.9, 1.0));
+            let who = self.player();
+            // The sheets' faces are the built-in characters'.
+            let face = !who.is_custom()
+                && self.game_sprites.as_ref().is_some_and(|sp| sp.face(who, vec2(30.0, y - 6.0), 28.0));
+            if !face {
+                let [r, g, b] = who.colours().map_or_else(|| crate::sonic::art::base_colours(who)[0], |c| c[0]);
+                draw_circle(30.0, y - 6.0, 13.0, Color::from_rgba(r, g, b, 255));
                 draw_circle(34.0, y - 9.0, 4.0, WHITE);
             }
             theme::text_bold(&format!("×  {}", g.lives), 50.0, y, 20.0, WHITE);

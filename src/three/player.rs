@@ -11,6 +11,7 @@
 //! [`K`] metres.
 
 use super::phys::{Hit, Phys};
+use crate::sonic::kit::{Ability, Button, Kit};
 use crate::sonic::Character;
 use macroquad::prelude::{vec3, Quat, Vec3};
 use rapier3d::prelude::RigidBodyHandle;
@@ -45,8 +46,7 @@ const LIFT: f32 = 0.3;
 /// Turning: radians a frame, slow and fast.
 const TURN_SLOW: f32 = 0.2;
 const TURN_FAST: f32 = 0.07;
-/// Tails' flight, Knuckles' glide.
-const FLY_TIME: u32 = 480;
+/// Tails' flight (its time is the kit's), Knuckles' glide.
 const FLY_GRV: f32 = 0.03125;
 const FLAP: f32 = 1.6;
 const GLIDE_START: f32 = 4.0;
@@ -54,7 +54,16 @@ const GLIDE_TOP: f32 = 9.0;
 const GLIDE_FALL: f32 = 0.5;
 /// Amy's hammer swing (frames), Sonic.exe's teleport (metres).
 const HAMMER: u32 = 22;
+#[cfg(test)]
 const WARP: f32 = 5.0;
+/// A dash through the air (frames), a homing attack's speed (guide px a
+/// frame) and how long it keeps after its target, how long a second jump
+/// and a throw show.
+const DASH_TIME: u32 = 14;
+const HOMING_SPEED: f32 = 12.0;
+const HOMING_TIME: u32 = 50;
+const DOUBLE_SHOW: u32 = 16;
+const THROW_SHOW: u32 = 12;
 
 /// What the player asks for this frame. `dir` is where to go, in the
 /// world (flat, at most 1 long: a stick pushed half way is half).
@@ -79,6 +88,17 @@ pub enum Event {
     Glide,
     Hammer,
     Teleport,
+    DoubleJump,
+    AirDash,
+    Stomp,
+    Stomped,
+    /// Something thrown from `from` along `dir` (flat, normalised) at
+    /// `speed` (guide px a frame).
+    Shoot {
+        from: Vec3,
+        dir: Vec3,
+        speed: f32,
+    },
     /// He ran into something that moves: push it (kg·m/s, at a point).
     Push {
         body: RigidBodyHandle,
@@ -124,6 +144,20 @@ pub struct Runner {
     pub idle: u32,
     /// The axis the ground has tilted him about (kept when upside down).
     tilt: Vec3,
+    /// How he moves and his moves.
+    pub kit: Kit,
+    /// The moves used this jump (one bit each, by their place in the kit).
+    used: u8,
+    fly_time: u32,
+    /// Frames into a second jump, a dash through the air, a throw.
+    pub doubled: Option<u32>,
+    pub dashing: Option<u32>,
+    pub throwing: Option<u32>,
+    /// Homing in on this (metres), stomping down at this speed.
+    pub homing: Option<Vec3>,
+    pub stomping: Option<f32>,
+    /// What a homing attack can go for (badniks), told him by the world.
+    pub targets: Vec<Vec3>,
 }
 
 /// `v` along the plane whose normal is `n`.
@@ -162,6 +196,15 @@ impl Runner {
             warped: false,
             idle: 0,
             tilt: Vec3::Z,
+            kit: character.kit(),
+            used: 0,
+            fly_time: 480,
+            doubled: None,
+            dashing: None,
+            throwing: None,
+            homing: None,
+            stomping: None,
+            targets: vec![],
         }
     }
 
@@ -201,6 +244,21 @@ impl Runner {
         self.spindash = None;
         self.flying = None;
         self.gliding = None;
+        self.dashing = None;
+        self.homing = None;
+        self.stomping = None;
+    }
+
+    /// Bounced off a badnik he broke in the air: out of a homing attack,
+    /// up off it with every move ready again.
+    pub fn rebound(&mut self) {
+        if self.homing.take().is_some() || self.dashing.take().is_some() {
+            self.vel = flat(self.vel, Vec3::Y) * 0.25 + Vec3::Y * 5.5;
+            self.jumping = true;
+            self.used = 0;
+        } else {
+            self.vel.y = self.vel.y.abs().max(4.0);
+        }
     }
 
     /// Hurt: thrown up and back from `from`, no control until he lands.
@@ -246,8 +304,14 @@ impl Runner {
         let mut speed = self.vel.length();
         let mut dir = if speed > 1e-4 { self.vel / speed } else { flat(self.facing, n).normalize_or(self.facing) };
 
+        let p = self.kit.physics;
+        let (acc, top, jmp) = (ACC * p.accel, TOP * p.speed, JMP * p.jump);
+        // The action button: a move of theirs on the ground if they have
+        // one (Amy's hammer…), else rolling and the spin dash.
+        let ground_move =
+            self.kit.blocks.iter().map(|b| (b.ability, b.on)).find(|(a, on)| *on == Button::Action && a.on_ground());
         // The spin dash: hold the action button standing, jump to rev, let go.
-        let can_dash = !matches!(self.character, Character::Amy);
+        let can_dash = self.kit.spin_dash && ground_move.is_none();
         if let Some(rev) = self.spindash {
             if !c.action {
                 self.spindash = None;
@@ -277,16 +341,28 @@ impl Runner {
             return;
         }
         if c.jump_pressed {
-            self.vel = dir * speed + n * JMP;
+            self.vel = dir * speed + n * jmp;
+            self.used = 0;
             self.leave_ground();
             self.jumping = true;
             self.rolling = false;
             events.push(Event::Jump);
             return;
         }
-        if c.action_pressed && matches!(self.character, Character::Amy) && self.hammer.is_none() {
-            self.hammer = Some(0);
-            events.push(Event::Hammer);
+        // The action button's moves that work on the ground: the first one.
+        if c.action_pressed && self.hammer.is_none() {
+            match ground_move {
+                Some((Ability::Hammer, _)) => {
+                    self.hammer = Some(0);
+                    events.push(Event::Hammer);
+                }
+                Some((Ability::Shoot { speed }, _)) => self.throw(speed, events),
+                Some((Ability::Teleport { distance }, _)) => self.teleport(world, distance, events),
+                _ => {}
+            }
+        }
+        if let Some(t) = self.throwing {
+            self.throwing = (t + 1 < THROW_SHOW).then_some(t + 1);
         }
 
         // Slopes: gravity along the ground.
@@ -326,7 +402,7 @@ impl Runner {
         } else if d != Vec3::ZERO {
             if speed < 0.01 {
                 dir = d;
-                speed = ACC;
+                speed = acc;
             } else if d.dot(dir) < -0.5 {
                 // Braking (skidding at speed).
                 self.skidding = speed >= 4.0;
@@ -336,11 +412,11 @@ impl Runner {
                     speed = 0.5;
                 }
             } else {
-                let k = (speed / TOP).min(1.0);
+                let k = (speed / top).min(1.0);
                 dir = turn(dir, d, TURN_SLOW + (TURN_FAST - TURN_SLOW) * k);
-                let top = TOP * push;
+                let top = top * push;
                 if speed < top {
-                    speed = (speed + ACC).min(top);
+                    speed = (speed + acc).min(top);
                 }
             }
             if self.skidding && !events.contains(&Event::Skid) {
@@ -349,7 +425,7 @@ impl Runner {
         } else {
             speed -= speed.min(FRC);
         }
-        if !self.rolling && c.action_pressed && speed >= ROLL_START && can_dash {
+        if !self.rolling && c.action_pressed && speed >= ROLL_START && self.kit.roll && ground_move.is_none() {
             self.rolling = true;
             events.push(Event::Roll);
         }
@@ -436,34 +512,53 @@ impl Runner {
         let d = flat(c.dir, Vec3::Y);
         let d = if d.length() > 0.05 { d.normalize() } else { Vec3::ZERO };
         let again = c.jump_pressed && self.jumping;
-        match self.character {
-            Character::Tails if again && self.flying.is_none() => {
-                self.flying = Some(0);
-                self.jumping = false;
-                events.push(Event::Flap);
+        let busy = self.flying.is_some() || self.gliding.is_some() || self.stomping.is_some() || self.homing.is_some();
+        if (again || c.action_pressed) && !busy && !self.hurt {
+            let blocks = self.kit.blocks.clone();
+            for (k, b) in blocks.iter().enumerate().take(8) {
+                let pressed = match b.on {
+                    Button::JumpAgain => again,
+                    Button::Action => c.action_pressed,
+                };
+                if pressed && self.used & (1 << k) == 0 && self.start_move(b.ability, world, events) {
+                    self.used |= 1 << k;
+                    break;
+                }
             }
-            Character::Knuckles if again && self.gliding.is_none() => {
-                self.gliding = Some(GLIDE_START);
-                self.jumping = false;
-                self.vel.y = self.vel.y.min(0.0);
-                events.push(Event::Glide);
-            }
-            Character::Amy if (again || c.action_pressed) && self.hammer.is_none() => {
-                self.hammer = Some(0);
-                events.push(Event::Hammer);
-            }
-            Character::Exe if again && !self.warped => {
-                let dir = flat(self.facing, Vec3::Y).normalize_or(Vec3::X);
-                let room = world.ray(self.pos, dir, WARP + 0.6).map_or(WARP, |h| (h.dist - 0.6).max(0.0));
-                self.pos += dir * room;
-                self.vel.y = self.vel.y.max(2.0);
-                self.warped = true;
-                events.push(Event::Teleport);
-            }
-            _ => {}
         }
-        if self.jumping && !c.jump && self.vel.y > RELEASE {
-            self.vel.y = RELEASE;
+        for t in [&mut self.doubled, &mut self.throwing] {
+            *t = t.map(|f| f + 1).filter(|&f| f < DOUBLE_SHOW.max(THROW_SHOW));
+        }
+        if let Some(f) = self.dashing {
+            self.dashing = (f + 1 < if self.homing.is_some() { HOMING_TIME } else { DASH_TIME }).then_some(f + 1);
+        }
+        if let Some(target) = self.homing {
+            let to = target - self.pos;
+            if to.length() < 0.3 || self.dashing.is_none() {
+                self.homing = None;
+            } else {
+                self.vel = to.normalize() * HOMING_SPEED;
+                self.facing = flat(self.vel, Vec3::Y).normalize_or(self.facing);
+            }
+        }
+        let p = self.kit.physics;
+        let (air, top, grv, release) = (AIR * p.air, TOP * p.speed, GRV * p.gravity, RELEASE * p.jump);
+        if self.jumping && !c.jump && self.vel.y > release && self.doubled.is_none() {
+            self.vel.y = release;
+        }
+        // Dashing, homing in or stomping, the move is the motion.
+        if self.dashing.is_some() || self.stomping.is_some() {
+            if let Some(speed) = self.stomping {
+                self.vel = Vec3::NEG_Y * speed;
+            }
+            let steps = (self.vel.length() / 6.0).ceil().max(1.0) as usize;
+            for _ in 0..steps {
+                self.pos += self.vel * K / steps as f32;
+                if self.collide_air(world, events) {
+                    return;
+                }
+            }
+            return;
         }
         let mut h = vec3(self.vel.x, 0.0, self.vel.z);
         let onward = d != Vec3::ZERO && h.length() > 0.1 && d.dot(h.normalize()) > 0.5;
@@ -485,8 +580,8 @@ impl Runner {
             }
         } else if d != Vec3::ZERO {
             let along = h.dot(d);
-            if along < TOP {
-                h += d * AIR.min(TOP - along);
+            if along < top {
+                h += d * air.min(top - along);
             }
             if h.length() > 0.5 {
                 h = turn(h.normalize(), d, 0.03) * h.length();
@@ -502,7 +597,7 @@ impl Runner {
             let f = f + 1;
             self.flying = Some(f);
             let mut vy = self.vel.y - FLY_GRV;
-            if c.jump_pressed && f < FLY_TIME {
+            if c.jump_pressed && f < self.fly_time {
                 vy = vy.max(0.0) + FLAP;
                 events.push(Event::Flap);
             }
@@ -510,7 +605,7 @@ impl Runner {
         } else if self.gliding.is_some() {
             (self.vel.y - 0.05).max(-GLIDE_FALL)
         } else {
-            (self.vel.y - GRV).max(-MAX_FALL)
+            (self.vel.y - grv).max(-MAX_FALL)
         };
         self.vel = vec3(h.x, vy, h.z);
 
@@ -572,8 +667,104 @@ impl Runner {
         self.flying = None;
         self.gliding = None;
         self.warped = false;
+        if self.stomping.take().is_some() {
+            events.push(Event::Stomped);
+        }
+        self.used = 0;
+        self.dashing = None;
+        self.homing = None;
+        self.doubled = None;
         events.push(Event::Land);
         true
+    }
+
+    /// Start one of his moves in the air; false if it cannot go now.
+    fn start_move(&mut self, a: Ability, world: &impl Sense, events: &mut Vec<Event>) -> bool {
+        match a {
+            Ability::Fly { seconds } if self.flying.is_none() => {
+                self.flying = Some(0);
+                self.fly_time = (seconds * 60.0) as u32;
+                self.jumping = false;
+                events.push(Event::Flap);
+            }
+            Ability::Glide { .. } if self.gliding.is_none() => {
+                self.gliding = Some(GLIDE_START);
+                self.jumping = false;
+                self.vel.y = self.vel.y.min(0.0);
+                events.push(Event::Glide);
+            }
+            Ability::Hammer if self.hammer.is_none() => {
+                self.hammer = Some(0);
+                events.push(Event::Hammer);
+            }
+            Ability::Teleport { distance } if !self.warped => {
+                self.teleport(world, distance, events);
+                self.vel.y = self.vel.y.max(2.0);
+                self.warped = true;
+            }
+            Ability::DoubleJump { power } => {
+                self.vel.y = self.vel.y.max(JMP * self.kit.physics.jump * power);
+                self.jumping = true;
+                self.doubled = Some(0);
+                events.push(Event::DoubleJump);
+            }
+            Ability::AirDash { speed } => self.air_dash(speed, events),
+            Ability::Homing { range } => {
+                let reach = range * K;
+                let ahead = flat(self.facing, Vec3::Y).normalize_or(Vec3::X);
+                let target = self
+                    .targets
+                    .iter()
+                    .copied()
+                    .filter(|t| {
+                        let d = *t - self.pos;
+                        d.length() < reach && d.dot(ahead) > -0.3 && d.y > -reach * 0.6
+                    })
+                    .min_by(|a, b| (*a - self.pos).length().total_cmp(&(*b - self.pos).length()));
+                match target {
+                    Some(t) => {
+                        self.homing = Some(t);
+                        self.dashing = Some(0);
+                        self.jumping = true;
+                        events.push(Event::AirDash);
+                    }
+                    None => self.air_dash(9.0, events),
+                }
+            }
+            Ability::Stomp { speed } => {
+                self.stomping = Some(speed);
+                self.jumping = true;
+                events.push(Event::Stomp);
+            }
+            Ability::Shoot { speed } => self.throw(speed, events),
+            _ => return false,
+        }
+        true
+    }
+
+    /// On through the air the way he faces, level, for a moment.
+    fn air_dash(&mut self, speed: f32, events: &mut Vec<Event>) {
+        let ahead = flat(self.facing, Vec3::Y).normalize_or(Vec3::X);
+        self.vel = ahead * flat(self.vel, Vec3::Y).length().max(speed);
+        self.jumping = true;
+        self.dashing = Some(0);
+        events.push(Event::AirDash);
+    }
+
+    fn throw(&mut self, speed: f32, events: &mut Vec<Event>) {
+        let dir = flat(self.facing, Vec3::Y).normalize_or(Vec3::X);
+        self.throwing = Some(0);
+        let speed = speed + flat(self.vel, Vec3::Y).length().min(8.0) * 0.5;
+        events.push(Event::Shoot { from: self.pos + dir * 0.4, dir, speed });
+    }
+
+    /// Vanish and turn up `distance` guide px ahead, short of walls.
+    fn teleport(&mut self, world: &impl Sense, distance: f32, events: &mut Vec<Event>) {
+        let dir = flat(self.facing, Vec3::Y).normalize_or(Vec3::X);
+        let far = distance * K * 2.2;
+        let room = world.ray(self.pos, dir, far + 0.6).map_or(far, |h| (h.dist - 0.6).max(0.0));
+        self.pos += dir * room;
+        events.push(Event::Teleport);
     }
 }
 
@@ -748,6 +939,64 @@ mod tests {
         assert!(e.frame(&w, again).contains(&Event::Teleport));
         assert!((e.pos.x - x - WARP).abs() < 0.2, "warped {} m", e.pos.x - x);
         assert!(!e.frame(&w, again).contains(&Event::Teleport));
+    }
+
+    #[test]
+    fn made_up_moves_work_in_3d_too() {
+        use crate::sonic::kit::Block;
+        let w = floor();
+        let with = |blocks: Vec<Block>| {
+            let mut r = Runner::new(Character::Sonic, Vec3::ZERO, Vec3::X);
+            r.kit.blocks = blocks;
+            r
+        };
+        let press = Controls { jump: true, jump_pressed: true, ..Controls::default() };
+        let hold = Controls { jump: true, ..Controls::default() };
+        // A second jump.
+        let mut d = with(vec![Block::new(Ability::DoubleJump { power: 1.0 })]);
+        d.frame(&w, press);
+        run(&mut d, &w, hold, 20);
+        assert!(d.frame(&w, press).contains(&Event::DoubleJump) && d.vel.y > 5.0);
+        // A dash: level and fast.
+        let mut a = with(vec![Block::new(Ability::AirDash { speed: 10.0 })]);
+        a.frame(&w, press);
+        run(&mut a, &w, hold, 10);
+        let y = a.pos.y;
+        assert!(a.frame(&w, press).contains(&Event::AirDash));
+        run(&mut a, &w, hold, 5);
+        assert!(a.vel.x >= 10.0 && (a.pos.y - y).abs() < 0.05);
+        // Homing in on a target ahead, then up off it.
+        let mut h = with(vec![Block::new(Ability::Homing { range: 200.0 })]);
+        let target = vec3(4.0, 3.0, 0.5);
+        h.targets = vec![vec3(-4.0, 2.0, 0.0), target];
+        h.frame(&w, press);
+        run(&mut h, &w, hold, 6);
+        h.frame(&w, press);
+        assert_eq!(h.homing, Some(target));
+        for _ in 0..30 {
+            h.frame(&w, Controls::default());
+            if (h.pos - target).length() < 0.6 {
+                break;
+            }
+        }
+        assert!((h.pos - target).length() < 0.6, "got there: {:?}", h.pos);
+        h.rebound();
+        assert!(h.homing.is_none() && h.vel.y > 5.0);
+        // A stomp lands with a thud; a throw comes out ahead.
+        let mut s = with(vec![Block { ability: Ability::Stomp { speed: 12.0 }, on: Button::Action }]);
+        s.frame(&w, press);
+        run(&mut s, &w, hold, 15);
+        assert!(s.frame(&w, Controls { action_pressed: true, ..Controls::default() }).contains(&Event::Stomp));
+        let events = run(&mut s, &w, Controls::default(), 60);
+        assert!(s.grounded && events.contains(&Event::Stomped));
+        let mut t = with(vec![Block { ability: Ability::Shoot { speed: 9.0 }, on: Button::Action }]);
+        let events = t.frame(&w, Controls { action_pressed: true, ..Controls::default() });
+        assert!(events.iter().any(|e| matches!(e, Event::Shoot { dir, .. } if dir.x > 0.99)));
+        // Faster by the kit.
+        let mut f = Runner::new(Character::Sonic, Vec3::ZERO, Vec3::X);
+        f.kit.physics.speed = 1.5;
+        run(&mut f, &w, go(Vec3::X), 300);
+        assert!((f.speed() - 9.0).abs() < 0.01, "{}", f.speed());
     }
 
     /// A loop of radius 6 m in the x-y plane, its floor at y = 0, inside

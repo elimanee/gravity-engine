@@ -561,15 +561,17 @@ impl Owner {
     }
 }
 
-fn file_names(o: Owner) -> &'static [&'static str] {
-    match o {
+fn file_names(o: Owner) -> Vec<String> {
+    let names: &[&str] = match o {
         Owner::Char(Character::Sonic) => &["sheet.png"],
         Owner::Char(Character::Tails) => &["tails.png"],
         Owner::Char(Character::Knuckles) => &["knuckles.png"],
         Owner::Char(Character::Amy) => &["amy.png", "amy.webp"],
         Owner::Char(Character::Exe) => &["exe.png"],
+        Owner::Char(c @ Character::Custom(_)) => return vec![format!("custom-{}.png", super::custom::slug(c.label()))],
         Owner::Zone => &[ZONE_FILE, "zone.webp"],
-    }
+    };
+    names.iter().map(|n| n.to_string()).collect()
 }
 
 /// The zone's sheet.
@@ -796,7 +798,7 @@ impl Sheets {
     pub fn load() -> (Sheets, Vec<String>) {
         let mut out = Sheets::default();
         let mut errors = vec![];
-        for c in Character::ALL {
+        for c in Character::every() {
             match Sheet::load(c) {
                 Ok(Some(s)) => out.sheets.push((c, s)),
                 Ok(None) => {}
@@ -815,9 +817,13 @@ impl Sheets {
 /// regions edited on a sheet)?
 fn is_not_sonics(p: &Path) -> bool {
     use crate::game::sprites::{MONITORS, OBJECTS};
-    let others = Owner::ALL.iter().skip(1).flat_map(|&o| file_names(o).iter().copied());
+    let others: Vec<String> = Owner::ALL.iter().skip(1).flat_map(|&o| file_names(o)).collect();
     p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
-        n == OBJECTS || n == MONITORS || n.ends_with(".regions.json") || others.clone().any(|o| o == n)
+        n == OBJECTS
+            || n == MONITORS
+            || n.ends_with(".regions.json")
+            || n.starts_with("custom-")
+            || others.iter().any(|o| o == n)
     })
 }
 
@@ -1487,7 +1493,8 @@ impl Sheet {
                 let _ = std::fs::remove_file(dir.join(n));
             }
             let ext = png.extension().map_or("png".into(), |e| e.to_string_lossy().to_lowercase());
-            let name = file_names(c).iter().find(|n| n.ends_with(&ext)).unwrap_or(&file_names(c)[0]).to_string();
+            let names = file_names(c);
+            let name = names.iter().find(|n| n.ends_with(&ext)).unwrap_or(&names[0]).to_string();
             std::fs::copy(png, dir.join(&name)).map_err(|e| e.to_string())?;
             return Ok(name);
         }
@@ -1525,9 +1532,9 @@ impl Sheet {
                 let _ = std::fs::remove_file(dir.join(n));
             }
         }
-        let name = file_names(c)[0];
-        img.save(dir.join(name)).map_err(|e| e.to_string())?;
-        Ok(name.to_string())
+        let name = file_names(c).swap_remove(0);
+        img.save(dir.join(&name)).map_err(|e| e.to_string())?;
+        Ok(name)
     }
 
     /// Write `img` over `c`'s sheet `name`, as a PNG (one in another format
@@ -1541,7 +1548,7 @@ impl Sheet {
         } else if c == Owner::Char(Character::Sonic) {
             was.with_extension("png")
         } else {
-            dir.join(file_names(c)[0])
+            dir.join(&file_names(c)[0])
         };
         img.save(&png).map_err(|e| e.to_string())?;
         if png != was {
@@ -1571,8 +1578,8 @@ impl Sheet {
                 let _ = std::fs::remove_file(dir.join(n));
             }
         }
-        let name = file_names(c)[0];
-        img.save(dir.join(name)).map_err(|e| e.to_string())?;
+        let name = file_names(c).swap_remove(0);
+        img.save(dir.join(&name)).map_err(|e| e.to_string())?;
         // Its regions, when they came with it (a generated sheet's).
         let beside = src.with_extension("regions.json");
         if let Ok(text) = std::fs::read_to_string(&beside) {

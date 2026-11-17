@@ -52,6 +52,15 @@ struct Look {
 }
 
 fn look(c: Character) -> Look {
+    let base = look_of(c.base());
+    let rgb = |c: [u8; 3]| Color::new(c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0);
+    match c.colours() {
+        Some([main, second, shoe]) => Look { main: rgb(main), skin: rgb(second), shoe: rgb(shoe), ..base },
+        None => base,
+    }
+}
+
+fn look_of(c: Character) -> Look {
     let skin = Color::new(0.98, 0.78, 0.6, 1.0);
     match c {
         Character::Sonic => Look {
@@ -89,6 +98,7 @@ fn look(c: Character) -> Look {
             eye: Color::new(0.9, 0.05, 0.05, 1.0),
             glove: Color::new(0.85, 0.85, 0.85, 1.0),
         },
+        Character::Custom(_) => look_of(Character::Sonic),
     }
 }
 
@@ -119,6 +129,9 @@ fn eyes(s: &mut Shape, l: &Look, centre: Vec3, black: bool) {
 impl Figure {
     pub fn new(c: Character) -> Figure {
         let l = look(c);
+        // Shaped as their base, Amy's hammer for whoever swings one.
+        let hammer_too = c.kit().has(crate::sonic::kit::Ability::Hammer);
+        let c = c.base();
         let mut body = Shape::default();
         let head = vec3(0.02, 1.12, 0.0);
         // Body and belly.
@@ -146,7 +159,7 @@ impl Figure {
         // Spikes, quills, dreadlocks or hair.
         let back = head + vec3(-0.18, 0.0, 0.0);
         match c {
-            Character::Sonic | Character::Exe => {
+            Character::Sonic | Character::Exe | Character::Custom(_) => {
                 for (dy, dz) in [(0.18, 0.0), (0.0, 0.0), (-0.18, 0.0), (0.06, 0.16), (0.06, -0.16)] {
                     let dir = vec3(-1.0, dy * 2.0 - 0.3, dz * 2.0);
                     body.append(&spike(back + vec3(0.0, dy, dz), dir, 0.55, 0.15, l.main), Mat4::IDENTITY);
@@ -228,7 +241,7 @@ impl Figure {
         ball.append(&sphere(vec3(0.3, 0.1, 0.0), vec3(0.14, 0.12, 0.18), 5, 6, l.skin), Mat4::IDENTITY);
         // The hammer: a handle down from the hand along the arm, the head
         // at its end.
-        let hammer = if matches!(c, Character::Amy) {
+        let hammer = if hammer_too || matches!(c, Character::Amy) {
             let hand = shoulder[1] + vec3(0.02, -0.42, 0.0);
             let mut h = cylinder(hand, -0.05, 0.65, 0.035, 0.035, 6, Color::new(0.55, 0.35, 0.2, 1.0));
             let head = hand + vec3(0.0, 0.72, 0.0);

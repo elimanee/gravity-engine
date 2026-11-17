@@ -262,12 +262,23 @@ pub fn drawn_animations(c: Character) -> Vec<(&'static str, usize)> {
         ("hurt", 1),
         ("dead", 1),
     ];
+    if c.is_custom() {
+        for b in c.kit().blocks {
+            for &(name, _) in b.ability.animations() {
+                if !out.iter().any(|(n, _)| *n == name) {
+                    out.push((name, 4));
+                }
+            }
+        }
+        return out;
+    }
     out.extend_from_slice(match c {
         Character::Sonic => &[],
         Character::Tails => &[("fly", 4), ("fly_tired", 4)],
         Character::Knuckles => &[("glide", 1), ("slide", 1), ("drop", 1), ("climb", 1), ("climb_up", 1)],
         Character::Amy => &[("hammer", 4), ("hammer_air", 4)],
         Character::Exe => &[("warp", 1), ("chase", 4), ("laugh", 1)],
+        Character::Custom(_) => &[],
     });
     out
 }
@@ -308,6 +319,13 @@ pub fn posed(c: Character, name: &str, k: usize, n: usize, at: Vec2) -> (Sonic, 
         // In the air the hammer goes round with the spin.
         "hammer_air" => (s.grounded, s.hammer, s.hammer_air, s.spin) = (false, Some(5), true, f * PI),
         "warp" => (s.grounded, s.warp) = (false, Some(0)),
+        // The made-up moves: curled up in the air, or the throwing arm.
+        "double_jump" => {
+            (s.grounded, s.jumping, s.doubled, s.ysp, s.spin) = (false, true, Some(0), -5.0, f * TAU / 5.0)
+        }
+        "air_dash" => (s.grounded, s.jumping, s.dashing, s.xsp, s.spin) = (false, true, Some(0), 9.0, f * TAU / 5.0),
+        "stomp" => (s.grounded, s.jumping, s.stomping, s.ysp, s.spin) = (false, true, Some(12.0), 12.0, f * TAU / 5.0),
+        "throw" => s.throwing = Some(k as u32),
         _ => {}
     }
     (s, t)
@@ -649,6 +667,24 @@ mod tests {
                 }
             }
         }
+        // A made-up character with every move: each of its own poses too.
+        use crate::sonic::custom::{self, Custom, PREVIEW};
+        use crate::sonic::kit::{Ability, Block, Kit};
+        let _held = custom::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let blocks = Ability::ALL.into_iter().take(6).map(Block::new).collect();
+        custom::set_preview(Some(Custom {
+            name: "Every move".into(),
+            kit: Kit { blocks, ..Kit::default() },
+            ..Custom::default()
+        }));
+        let c = Character::Custom(PREVIEW);
+        let names: Vec<&str> = drawn_animations(c).into_iter().map(|(n, _)| n).collect();
+        for name in ["double_jump", "air_dash", "stomp", "throw", "fly"] {
+            assert!(names.contains(&name), "{name} in {names:?}");
+            let (s, _) = posed(c, name, 1, 4, vec2(100.0, 100.0));
+            assert_eq!(s.poses()[0], name);
+        }
+        custom::set_preview(None);
     }
 
     #[test]

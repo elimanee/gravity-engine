@@ -51,6 +51,7 @@ use std::sync::Arc;
 
 mod bench;
 mod build;
+mod chars;
 mod editor;
 mod endless;
 mod fire;
@@ -188,6 +189,10 @@ pub struct App {
     region_test: Option<regions::RegionTest>,
     /// A character with no sheet was to be edited: asking what to do.
     sheet_prompt: Option<crate::sonic::Character>,
+    /// The character editor (the whole screen), and while a character is
+    /// tried, what to come back to.
+    chars: Option<chars::CharEditor>,
+    char_test: Option<chars::CharTest>,
     /// The web version saves the settings as they change (closing the tab
     /// does not run `Drop`): what was saved last, and when to look again.
     autosaved: String,
@@ -333,6 +338,8 @@ impl App {
             regions: None,
             region_test: None,
             sheet_prompt: None,
+            chars: None,
+            char_test: None,
             autosaved: String::new(),
             autosave_in: 2.0,
             game: None,
@@ -472,6 +479,14 @@ impl App {
             self.audio.tick();
             return;
         }
+        if self.char_test.is_some() && is_key_pressed(KeyCode::Escape) {
+            self.end_char_test();
+        }
+        if self.chars.is_some() && self.char_test.is_none() {
+            self.chars_frame(dt);
+            self.audio.tick();
+            return;
+        }
 
         let arena = self.arena();
         if (arena.0 - self.last_size.0).abs() > 1.0 || (arena.1 - self.last_size.1).abs() > 1.0 {
@@ -528,6 +543,7 @@ impl App {
             self.draw(dt, &input);
         }
         self.draw_region_test();
+        self.draw_char_test();
 
         if let Some(Title::Leaving(po)) = &mut self.title {
             po.draw();
@@ -829,7 +845,7 @@ impl App {
     fn update_ui(&mut self, dt: f32, input: &mut Input, actions: &mut Vec<Action>) {
         // Top-most first, so overlays swallow clicks meant for them.
         self.help.update(dt, input);
-        self.library.update(dt, (self.custom.len(), self.levels.len()), input, actions);
+        self.library.update(dt, (self.custom.len(), self.levels.len()), self.s.character, input, actions);
         self.picker.update(dt, input, actions);
         self.menu.update(dt, input, actions);
         self.update_inspector(dt, input);
@@ -1331,6 +1347,7 @@ impl App {
             Action::OpenAct(i) => self.open_act(i),
             Action::RandomAct { edit } => self.random_act(edit),
             Action::Play3d { zone } => self.play_3d(zone),
+            Action::EditCharacters => self.open_chars(None),
             Action::OpenLevel(i) => self.open_level(i),
             Action::EditLevel(i) => self.open_level_editor(i),
             Action::Level(cmd) => self.level_cmd(cmd),

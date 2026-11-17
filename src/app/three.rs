@@ -114,6 +114,7 @@ impl App {
                 Noise::Pop => (Sound::Pop, 0.7),
                 Noise::Boom => (Sound::Boom, 0.6),
                 Noise::Thud => (Sound::Pop, 0.3),
+                Noise::Shot => (Sound::Shot, 0.5),
                 Noise::Mark => (Sound::Post, 0.6),
             };
             self.sound(sound, centre, volume);
@@ -124,7 +125,12 @@ impl App {
         }
         if is_key_pressed(KeyCode::Escape) || self.pad.pressed(Button::Select) {
             self.three = None;
-            self.library.fader.open = true;
+            if self.char_test.is_some() {
+                // Trying a character: back to the editor.
+                self.end_char_test();
+            } else {
+                self.library.fader.open = true;
+            }
         }
     }
 }

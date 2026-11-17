@@ -136,7 +136,12 @@ fn to_pic(r: &Region) -> Pic {
 
 /// The file `o`'s regions are kept in.
 pub fn file_name(o: impl Into<Owner>) -> String {
-    format!("{}.regions.json", o.into().short().to_lowercase())
+    match o.into() {
+        Owner::Char(c @ super::Character::Custom(_)) => {
+            format!("custom-{}.regions.json", super::custom::slug(c.label()))
+        }
+        o => format!("{}.regions.json", o.short().to_lowercase()),
+    }
 }
 
 fn path(o: Owner) -> Option<PathBuf> {

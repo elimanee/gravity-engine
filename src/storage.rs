@@ -28,6 +28,11 @@ pub fn list(dir: &Path) -> Vec<PathBuf> {
     platform::list(dir)
 }
 
+/// Forget a file.
+pub fn remove(path: &Path) -> Result<(), String> {
+    platform::remove(path)
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 mod platform {
     use std::path::{Path, PathBuf};
@@ -50,6 +55,10 @@ mod platform {
     pub fn list(dir: &Path) -> Vec<PathBuf> {
         let Ok(entries) = std::fs::read_dir(dir) else { return vec![] };
         entries.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect()
+    }
+
+    pub fn remove(path: &Path) -> Result<(), String> {
+        std::fs::remove_file(path).map_err(|e| e.to_string())
     }
 }
 
@@ -103,6 +112,12 @@ mod platform {
 
     pub fn exists(path: &Path) -> bool {
         query(0, &key(path)).is_some()
+    }
+
+    /// Emptied (the browser's storage has no way to drop a key here): an
+    /// empty file reads as nothing to whoever lists it.
+    pub fn remove(path: &Path) -> Result<(), String> {
+        write(path, &[])
     }
 
     /// Keys under `dir/` with no further `/`.

@@ -5,7 +5,7 @@
 //! the full list of controls.
 //!
 //! Usage: `gravity_engine [--no-title] [--benchmark] [--act=N] [--special-stage=N]
-//! [--3d[=run|zone]] [--sprite-regions[=CHARACTER]] [FILES…]` — files may be images, audio
+//! [--3d[=run|zone]] [--sprite-regions[=CHARACTER]] [--characters] [FILES…]` — files may be images, audio
 //! (tracker modules, mp3/flac/ogg/…, .pls playlists) or `.gscene` scenes.
 
 // No console window behind the game on Windows release builds.
@@ -72,6 +72,7 @@ async fn main() {
     let mut special = None;
     let mut three = None;
     let mut regions = None;
+    let mut characters = false;
     let mut files = vec![];
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
@@ -90,6 +91,7 @@ async fn main() {
             "--3d=zone" => three = Some(true),
             // Straight into the sprite region editor (on this character's sheet).
             "--sprite-regions" => regions = Some(None),
+            "--characters" => characters = true,
             a if a.starts_with("--sprite-regions=") => {
                 let name = a[17..].to_lowercase();
                 regions = Some(sonic::sheet::Owner::ALL.into_iter().find(|o| o.short().to_lowercase() == name));
@@ -97,13 +99,14 @@ async fn main() {
             "-h" | "--help" => {
                 println!(
                     "usage: gravity_engine [--no-title] [--benchmark] [--act=N] [--special-stage=N] \
-                     [--3d[=run|zone]] [--sprite-regions[=CHARACTER]] [FILES…]\n\n  \
+                     [--3d[=run|zone]] [--sprite-regions[=CHARACTER]] [--characters] [FILES…]\n\n  \
                      --benchmark        run stress scenes, print frame times and quit\n  \
                      --act=N            play Sonic act N (1-7)\n  \
                      --special-stage=N  play special stage N (1-7)\n  \
                      --3d[=run|zone]    play the 3D mode: the endless run or the open zone\n  \
                      --sprite-regions   edit the characters' sprite sheet regions (sonic, tails,\n                     \
-                     knuckles, amy or exe) or the zone's tiles (zone)\n\n\
+                     knuckles, amy or exe) or the zone's tiles (zone)\n  \
+                     --characters       make up characters of your own (the character editor)\n\n\
                      Press F1 in the app for controls."
                 );
                 return;
@@ -138,6 +141,9 @@ async fn main() {
     }
     if let Some(c) = regions {
         app.edit_regions(c);
+    }
+    if characters {
+        app.edit_characters();
     }
     loop {
         app.frame();

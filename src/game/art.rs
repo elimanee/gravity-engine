@@ -66,6 +66,13 @@ pub fn draw(g: &Game, t: f32, sp: Option<&Sprites>, zone: Option<&Sheet>) {
         draw_circle(s.pos.x, s.pos.y, 4.5, Color::new(1.0, 0.6, 0.15, 1.0));
         draw_circle(s.pos.x, s.pos.y, 2.0, Color::new(1.0, 0.95, 0.8, 1.0));
     }
+    // What the character threw: a spinning ring of light.
+    for s in &g.thrown {
+        let a = t * 18.0;
+        draw_circle(s.pos.x, s.pos.y, 9.0, Color::new(1.0, 0.95, 0.6, 0.3));
+        draw_circle_lines(s.pos.x, s.pos.y, 6.0, 2.5, Color::new(1.0, 0.85, 0.2, 1.0));
+        draw_circle(s.pos.x + a.cos() * 3.0, s.pos.y + a.sin() * 3.0, 2.0, WHITE);
+    }
     for r in &g.lost {
         // Blink in their last second.
         let left = RING_LIFE - r.age;

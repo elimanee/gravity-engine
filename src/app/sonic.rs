@@ -186,7 +186,9 @@ impl App {
         let bench = self.bench_frame();
         let (aw, ah) = self.arena();
         let floor = world.walls().floor.then_some(ah - WALL_T * PPM);
+        let targets = self.game.as_ref().map(|g| g.targets()).unwrap_or_default();
         let Some(run) = &mut self.sonic else { return };
+        run.sonic.targets = targets;
         let mut pad = Pad {
             left: key(KeyCode::Left) || gp.left(),
             right: key(KeyCode::Right) || gp.right(),
@@ -264,6 +266,18 @@ impl App {
         }
     }
 
+    /// A ball thrown by a character in the sandbox: from `at` (world px)
+    /// at `vel` (px a second).
+    fn throw_ball(&mut self, at: Vec2, vel: Vec2) {
+        let m = Material { bounce: 0.6, friction: 0.4, ..Material::DEFAULT };
+        self.spawn_shape(Shape::Circle, (255, 200, 60), 22.0, at, false, m);
+        if let Some(o) = self.objects.last() {
+            if let Some(b) = self.world.bodies.get_mut(o.body) {
+                b.set_linvel(vector![vel.x / PPM, -vel.y / PPM], true);
+            }
+        }
+    }
+
     fn sonic_events(&mut self, s: &Sonic, events: &[Event], step: f32) {
         let feet = s.pos + vec2(0.0, s.radii().1 * SCALE);
         let g = -self.s.gravity;
@@ -338,6 +352,41 @@ impl App {
                 Event::Land => {
                     if self.s.effects && s.gsp.abs() > 4.0 {
                         self.effects.dust(feet, s.gsp.abs());
+                    }
+                }
+                Event::DoubleJump => {
+                    self.sound(Sound::Jump, s.pos, 0.45);
+                    if self.s.effects {
+                        self.effects.dust(feet, 6.0);
+                    }
+                }
+                Event::AirDash => {
+                    self.sound(Sound::Dash, s.pos, 0.5);
+                    if self.s.effects {
+                        self.effects.sparks(s.pos, vec2(-s.facing, 0.0), 8.0);
+                    }
+                }
+                Event::Stomp => self.sound(Sound::Dash, s.pos, 0.4),
+                Event::Stomped => {
+                    self.sound(Sound::Hit { size: 120.0, hard: 0.3 }, feet, 0.7);
+                    self.pad.rumble(0.6, 0.15);
+                    if self.s.effects {
+                        self.effects.dust(feet, 10.0);
+                    }
+                    // The badniks on the ground close by are broken.
+                    if let Some(game) = self.game.as_mut() {
+                        let fx = game.shock(feet, 90.0);
+                        self.game_effects(fx);
+                    }
+                }
+                Event::Shoot { from, dir, speed } => {
+                    self.sound(Sound::Shot, from, 0.5);
+                    let vel = vec2(dir * speed, 0.0) * SCALE * FPS;
+                    if let Some(game) = self.game.as_mut() {
+                        game.throw(from, vel);
+                    } else {
+                        // In the sandbox it is a ball, thrown.
+                        self.throw_ball(from, vel);
                     }
                 }
             }

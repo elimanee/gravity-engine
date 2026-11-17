@@ -191,6 +191,7 @@ pub enum Noise {
     Pop,
     Boom,
     Thud,
+    Shot,
     /// A milestone of the run passed.
     Mark,
 }
@@ -261,6 +262,8 @@ pub struct World3 {
     spilled: Vec<Spilled>,
     pops: Vec<(Vec3, u32)>,
     blasts: Vec<(Vec3, u32)>,
+    /// What he threw: where, its velocity (m/s), its age (frames).
+    thrown: Vec<(Vec3, Vec3, u32)>,
     /// Where he went into the sea, and how long ago (frames).
     splash: Option<(Vec3, u32)>,
     guide: Option<(usize, f32)>,
@@ -350,6 +353,7 @@ impl World3 {
             spilled: vec![],
             pops: vec![],
             blasts: vec![],
+            thrown: vec![],
             splash: None,
             guide: None,
             cam: Chase {
@@ -583,6 +587,7 @@ impl World3 {
             action: input.action,
             action_pressed: input.action_pressed,
         };
+        self.runner.targets = self.badniks.iter().map(|(b, _)| b.at + Vec3::Y * 0.5).collect();
         let moves = self.runner.frame(&self.phys, c);
         for m in moves {
             match m {
@@ -591,7 +596,18 @@ impl World3 {
                 Move::Dash => self.noises.push(Noise::Dash),
                 Move::Skid => self.noises.push(Noise::Skid),
                 Move::Hammer | Move::Flap | Move::Glide | Move::Roll => self.noises.push(Noise::Rev),
-                Move::Teleport => self.noises.push(Noise::Dash),
+                Move::Teleport | Move::AirDash | Move::Stomp => self.noises.push(Noise::Dash),
+                Move::DoubleJump => self.noises.push(Noise::Jump),
+                Move::Stomped => {
+                    self.noises.push(Noise::Thud);
+                    let at = self.runner.pos;
+                    self.phys.blast(at, 3.0, 5.0);
+                    self.pops.push((at - Vec3::Y * 0.5, 4));
+                }
+                Move::Shoot { from, dir, speed } => {
+                    self.thrown.push((from, dir * speed * K * 60.0, 0));
+                    self.noises.push(Noise::Shot);
+                }
                 Move::Land => {}
                 Move::Push { body, impulse, at } => self.phys.push(body, impulse, at),
             }
@@ -599,6 +615,7 @@ impl World3 {
         self.guide_loops();
         self.phys.step();
         self.touch();
+        self.thrown_move();
         self.badniks_move();
         self.spill_move();
         if input.spawn {
@@ -741,12 +758,47 @@ impl World3 {
             self.score += 100;
             self.noises.push(Noise::Pop);
             if !self.runner.grounded {
-                let v = &mut self.runner.vel;
-                v.y = v.y.max(4.0).max(-v.y);
+                self.runner.rebound();
             }
         }
         if let Some(from) = hit_by {
             self.hurt(from);
+        }
+    }
+
+    /// What he threw flies on until it meets something: a badnik breaks,
+    /// a thing is knocked.
+    fn thrown_move(&mut self) {
+        let dt = 1.0 / 60.0;
+        let mut popped = vec![];
+        let mut knocks = vec![];
+        let (phys, badniks) = (&self.phys, &self.badniks);
+        self.thrown.retain_mut(|(at, vel, age)| {
+            *age += 1;
+            let step = *vel * dt;
+            if let Some(h) = phys.ray(*at, step.normalize_or_zero(), step.length() + 0.2) {
+                if let Some(body) = h.moving {
+                    knocks.push((body, *vel * 0.4, h.point));
+                }
+                return false;
+            }
+            *at += step;
+            if let Some(k) = badniks.iter().position(|(b, _)| (b.at + Vec3::Y * 0.5 - *at).length() < BADNIK_REACH) {
+                popped.push(k);
+                return false;
+            }
+            *age < 90
+        });
+        for (body, impulse, at) in knocks {
+            self.phys.push(body, impulse, at);
+        }
+        popped.sort_unstable();
+        popped.dedup();
+        for k in popped.into_iter().rev() {
+            let (b, _) = self.badniks.remove(k);
+            self.pops.push((b.at + Vec3::Y * 0.5, 0));
+            self.score += 100;
+            self.noises.push(Noise::Pop);
         }
     }
 
@@ -1086,6 +1138,13 @@ impl World3 {
                 }
             }
         }
+        // What he threw: a ring of light, spinning.
+        for (at, _, age) in &self.thrown {
+            let m = Mat4::from_translation(*at)
+                * Mat4::from_rotation_y(*age as f32 * 0.5)
+                * Mat4::from_scale(Vec3::splat(0.6));
+            draw_at(&props.ring, m);
+        }
         // Badniks bursting, and blasts: bits flying out.
         let bursts = self.pops.iter().map(|(p, t)| (*p, *t as f32 / 24.0, 7, 1.6, 0.55, &props.puff));
         let bursts = bursts.chain(self.blasts.iter().map(|(p, t)| (*p, *t as f32 / 30.0, 16, 6.0, 1.3, &props.flame)));
@@ -1203,6 +1262,14 @@ impl World3 {
             let a = ((540 - self.frames) as f32 / 60.0).min(1.0);
             let mut hint =
                 "Arrows: run  ·  Space: jump  ·  Shift: roll, spin dash  ·  Q / E: camera  ·  P: pause".to_string();
+            // Moves on the action button come first on it.
+            let on_action: Vec<String> = (self.runner.kit.blocks.iter())
+                .filter(|b| b.on == crate::sonic::kit::Button::Action)
+                .map(|b| b.ability.name().to_lowercase())
+                .collect();
+            if !on_action.is_empty() {
+                hint = hint.replace("Shift: roll, spin dash", &format!("X: {}", on_action.join(", ")));
+            }
             if !self.maker.endless() {
                 hint.push_str("  ·  N: drop a thing  ·  B: blast");
             }

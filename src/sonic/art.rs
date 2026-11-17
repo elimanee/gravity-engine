@@ -25,7 +25,41 @@ struct Look {
     shoe_dark: Color,
 }
 
+/// A colour from 0‥255 values.
+fn rgb(c: [u8; 3]) -> Color {
+    Color::new(c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0)
+}
+
+fn darker(c: Color, k: f32) -> Color {
+    Color::new(c.r * k, c.g * k, c.b * k, c.a)
+}
+
+/// A character's colours: a built-in's own, a made-up one's chosen ones
+/// on its base's.
 fn look(c: Character) -> Look {
+    let base = look_of(c.base());
+    match c.colours() {
+        Some([main, second, shoe]) => Look {
+            main: rgb(main),
+            dark: darker(rgb(main), 0.62),
+            skin: rgb(second),
+            belly: rgb(second),
+            shoe: rgb(shoe),
+            shoe_dark: darker(rgb(shoe), 0.6),
+        },
+        None => base,
+    }
+}
+
+/// A built-in character's own colours, as a made-up one's are kept (main,
+/// belly and muzzle, shoes).
+pub fn base_colours(c: Character) -> [[u8; 3]; 3] {
+    let l = look_of(c.base());
+    let u8s = |c: Color| [(c.r * 255.0).round() as u8, (c.g * 255.0).round() as u8, (c.b * 255.0).round() as u8];
+    [u8s(l.main), u8s(l.skin), u8s(l.shoe)]
+}
+
+fn look_of(c: Character) -> Look {
     match c {
         Character::Sonic => Look {
             main: Color::new(0.12, 0.36, 0.9, 1.0),
@@ -67,6 +101,7 @@ fn look(c: Character) -> Look {
             shoe: RED,
             shoe_dark: SHOE_DARK,
         },
+        Character::Custom(_) => look_of(Character::Sonic),
     }
 }
 
@@ -140,7 +175,7 @@ pub fn draw_at(s: &Sonic, t: f32) {
     // Curled up, except mid-swing or lunging out of a teleport.
     if s.is_ball() && !(s.hammer_air && s.hammer.is_some()) && s.warp.is_none() {
         ball(&f, s, &l);
-        if s.character == Character::Tails {
+        if s.character.base() == Character::Tails {
             // His tails trail behind the ball.
             tails(&f, s, &l, (-12.0, 4.0), 2.6, false, t);
         }
@@ -222,7 +257,7 @@ fn hammer(f: &Frame, hand: (f32, f32), a: f32) {
 }
 
 fn body(f: &Frame, s: &Sonic, l: &Look, t_now: f32) {
-    let ch = s.character;
+    let ch = s.character.base();
     let speed = s.gsp.abs();
     let running = s.grounded && speed >= 6.0 && !s.sliding;
     let walking = s.grounded && speed > 0.05 && !s.sliding;
@@ -338,7 +373,7 @@ fn body(f: &Frame, s: &Sonic, l: &Look, t_now: f32) {
                 f.tri(q(-3.0, y0 - 2.0), q(-4.0, y0 + 2.0), q(-10.5, y0 + len - 2.0), l.main);
             }
         }
-        Character::Tails => {}
+        Character::Tails | Character::Custom(_) => {}
     }
     // Body and belly (Amy's dress).
     let b = t(0.0, 3.0);
@@ -423,6 +458,9 @@ fn body(f: &Frame, s: &Sonic, l: &Look, t_now: f32) {
         t(2.0 + a.cos() * 10.0, -2.0 + a.sin() * 10.0)
     } else if s.gliding.is_some() {
         t(5.0, -15.0)
+    } else if s.throwing.is_some() {
+        // Flung forward, just let go.
+        t(14.0, -5.0)
     } else if air {
         t(4.0, -15.0)
     } else if s.pushing {
@@ -439,7 +477,7 @@ fn body(f: &Frame, s: &Sonic, l: &Look, t_now: f32) {
     if let Some(k) = swinging {
         hammer(f, front_hand, -2.4 + k * 2.6 + 0.3);
     }
-    if ch == Character::Amy && s.hammer_air && s.hammer.is_some() {
+    if s.hammer_air && s.hammer.is_some() {
         hammer(f, front_hand, s.spin * 2.0);
     }
     if ch == Character::Knuckles {
