@@ -13,19 +13,26 @@ pub(super) struct Three {
     pub zone: bool,
 }
 
-/// A new world: the zone, or a new course for the run.
-fn maker(zone: bool) -> Box<dyn Maker> {
-    let seed = (get_time() * 1000.0) as u32 ^ (miniquad::date::now() * 1000.0) as u32;
+/// A new world: the zone, or a new course for the run (from `seed`, or a
+/// new one every time).
+fn maker(zone: bool, seed: Option<u32>) -> Box<dyn Maker> {
+    let fresh = (get_time() * 1000.0) as u32 ^ (miniquad::date::now() * 1000.0) as u32;
     if zone {
         Box::new(Zone::new(7))
     } else {
-        Box::new(crate::three::course::Course::new(seed.max(1)))
+        Box::new(crate::three::course::Course::new(seed.unwrap_or(fresh).max(1)))
     }
 }
 
 impl App {
     /// Into the 3D mode: the open zone or the endless run.
     pub fn play_3d(&mut self, zone: bool) {
+        self.play_3d_seeded(zone, None);
+    }
+
+    /// The same, the run's course from `seed` (the benchmark's is always the same).
+    pub(super) fn play_3d_seeded(&mut self, zone: bool, seed: impl Into<Option<u32>>) {
+        let seed = seed.into();
         let Some(looks) = Looks::new(self.s.character) else {
             self.toasts.error("3D drawing is not available here");
             return;
@@ -36,7 +43,7 @@ impl App {
         if n > 0 {
             self.toasts.status("models", format!("3D models: {n} from your pack"));
         }
-        let world = World3::new(maker(zone), self.s.character, self.s.run_3d_best);
+        let world = World3::new(maker(zone, seed), self.s.character, self.s.run_3d_best);
         self.three = Some(Three { world, looks, zone });
     }
 
@@ -71,16 +78,25 @@ impl App {
             again: pressed(&[KeyCode::Space, KeyCode::Enter]) || self.pad.pressed(Button::South),
             pause: pressed(&[KeyCode::P]) || self.pad.pressed(Button::Start),
         };
+        let bench = self.bench_frame();
         let Some(t) = &mut self.three else { return };
-        if t.world.over && hands.again {
+        let hands = match bench {
+            Some(frame) => super::bench::hands_3d(frame, t.zone),
+            None => hands,
+        };
+        if t.world.over && hands.again && bench.is_none() {
             let zone = t.zone;
             self.s.run_3d_best = self.s.run_3d_best.max(t.world.distance);
             let _ = self.s.save();
-            t.world.restart(maker(zone));
+            t.world.restart(maker(zone, None));
         } else {
+            let _t = crate::profile::span("3d/update");
             t.world.update(dt, hands);
         }
-        t.world.draw(&t.looks);
+        {
+            let _t = crate::profile::span("3d/draw");
+            t.world.draw(&t.looks);
+        }
         let noises = std::mem::take(&mut t.world.noises);
         let distance = t.world.distance;
         let over = t.world.over;
@@ -102,7 +118,7 @@ impl App {
             };
             self.sound(sound, centre, volume);
         }
-        if over && distance > self.s.run_3d_best {
+        if over && distance > self.s.run_3d_best && bench.is_none() {
             self.s.run_3d_best = distance;
             let _ = self.s.save();
         }

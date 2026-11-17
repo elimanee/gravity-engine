@@ -156,6 +156,9 @@ pub struct Stretch {
 struct Piece {
     id: u32,
     meshes: Vec<(Vec<Mesh>, Skin)>,
+    /// A ball round each of its meshes (centre, radius), to skip those out
+    /// of view.
+    bounds: Vec<Vec<(Vec3, f32)>>,
     /// Its textures put on (at the first drawing).
     dressed: bool,
     colliders: Vec<ColliderHandle>,
@@ -207,6 +210,8 @@ struct Chase {
     aside_eye: Vec3,
     /// The view widens with speed (degrees).
     fov: f32,
+    /// Where it looks (where it follows from, but for a fall: him).
+    look: Vec3,
 }
 
 impl Chase {
@@ -256,6 +261,8 @@ pub struct World3 {
     spilled: Vec<Spilled>,
     pops: Vec<(Vec3, u32)>,
     blasts: Vec<(Vec3, u32)>,
+    /// Where he went into the sea, and how long ago (frames).
+    splash: Option<(Vec3, u32)>,
     guide: Option<(usize, f32)>,
     cam: Chase,
     pub sky: Sky,
@@ -343,6 +350,7 @@ impl World3 {
             spilled: vec![],
             pops: vec![],
             blasts: vec![],
+            splash: None,
             guide: None,
             cam: Chase {
                 yaw,
@@ -354,6 +362,7 @@ impl World3 {
                 aside: 0.0,
                 aside_eye: start.0,
                 fov: 58.0,
+                look: start.0,
             },
             sky: Sky::DAY,
             ring_count: 0,
@@ -403,6 +412,7 @@ impl World3 {
         for (shape, skin) in &s.decor {
             meshes.push((shape.meshes(None), *skin));
         }
+        let bounds = meshes.iter().map(|(ms, _)| ms.iter().map(ball).collect()).collect();
         self.rings.extend(s.rings.iter().map(|r| (*r, id)));
         self.springs.extend(s.springs.iter().map(|r| (*r, id)));
         self.panels.extend(s.panels.iter().map(|r| (*r, id)));
@@ -412,7 +422,7 @@ impl World3 {
             let body = self.phys.add_body(solid, at, Vec3::ZERO, 0.6);
             self.things.push(Thing { body, solid });
         }
-        self.pieces.push(Piece { id, meshes, dressed: false, colliders, path: s.path });
+        self.pieces.push(Piece { id, meshes, bounds, dressed: false, colliders, path: s.path });
     }
 
     /// Clear stretches far behind.
@@ -553,6 +563,9 @@ impl World3 {
         self.frames += 1;
         if self.over {
             self.camera(input.turn);
+            if let Some((_, t)) = &mut self.splash {
+                *t += 1;
+            }
             return;
         }
         // The stick, turned by the camera.
@@ -614,9 +627,13 @@ impl World3 {
         }
         self.milestone.1 = self.milestone.1.saturating_add(1);
         self.phys.refresh();
-        // Fell: below everything near.
+        // Fell: below everything near, or into the sea under the run.
         let floor = self.along(self.runner.pos).map_or(-60.0, |p| p.0.y - 40.0);
-        if self.runner.pos.y < floor.min(-60.0).max(floor) {
+        let sea = self.maker.endless() && self.runner.pos.y < self.sea + 0.5;
+        if sea {
+            self.splash = Some((vec3(self.runner.pos.x, self.sea, self.runner.pos.z), 0));
+        }
+        if sea || self.runner.pos.y < floor.min(-60.0).max(floor) {
             self.die();
         }
         if let Some((p, _)) = self.along(self.runner.pos) {
@@ -847,6 +864,10 @@ impl World3 {
 
     fn camera(&mut self, turn: f32) {
         let road = if self.maker.endless() { self.way(self.runner.pos) } else { None };
+        let falling = self
+            .along(self.runner.pos)
+            .map(|(p, _)| p.y - 4.0)
+            .filter(|edge| self.maker.endless() && !self.runner.grounded && self.runner.pos.y < *edge);
         let r = &self.runner;
         let cam = &mut self.cam;
         if turn.abs() > 0.05 && self.guide.is_none() {
@@ -869,7 +890,11 @@ impl World3 {
                 cam.yaw += d * rate;
             }
         }
-        let target = r.pos + Vec3::Y * 0.7;
+        let mut target = r.pos + Vec3::Y * 0.7;
+        // Falling off: the view stays up by the road and watches him go.
+        if let Some(edge) = falling {
+            target.y = target.y.max(edge);
+        }
         cam.at += (target - cam.at) * 0.35;
         let f = vec3(cam.yaw.cos(), 0.0, cam.yaw.sin());
         let back = -f * cam.dist * cam.pitch.cos() + Vec3::Y * (cam.dist * cam.pitch.sin() + 0.8);
@@ -895,6 +920,8 @@ impl World3 {
         cam.eye += (eye - cam.eye) * 0.3;
         let fast = ((r.speed() - TOP) / 8.0).clamp(0.0, 1.0);
         cam.fov += (58.0 + fast * 12.0 - cam.fov) * 0.05;
+        let look = if falling.is_some() { r.pos } else { cam.at };
+        cam.look += (look - cam.look) * if falling.is_some() { 0.15 } else { 1.0 };
     }
 
     /// Restart the run (a new course) or the zone.
@@ -916,7 +943,7 @@ impl World3 {
         }
         let cam = Camera3D {
             position: self.cam.eye,
-            target: self.cam.at,
+            target: self.cam.look,
             up: Vec3::Y,
             fovy: self.cam.fov.to_radians(),
             z_near: 0.1,
@@ -933,13 +960,19 @@ impl World3 {
         draw_sky(&self.sky, horizon);
         set_camera(&cam);
         looks.gfx.begin(&self.sky, self.cam.eye);
+        let span = crate::profile::span("3d/draw/ground");
+        let view = Frustum::of(cam.matrix());
         for p in &self.pieces {
-            for (meshes, _) in &p.meshes {
-                for m in meshes {
-                    draw_mesh(m);
+            for ((meshes, _), balls) in p.meshes.iter().zip(&p.bounds) {
+                for (m, (c, r)) in meshes.iter().zip(balls) {
+                    if view.sees(*c, *r) {
+                        draw_mesh(m);
+                    }
                 }
             }
         }
+        drop(span);
+        let span = crate::profile::span("3d/draw/sky and sea");
         // Clouds: scattered over a square that goes round with the view.
         let e = self.cam.eye;
         for k in 0..18 {
@@ -967,11 +1000,13 @@ impl World3 {
                 texture: None,
             });
         }
+        drop(span);
+        let span = crate::profile::span("3d/draw/rings, springs, badniks");
         let time = self.frames as f32 / 60.0;
         let props = &looks.props;
         let pack = &looks.pack;
         for (r, _) in &self.rings {
-            if (*r - self.cam.eye).length() < 160.0 {
+            if (*r - self.cam.eye).length() < 160.0 && view.sees(*r, 0.6) {
                 let m = Mat4::from_translation(*r) * Mat4::from_rotation_y(time * 3.0);
                 match &pack.ring {
                     Some(ring) => ring.draw_still(m * Mat4::from_translation(vec3(0.0, -ring.height / 2.0, 0.0))),
@@ -1037,6 +1072,8 @@ impl World3 {
                 None => draw_at(if b.kind == BadnikKind::Crawler { &props.crawler } else { &props.flyer }, m),
             }
         }
+        drop(span);
+        let span = crate::profile::span("3d/draw/things");
         for t in &self.things {
             let Some((at, rot)) = self.phys.pose(t.body) else { continue };
             let q = Quat::from_xyzw(rot.i, rot.j, rot.k, rot.w);
@@ -1052,6 +1089,8 @@ impl World3 {
         // Badniks bursting, and blasts: bits flying out.
         let bursts = self.pops.iter().map(|(p, t)| (*p, *t as f32 / 24.0, 7, 1.6, 0.55, &props.puff));
         let bursts = bursts.chain(self.blasts.iter().map(|(p, t)| (*p, *t as f32 / 30.0, 16, 6.0, 1.3, &props.flame)));
+        let splash = self.splash.filter(|(_, t)| *t < 50).map(|(p, t)| (p, t as f32 / 50.0, 18, 5.0, 2.2, &props.puff));
+        let bursts = bursts.chain(splash);
         for (p, k, n, reach, size, mesh) in bursts {
             let out = 1.0 - (1.0 - k) * (1.0 - k);
             for j in 0..n {
@@ -1061,6 +1100,8 @@ impl World3 {
                 draw_at(mesh, Mat4::from_translation(at) * Mat4::from_scale(Vec3::splat(size * (1.0 - k))));
             }
         }
+        drop(span);
+        let span = crate::profile::span("3d/draw/him");
         // His shadow, and him (blinking while he cannot be hurt).
         let r = &self.runner;
         if let Some(h) = self.phys.ray(r.pos, -Vec3::Y, 30.0) {
@@ -1110,8 +1151,11 @@ impl World3 {
                 None => looks.figure.draw(place, &self.pose),
             }
         }
+        drop(span);
+        let span = crate::profile::span("3d/draw/to GPU");
         looks.gfx.end();
         set_default_camera();
+        drop(span);
         self.hud();
     }
 
@@ -1179,7 +1223,8 @@ impl World3 {
                 text_bold_centered(line, w / 2.0, h / 2.0 - 16.0 + k as f32 * 26.0, 15.0, c);
             }
         }
-        if self.over {
+        // The end of the run, once the splash has been seen.
+        if self.over && self.splash.is_none_or(|(_, t)| t > 40) {
             draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.35));
             text_bold_centered(&format!("{} m", self.distance as u32), w / 2.0, h / 2.0 - 30.0, 48.0, WHITE);
             let line = if self.distance > self.best && self.best >= 20.0 {
@@ -1192,6 +1237,39 @@ impl World3 {
             text_bold_centered(&line, w / 2.0, h / 2.0 + 14.0, 22.0, yellow);
             text_bold_centered("Space: run again  ·  Esc: back", w / 2.0, h / 2.0 + 52.0, 18.0, WHITE);
         }
+    }
+}
+
+/// A ball round a mesh's vertices: their middle, and the farthest from it.
+fn ball(m: &Mesh) -> (Vec3, f32) {
+    if m.vertices.is_empty() {
+        return (Vec3::ZERO, 0.0);
+    }
+    let (lo, hi) = m
+        .vertices
+        .iter()
+        .fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), v| (lo.min(v.position), hi.max(v.position)));
+    let c = (lo + hi) / 2.0;
+    let r = m.vertices.iter().map(|v| (v.position - c).length()).fold(0.0, f32::max);
+    (c, r)
+}
+
+/// What a camera sees: the six sides of its view, as planes facing in.
+pub struct Frustum([Vec4; 6]);
+
+impl Frustum {
+    /// From the camera's projection × view matrix.
+    pub fn of(m: Mat4) -> Frustum {
+        let row = |i: usize| vec4(m.x_axis[i], m.y_axis[i], m.z_axis[i], m.w_axis[i]);
+        let (r0, r1, r2, r3) = (row(0), row(1), row(2), row(3));
+        let planes =
+            [r3 + r0, r3 - r0, r3 + r1, r3 - r1, r3 + r2, r3 - r2].map(|p| p / p.truncate().length().max(1e-6));
+        Frustum(planes)
+    }
+
+    /// Whether any of a ball (centre, radius) is in view.
+    pub fn sees(&self, c: Vec3, r: f32) -> bool {
+        self.0.iter().all(|p| p.truncate().dot(c) + p.w > -r)
     }
 }
 
@@ -1297,6 +1375,25 @@ mod tests {
         }
         assert!(w.noises.contains(&Noise::Spring) && top > 6.0, "sprung to {top} m");
         assert!(w.runner.pos.x > 60.0);
+    }
+
+    #[test]
+    fn only_what_is_in_view_is_drawn() {
+        // As a Camera3D at the origin looking along +x makes it.
+        let m = Mat4::perspective_rh_gl(1.0, 1.5, 0.1, 500.0) * Mat4::look_at_rh(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let v = Frustum::of(m);
+        assert!(v.sees(vec3(20.0, 0.0, 0.0), 1.0), "ahead");
+        assert!(!v.sees(vec3(-20.0, 0.0, 0.0), 1.0), "behind");
+        assert!(!v.sees(vec3(5.0, 0.0, 60.0), 1.0), "far to the side");
+        assert!(v.sees(vec3(5.0, 0.0, 60.0), 60.0), "big enough to reach into view");
+        assert!(!v.sees(vec3(800.0, 0.0, 0.0), 1.0), "beyond the far end");
+        let mut s = Shape::default();
+        for p in [vec3(-1.0, 0.0, 0.0), vec3(3.0, 0.0, 0.0), vec3(1.0, 2.0, 0.0)] {
+            s.vertex(p, Vec3::Y, Vec2::ZERO, WHITE);
+        }
+        s.tri(0, 1, 2);
+        let (c, r) = ball(&s.meshes(None)[0]);
+        assert!((c - vec3(1.0, 1.0, 0.0)).length() < 1e-5 && (r - 5f32.sqrt()).abs() < 1e-5);
     }
 
     #[test]

@@ -12,6 +12,8 @@ use macroquad::prelude::*;
 const CELLS: usize = 96;
 const CELL: f32 = 4.0;
 const SIZE: f32 = CELLS as f32 * CELL;
+/// Cells a side in each piece of ground (drawn or not as a whole).
+const CHUNK: usize = 12;
 
 pub struct Zone {
     seed: u32,
@@ -134,30 +136,34 @@ impl Maker for Zone {
         self.made = true;
         let seed = self.seed;
         let mut st = Stretch::default();
-        // The ground: one solid height map, drawn with grass on gentle
-        // slopes and earth on steep ones.
-        let mut g = Shape::default();
+        // The ground: a height map, drawn with grass on gentle slopes and
+        // earth on steep ones, in square pieces (only those in view are drawn).
         let h = |x: f32, z: f32| height(seed, x, z);
-        for i in 0..=CELLS {
-            for j in 0..=CELLS {
-                let (x, z) = (j as f32 * CELL, i as f32 * CELL);
-                let y = h(x, z);
-                let n = vec3(h(x - 1.0, z) - h(x + 1.0, z), 2.0, h(x, z - 1.0) - h(x, z + 1.0)).normalize();
-                let steep = ((1.0 - n.y) * 4.0).clamp(0.0, 1.0);
-                let tint = Color::new(1.0, 1.0 - steep * 0.25, 1.0 - steep * 0.6, 1.0);
-                let tint = if y > 30.0 { Color::new(0.85, 0.8, 0.75, 1.0) } else { tint };
-                g.vertex(vec3(x, y, z), n, vec2(x / 8.0, z / 8.0), tint);
+        for ci in (0..CELLS).step_by(CHUNK) {
+            for cj in (0..CELLS).step_by(CHUNK) {
+                let mut g = Shape::default();
+                for i in ci..=ci + CHUNK {
+                    for j in cj..=cj + CHUNK {
+                        let (x, z) = (j as f32 * CELL, i as f32 * CELL);
+                        let y = h(x, z);
+                        let n = vec3(h(x - 1.0, z) - h(x + 1.0, z), 2.0, h(x, z - 1.0) - h(x, z + 1.0)).normalize();
+                        let steep = ((1.0 - n.y) * 4.0).clamp(0.0, 1.0);
+                        let tint = Color::new(1.0, 1.0 - steep * 0.25, 1.0 - steep * 0.6, 1.0);
+                        let tint = if y > 30.0 { Color::new(0.85, 0.8, 0.75, 1.0) } else { tint };
+                        g.vertex(vec3(x, y, z), n, vec2(x / 8.0, z / 8.0), tint);
+                    }
+                }
+                let row = (CHUNK + 1) as u32;
+                for i in 0..CHUNK as u32 {
+                    for j in 0..CHUNK as u32 {
+                        let a = i * row + j;
+                        g.tri(a, a + row + 1, a + 1);
+                        g.tri(a, a + row, a + row + 1);
+                    }
+                }
+                st.ground.push((g, Skin::Grass));
             }
         }
-        let row = (CELLS + 1) as u32;
-        for i in 0..CELLS as u32 {
-            for j in 0..CELLS as u32 {
-                let a = i * row + j;
-                g.tri(a, a + row + 1, a + 1);
-                g.tri(a, a + row, a + row + 1);
-            }
-        }
-        st.ground.push((g, Skin::Grass));
         let c = SIZE / 2.0;
         let base = |x: f32, z: f32| vec3(x, h(x, z), z);
 

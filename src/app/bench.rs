@@ -17,12 +17,14 @@ struct Scene {
     setup: fn(&mut App),
 }
 
-const SCENES: [Scene; 5] = [
+const SCENES: [Scene; 7] = [
     Scene { name: "400 shapes", setup: shapes },
     Scene { name: "Sand and water", setup: sand },
     Scene { name: "Night storm", setup: night_storm },
     Scene { name: "Ragdolls", setup: ragdolls },
     Scene { name: "Sonic endless run", setup: sonic_run },
+    Scene { name: "3D run", setup: run_3d },
+    Scene { name: "3D zone, 60 things", setup: zone_3d },
 ];
 
 /// One scene's numbers.
@@ -97,8 +99,10 @@ impl App {
 
     /// End of a frame: count it, and move on to the next scene (or finish).
     pub(super) fn bench_end(&mut self) {
-        let bodies = self.world.bodies.len();
-        let awake = self.world.islands.active_dynamic_bodies().len();
+        let (bodies, awake) = match &self.three {
+            Some(t) => (t.world.phys.bodies.len(), t.world.phys.awake()),
+            None => (self.world.bodies.len(), self.world.islands.active_dynamic_bodies().len()),
+        };
         let Some(b) = &mut self.bench else { return };
         let now = Instant::now();
         if let Some(start) = b.began.take() {
@@ -131,6 +135,18 @@ impl App {
             print_report(&b.reports, (screen_width(), screen_height()));
         }
     }
+}
+
+/// What the benchmark's hands do in the 3D mode on `frame`: run on, and
+/// in the zone drop things for a while, then blow them up.
+pub(super) fn hands_3d(frame: u32, zone: bool) -> crate::three::world::Input {
+    let mut i = crate::three::world::Input { stick: vec2(0.0, 1.0), ..Default::default() };
+    if zone {
+        i.stick = vec2(0.35, 1.0);
+        i.spawn = frame < 240 && frame.is_multiple_of(4);
+        i.blast = frame == 300;
+    }
+    i
 }
 
 fn ms(d: Duration) -> f32 {
@@ -197,6 +213,7 @@ fn stats(v: &[f32]) -> (f32, f32, f32) {
 
 /// An empty arena of the usual size, by day, without weather or water.
 fn fresh(app: &mut App) {
+    app.three = None;
     app.end_endless();
     app.clear_objects();
     app.rings.clear();
@@ -267,6 +284,16 @@ fn sonic_run(app: &mut App) {
     if let Some(i) = crate::library::examples::ALL.iter().position(|e| e.name == "Endless run") {
         app.open_example(i);
     }
+}
+
+fn run_3d(app: &mut App) {
+    fresh(app);
+    app.play_3d_seeded(false, 0x5eed);
+}
+
+fn zone_3d(app: &mut App) {
+    app.three = None;
+    app.play_3d_seeded(true, 7);
 }
 
 #[cfg(test)]

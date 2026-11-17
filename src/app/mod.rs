@@ -2298,7 +2298,15 @@ impl App {
         self.spawner.draw(&self.s, m);
         self.drawer.draw(&self.s, top, m, np.is_some());
         self.hud.draw(&self.hud_state(), m);
-        self.toasts.draw(top, &self.jobs, dt);
+        // Messages go below an editor's bar, not under it.
+        let toasts_top = if self.editor_view().is_some() {
+            crate::ui::editor_bar::bottom(top)
+        } else if self.level_view().is_some_and(|v| !v.testing) {
+            crate::ui::level_bar::bottom(top)
+        } else {
+            top
+        };
+        self.toasts.draw(toasts_top, &self.jobs, dt);
         self.inspector.draw(self.inspected().as_ref(), m);
         self.menu.draw(m);
         self.picker.draw(self.s.tool, m);

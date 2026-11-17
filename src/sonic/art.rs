@@ -250,6 +250,8 @@ fn body(f: &Frame, s: &Sonic, l: &Look, t_now: f32) {
     let phase = s.stride;
     let air = !s.grounded || s.climbing.is_some() || s.climb_up.is_some();
     let swinging = s.hammer.filter(|_| !s.hammer_air).map(|h| (h as f32 / 22.0).min(1.0));
+    // Hit, or done for: thrown back with arms and legs flung out.
+    let thrown = s.hurt || s.dead;
 
     // Behind the body: Tails' tails, Knuckles' dreadlocks.
     if ch == Character::Tails {
@@ -260,7 +262,9 @@ fn body(f: &Frame, s: &Sonic, l: &Look, t_now: f32) {
     // Back arm (behind the body).
     let swing = if walking { phase.sin() } else { 0.0 };
     let shoulder = t(-1.0, -1.0);
-    let back_hand = if swinging.is_some() || s.gliding.is_some() {
+    let back_hand = if thrown {
+        t(-11.0, -20.0)
+    } else if swinging.is_some() || s.gliding.is_some() {
         t(5.0, -14.0)
     } else if air {
         t(-4.0, -14.0)
@@ -269,6 +273,7 @@ fn body(f: &Frame, s: &Sonic, l: &Look, t_now: f32) {
     } else {
         t(-3.0 - swing * 6.0, 7.0)
     };
+    let shoulder = if thrown { t(-2.0, -3.0) } else { shoulder };
     f.line(shoulder, back_hand, 2.4, l.skin);
     f.circle(back_hand.0, back_hand.1, if ch == Character::Knuckles { 3.6 } else { 2.6 }, WHITE_);
 
@@ -286,7 +291,9 @@ fn body(f: &Frame, s: &Sonic, l: &Look, t_now: f32) {
             shoe(f, l, foot, 0.0, 0.8);
         }
     } else {
-        let feet = if s.gliding.is_some() || s.sliding {
+        let feet = if thrown {
+            [t(-8.0, 16.0), t(7.0, 17.0)]
+        } else if s.gliding.is_some() || s.sliding {
             [t(-3.0, 19.0), t(2.0, 20.0)]
         } else if air {
             [t(-3.0, 18.0), t(4.0, 19.0)]
@@ -398,11 +405,19 @@ fn body(f: &Frame, s: &Sonic, l: &Look, t_now: f32) {
     } else {
         INK
     };
-    if !exe {
+    if s.dead && !exe {
+        // Done for: crossed-out eye.
+        let (a, b) = (q(5.0, -13.5), q(9.0, -8.5));
+        let (c, d) = (q(5.0, -8.5), q(9.0, -13.5));
+        f.line(a, b, 1.3, INK);
+        f.line(c, d, 1.3, INK);
+    } else if !exe {
         f.ellipse(pupil.0, pupil.1, 1.4, 2.4, lean, iris);
     }
     // Front arm.
-    let front_hand = if let Some(k) = swinging {
+    let front_hand = if thrown {
+        t(12.0, -19.5)
+    } else if let Some(k) = swinging {
         // Up behind her head, then down in front.
         let a = -2.4 + k * 2.6;
         t(2.0 + a.cos() * 10.0, -2.0 + a.sin() * 10.0)
@@ -419,7 +434,7 @@ fn body(f: &Frame, s: &Sonic, l: &Look, t_now: f32) {
     } else {
         t(3.0 + swing * 6.0, 7.0)
     };
-    let fs = t(2.0, 0.0);
+    let fs = if thrown { t(3.0, -3.0) } else { t(2.0, 0.0) };
     f.line(fs, front_hand, 2.4, l.skin);
     if let Some(k) = swinging {
         hammer(f, front_hand, -2.4 + k * 2.6 + 0.3);

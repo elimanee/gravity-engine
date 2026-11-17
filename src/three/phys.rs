@@ -164,6 +164,11 @@ impl Phys {
         }
     }
 
+    /// How many bodies are moving (not asleep).
+    pub fn awake(&self) -> usize {
+        self.islands.active_dynamic_bodies().len()
+    }
+
     pub fn step(&mut self) {
         self.pipeline.step(
             &self.gravity,

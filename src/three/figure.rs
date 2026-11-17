@@ -37,6 +37,8 @@ pub struct Figure {
     leg: [Vec<Mesh>; 2],
     ball: Vec<Mesh>,
     extra: Vec<Mesh>,
+    /// Amy's hammer, held in her right hand (drawn while she swings it).
+    hammer: Vec<Mesh>,
     shoulder: [Vec3; 2],
     hip: [Vec3; 2],
 }
@@ -224,7 +226,40 @@ impl Figure {
             ball.append(&spike(out * 0.36, out * 0.7 - tangent, 0.32, 0.14, l.main), Mat4::IDENTITY);
         }
         ball.append(&sphere(vec3(0.3, 0.1, 0.0), vec3(0.14, 0.12, 0.18), 5, 6, l.skin), Mat4::IDENTITY);
-        Figure { body: body.meshes(None), arm, leg, ball: ball.meshes(None), extra: extra.meshes(None), shoulder, hip }
+        // The hammer: a handle down from the hand along the arm, the head
+        // at its end.
+        let hammer = if matches!(c, Character::Amy) {
+            let hand = shoulder[1] + vec3(0.02, -0.42, 0.0);
+            let mut h = cylinder(hand, -0.05, 0.65, 0.035, 0.035, 6, Color::new(0.55, 0.35, 0.2, 1.0));
+            let head = hand + vec3(0.0, 0.72, 0.0);
+            h.append(
+                &cuboid(head - vec3(0.2, 0.17, 0.32), head + vec3(0.2, 0.17, 0.32), Color::new(0.9, 0.15, 0.2, 1.0)),
+                Mat4::IDENTITY,
+            );
+            for z in [-0.34f32, 0.34] {
+                h.append(
+                    &cuboid(
+                        head + vec3(-0.21, -0.18, z - 0.03),
+                        head + vec3(0.21, 0.18, z + 0.03),
+                        Color::new(1.0, 0.8, 0.15, 1.0),
+                    ),
+                    Mat4::IDENTITY,
+                );
+            }
+            h.meshes(None)
+        } else {
+            vec![]
+        };
+        Figure {
+            body: body.meshes(None),
+            arm,
+            leg,
+            ball: ball.meshes(None),
+            extra: extra.meshes(None),
+            hammer,
+            shoulder,
+            hip,
+        }
     }
 
     /// Draw at `place` (model space to world: feet at its origin).
@@ -257,6 +292,9 @@ impl Figure {
             };
             draw_at(&self.arm[k], base * pivot(self.shoulder[k], arm));
             draw_at(&self.leg[k], base * pivot(self.hip[k], leg));
+            if k == 1 && pose.hammer.is_some() {
+                draw_at(&self.hammer, base * pivot(self.shoulder[k], arm));
+            }
         }
     }
 }

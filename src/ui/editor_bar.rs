@@ -9,6 +9,11 @@ use macroquad::prelude::*;
 
 const W: f32 = 600.0;
 const H: f32 = 98.0;
+
+/// Where the bar ends (the bottom of its panel) when it hangs below `top`.
+pub fn bottom(top: f32) -> f32 {
+    top.max(10.0) + 6.0 + H
+}
 const MAX_NAME: usize = 40;
 
 /// What the bar shows.

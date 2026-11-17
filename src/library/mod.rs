@@ -491,7 +491,7 @@ impl Challenge {
     pub fn scene(&self, sw: f32, sh: f32) -> SceneFile {
         let mut b = Builder::new(sw, sh);
         (self.build)(&mut b);
-        b.scene
+        by_day(b.scene)
     }
 }
 
@@ -499,8 +499,16 @@ impl Example {
     pub fn scene(&self, sw: f32, sh: f32) -> SceneFile {
         let mut b = Builder::new(sw, sh);
         (self.build)(&mut b);
-        b.scene
+        by_day(b.scene)
     }
+}
+
+/// A built-in scene that says nothing of the night or the weather is by
+/// day and clear (not left as the scene before had them).
+fn by_day(mut sc: SceneFile) -> SceneFile {
+    sc.night.get_or_insert(false);
+    sc.weather.get_or_insert(crate::weather::Weather::Clear);
+    sc
 }
 
 /// The challenge ball: a pinned golden circle released by "Go".
@@ -525,6 +533,8 @@ mod tests {
         for e in examples::ALL {
             let sc = e.scene(1100.0, 720.0);
             assert!(!sc.objects.is_empty() || sc.endless, "{} is empty", e.name);
+            // Each says how the sky is: none takes the last one's night or rain.
+            assert!(sc.night.is_some() && sc.weather.is_some(), "{} sets its sky", e.name);
             let json = serde_json::to_string(&sc).unwrap();
             assert!(serde_json::from_str::<SceneFile>(&json).is_ok(), "{} round-trips", e.name);
         }
@@ -542,6 +552,7 @@ mod tests {
                 c.name
             );
             assert_eq!(sc.zones.iter().filter(|z| z.kind == ZoneKind::Goal).count(), 1, "{} has one goal", c.name);
+            assert!(sc.night.is_some() && sc.weather.is_some(), "{} sets its sky", c.name);
         }
     }
 
