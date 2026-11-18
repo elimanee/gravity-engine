@@ -2100,7 +2100,16 @@ impl App {
         let m = input.world;
         let span = crate::profile::span("draw/background");
         if self.game.is_some() || self.level_editor.is_some() {
-            crate::background::level_sky(sw, sh, self.camera.center.x, &self.level_sky());
+            // The zone sheet's backdrop by day, if it has one; else the
+            // game's own sky (under it while one turns into the other).
+            let (scroll, day) = (self.camera.center.x, self.day_weight());
+            let zone = self.sonic_sheet.zone.as_ref().filter(|z| z.pics("sky").is_some());
+            if zone.is_none() || day < 1.0 {
+                crate::background::level_sky(sw, sh, scroll, &self.level_sky());
+            }
+            if let Some(z) = zone.filter(|_| day > 0.0) {
+                crate::game::art::zone_backdrop(z, sw, sh, scroll, get_time() as f32, day);
+            }
         } else {
             self.bg.draw(sw, sh);
         }

@@ -16,7 +16,8 @@ A 2D physics sandbox (Rust, macroquad 0.4, rapier2d) that grew a Sonic game
 ## Never commit other people's assets
 
 The owner plays with Sega / fan sprite sheets (Sonic, Tails, Knuckles, Amy,
-Sonic.exe, the Green Hill Zone objects sheet…) and 3D model packs (SRB2 MD3
+Sonic.exe, the Green Hill Zone objects sheet, NinjaCakes' Green Hill-style
+tileset…) and 3D model packs (SRB2 MD3
 packs such as Jeck Jims', which also hold Mario and others; 2011X's
 Sonic.exe "RAGE" model). **None of them may go into the repository, its
 releases, its docs or its tests**, not even resized or cropped.

@@ -1174,12 +1174,14 @@ fn prepare_zone(dir: &Path) -> Result<Option<Prepared>, String> {
     let original = image::open(&path).map_err(|e| e.to_string())?.to_rgba8();
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     let mut img = original.clone();
-    let known = img.dimensions() == super::zone::GHZ_SIZE;
-    let (background, anims) = if known {
-        clear_background(&mut img, &super::zone::GHZ_BACKGROUND);
-        (super::zone::GHZ_BACKGROUND.to_vec(), super::zone::ghz())
-    } else {
-        (vec![], HashMap::new())
+    let layout = super::zone::known(img.dimensions());
+    let known = layout.is_some();
+    let (background, anims) = match layout {
+        Some((background, anims)) => {
+            clear_background(&mut img, &background);
+            (background, anims)
+        }
+        None => (vec![], HashMap::new()),
     };
     Ok(Some(Prepared { original, image: img, background, soft: false, scale: 1.0, name, anims, known }))
 }
@@ -1483,7 +1485,7 @@ impl Sheet {
             std::fs::copy(png, dir.join(name)).map_err(|e| e.to_string())?;
             return Ok(name.to_string());
         }
-        if size == super::zone::GHZ_SIZE {
+        if super::zone::known(size).is_some() {
             std::fs::copy(png, dir.join(ZONE_FILE)).map_err(|e| e.to_string())?;
             return Ok(ZONE_FILE.to_string());
         }
@@ -1608,6 +1610,12 @@ impl Sheet {
     /// Picture `pic` with its centre at `at` (world px).
     pub fn put(&self, pic: Pic, at: Vec2) {
         self.blit_with(&self.texture, pic, at, 1.0, 0.0, WHITE);
+    }
+
+    /// The part `src` of the sheet drawn over `dest` (any size), tinted.
+    pub fn put_over(&self, src: Rect, dest: Rect, tint: Color) {
+        let params = DrawTextureParams { source: Some(src), dest_size: Some(dest.size()), ..Default::default() };
+        draw_texture_ex(&self.texture, dest.x, dest.y, tint, params);
     }
 
     /// The part `src` of the sheet, its top-left at `at` (world px).

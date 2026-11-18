@@ -309,6 +309,19 @@ impl App {
         }
     }
 
+    /// How much the sky is a bright day (where the zone's sheet has its
+    /// backdrop drawn): 1 in the meadows, 0 elsewhere, between while it turns.
+    pub(super) fn day_weight(&self) -> f32 {
+        let day = |s: &LevelSky| if *s == LevelSky::DAY { 1.0 } else { 0.0 };
+        match &self.endless {
+            Some(e) => {
+                let to = ZONES.get(e.zone).map_or(1.0, |z| day(&z.sky));
+                day(&e.sky_from) * (1.0 - e.sky_t) + to * e.sky_t
+            }
+            None => day(&self.level_sky()),
+        }
+    }
+
     /// Entering a zone: its sky, weather and water.
     fn endless_zone(&mut self, step: f32) {
         let sky = self.level_sky();

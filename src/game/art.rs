@@ -753,8 +753,21 @@ fn zone_things(th: &things::Things, z: &Sheet) {
         }
     }
     if let Some(wall) = first("wall") {
+        // Its picture, repeated over the wall as many times as it takes.
+        let (pw, ph) = (wall.src.w * k, wall.src.h * k);
         for w in &th.walls {
-            z.put(wall, w.pos);
+            let top_left = w.pos - WALL / 2.0;
+            let mut y = 0.0;
+            while y < WALL.y - 0.5 {
+                let mut x = 0.0;
+                while x < WALL.x - 0.5 {
+                    let (cw, ch) = ((WALL.x - x).min(pw), (WALL.y - y).min(ph));
+                    let src = Rect::new(wall.src.x, wall.src.y, cw / k, ch / k);
+                    z.put_part(src, top_left + vec2(x, y));
+                    x += pw;
+                }
+                y += ph;
+            }
         }
     }
     if let Some(frames) = z.pics("spike_log") {
@@ -772,8 +785,63 @@ fn zone_things(th: &things::Things, z: &Sheet) {
         }
     }
     if let Some(rock) = first("rock") {
+        // As big as the rock (keeping its shape), sitting on the ground.
+        let s = (ROCK.x / rock.src.w).min(ROCK.y / rock.src.h);
+        let size = rock.src.size() * s;
         for r in &th.rocks {
-            z.put(rock, r.pos);
+            let at = vec2(r.pos.x - size.x / 2.0, r.pos.y + ROCK.y / 2.0 - size.y);
+            z.put_over(rock.src, Rect::new(at.x, at.y, size.x, size.y), WHITE);
         }
     }
+}
+
+/// The zone's backdrop behind a level, when its sheet has one (else false):
+/// the sky, clouds, hills and islands from the back, each repeated across
+/// and scrolling slower the further it is (`scroll`: the camera, world px),
+/// the sea below the horizon, moving; `a`: how much it shows (turning to
+/// another zone's sky).
+pub fn zone_backdrop(z: &Sheet, sw: f32, sh: f32, scroll: f32, t: f32, a: f32) -> bool {
+    let first = |name: &str| z.pics(name).and_then(|p| p.first().copied());
+    let Some(sky) = first("sky") else { return false };
+    let tint = Color::new(1.0, 1.0, 1.0, a);
+    // Sheet px to the screen: as the games show them, two to one at 720.
+    let s = (sh / 360.0).max(1.0);
+    let horizon = (sh * 0.74).round();
+    // One layer, its bottom at `bottom`, repeated across from `off`.
+    let layer = |src: Rect, bottom: f32, off: f32| {
+        let (w, h) = (src.w * s, src.h * s);
+        let mut x = -(off.rem_euclid(w));
+        while x < sw {
+            z.put_over(src, Rect::new(x.floor(), (bottom - h).floor(), w.ceil() + 1.0, h.ceil()), tint);
+            x += w;
+        }
+    };
+    // Above the sky picture, its top row's colour.
+    let sky_bottom = horizon - 40.0 * s;
+    let top = Rect::new(sky.src.x, sky.src.y, sky.src.w, 1.0);
+    let sky_top = sky_bottom - sky.src.h * s;
+    if sky_top > 0.0 {
+        z.put_over(top, Rect::new(0.0, 0.0, sw, sky_top + 1.0), tint);
+    }
+    layer(sky.src, sky_bottom, scroll * 0.02);
+    if let Some(c) = first("clouds") {
+        layer(c.src, sky_bottom, scroll * 0.05 + t * 6.0);
+    }
+    if let Some(h) = first("hills") {
+        layer(h.src, horizon - 4.0 * s, scroll * 0.12);
+    }
+    if let Some(i) = first("islands") {
+        layer(i.src, horizon, scroll * 0.22);
+    }
+    // The sea: its pictures in turn, down to the bottom.
+    if let Some(frames) = z.pics("sea") {
+        let f = frames[(t * 6.0) as usize % frames.len()];
+        let (w, h) = (f.src.w * s, (f.src.h * s).max(sh - horizon));
+        let mut x = -((scroll * 0.3).rem_euclid(w));
+        while x < sw {
+            z.put_over(f.src, Rect::new(x.floor(), horizon, w.ceil() + 1.0, h), tint);
+            x += w;
+        }
+    }
+    true
 }
