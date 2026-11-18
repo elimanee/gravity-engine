@@ -9,6 +9,75 @@ use super::sheet::{Anim, Pic};
 use macroquad::prelude::{vec2, Rect};
 use std::collections::HashMap;
 
+/// The side of a tileset's pieces (sheet px).
+pub const PIECE: u32 = 8;
+
+/// A column of a tileset's terrain: its pieces from the top down (each a
+/// piece's top-left on the sheet). The ground's top line is the top of
+/// `top`; above it the grass sticks out (tall grass, a tuft), below it the
+/// earth goes on down: `earth` (or a plain colour where the set has none)
+/// and `under`, again and again.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Column {
+    pub tall: [Option<(u32, u32)>; 2],
+    pub tuft: Option<(u32, u32)>,
+    pub top: (u32, u32),
+    pub earth: Option<(u32, u32)>,
+    pub under: (u32, u32),
+    /// Where the set has no `earth` piece: the colour it is.
+    pub plain: [u8; 4],
+}
+
+/// A tileset's terrain: its columns, which go side by side in order (and
+/// round again); and a piece all grass, where tall grass has no tuft under.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Terrain {
+    pub columns: Vec<Column>,
+    pub grass: Option<(u32, u32)>,
+}
+
+/// NinjaCakes' terrain: 26 columns of pieces a pixel apart (its "main
+/// tiles", which its "grouped" strip shows put together), from the sheet
+/// with its background cleared (a piece is there when it is not all clear).
+pub fn ninja_terrain(img: &image::RgbaImage) -> Option<Terrain> {
+    if img.dimensions() != NINJA_SIZE {
+        return None;
+    }
+    let there = |x: u32, y: u32| {
+        (y..y + PIECE).any(|py| (x..x + PIECE).any(|px| img.get_pixel(px, py)[3] > 0)).then_some((x, y))
+    };
+    let full = |x: u32, y: u32| (y..y + PIECE).all(|py| (x..x + PIECE).all(|px| img.get_pixel(px, py)[3] > 0));
+    // Rows: tall grass (two), tufts, grass into earth, earth, earth into
+    // the next colour.
+    let [t2, t1, tuft, top, earth, under] = [40, 49, 58, 67, 76, 85];
+    let columns: Option<Vec<Column>> = (0..26)
+        .map(|i| {
+            let x = 10 + 9 * i;
+            let under = there(x, under)?;
+            // The colour most of the top row of `under` is.
+            let mut counts: Vec<([u8; 4], usize)> = vec![];
+            for px in x..x + PIECE {
+                let c = img.get_pixel(px, under.1).0;
+                match counts.iter_mut().find(|(k, _)| *k == c) {
+                    Some((_, n)) => *n += 1,
+                    None => counts.push((c, 1)),
+                }
+            }
+            let plain = counts.iter().max_by_key(|(_, n)| *n).map_or([0, 0, 0, 255], |(c, _)| *c);
+            Some(Column {
+                tall: [there(x, t2), there(x, t1)],
+                tuft: there(x, tuft),
+                top: there(x, top)?,
+                earth: there(x, earth),
+                under,
+                plain,
+            })
+        })
+        .collect();
+    let grass = (0..26).map(|i| 10 + 9 * i).find(|&x| full(x, tuft)).map(|x| (x, tuft));
+    Some(Terrain { columns: columns?, grass })
+}
+
 /// The tiles a zone's sheet can have, and what each is for.
 pub const TILES: &[(&str, &str)] = &[
     ("grass", "The ground's top, along it (the cross: where the ground is)"),
@@ -167,6 +236,30 @@ mod tests {
         assert_eq!(g["spike_log"].pics.len(), 8, "an eighth of a turn each");
         let n = ninja();
         let backdrop = ["sky", "clouds", "hills", "islands", "sea"];
+        // Its terrain: 26 columns found on the sheet, a pixel apart.
+        let mut img = image::RgbaImage::new(NINJA_SIZE.0, NINJA_SIZE.1);
+        let mut paint = |x: u32, y: u32, c: [u8; 4]| {
+            for py in y..y + PIECE {
+                for px in x..x + PIECE {
+                    img.put_pixel(px, py, image::Rgba(c));
+                }
+            }
+        };
+        for i in 0..26 {
+            let x = 10 + 9 * i;
+            paint(x, 67, [0, 200, 0, 255]);
+            paint(x, 85, [240, 120, 0, 255]);
+            if i % 2 == 0 {
+                paint(x, 76, [90, 40, 0, 255]);
+            }
+        }
+        paint(10 + 9 * 13, 58, [0, 150, 0, 255]);
+        let t = ninja_terrain(&img).unwrap();
+        assert_eq!(t.columns.len(), 26);
+        assert_eq!((t.columns[0].earth, t.columns[1].earth), (Some((10, 76)), None));
+        assert_eq!((t.columns[1].plain, t.columns[13].tuft), ([240, 120, 0, 255], Some((127, 58))));
+        assert_eq!(t.grass, Some((127, 58)), "a tuft all grass, for under the tall grass");
+        assert!(ninja_terrain(&image::RgbaImage::new(10, 10)).is_none());
         assert!(backdrop.iter().chain(&SCENERY).all(|t| n.contains_key(*t)), "the tileset's backdrop and scenery");
         assert_eq!(n["sea"].pics.len(), 6);
         // The backdrop's layers repeat across: as wide as each other.

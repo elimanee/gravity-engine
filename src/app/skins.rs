@@ -9,6 +9,7 @@
 use super::*;
 use crate::physics::object::Skin;
 use crate::sonic::sheet::{Pic, Sheet};
+use crate::sonic::zone::{Terrain, PIECE};
 use image::{Rgba, RgbaImage};
 
 /// A tile of the zone's picture, `k` world px a pixel of it.
@@ -270,6 +271,167 @@ pub fn bake_platform(line: &[Vec2], thick: f32, tile: Tile) -> Option<(RgbaImage
     Some((img, Rect::new(x0, y0, w as f32, h as f32)))
 }
 
+/// A pixel of a tileset's terrain, `d` sheet px below the ground's top in
+/// sheet column `u` (counted over the whole world, so pieces line up): the
+/// columns side by side, each its pieces from the top down; tall grass in
+/// some stretches only. None: nothing there.
+fn terrain_px(t: &Terrain, img: &RgbaImage, u: i64, d: i64) -> Option<Rgba<u8>> {
+    let piece = PIECE as i64;
+    let n = t.columns.len() as i64;
+    if n == 0 {
+        return None;
+    }
+    let c = &t.columns[u.div_euclid(piece).rem_euclid(n) as usize];
+    // Tall grass in about half the stretches the columns make, the same
+    // every time.
+    let tall = hash(u.div_euclid(piece * n)).is_multiple_of(2);
+    let (x, y) = (u.rem_euclid(piece) as u32, d.rem_euclid(piece) as u32);
+    let at = |p: (u32, u32)| {
+        let px = *img.get_pixel(p.0 + x, p.1 + y);
+        (px[3] > 0).then_some(px)
+    };
+    match d.div_euclid(piece) {
+        -3 if tall => c.tall[0].and_then(at),
+        -2 if tall => c.tall[1].and_then(at),
+        -1 => match (c.tuft, tall && c.tall[1].is_some()) {
+            (Some(p), _) => at(p),
+            // Under tall grass, grass all the same.
+            (None, true) => t.grass.and_then(at),
+            (None, false) => None,
+        },
+        0 => at(c.top),
+        r if r > 0 && r % 2 == 1 => c.earth.map_or(Some(Rgba(c.plain)), at),
+        r if r > 0 => at(c.under),
+        _ => None,
+    }
+}
+
+/// Sheet px above the ground's top a tileset's terrain reaches (tall grass).
+const TERRAIN_ABOVE: i64 = 3 * PIECE as i64;
+
+/// The scenery, at `spots` (world px), put into a picture of sheet pixels
+/// whose top-left is sheet pixel (`u0`, `v0`), behind what is there.
+fn put_scenery(out: &mut RgbaImage, u0: i64, v0: i64, k: f32, scenery: &[Item], spots: &[(usize, Vec2)]) {
+    for &(i, at) in spots {
+        let (au, av) = ((at.x / k).round() as i64, (at.y / k).round() as i64);
+        for t in &scenery[i].tiles {
+            let (sx, sy) = (t.pic.src.x as i64, t.pic.src.y as i64);
+            let (left, top) = (au - t.pic.centre.x.round() as i64, av - t.pic.centre.y.round() as i64);
+            for j in 0..t.pic.src.h as i64 {
+                for i in 0..t.pic.src.w as i64 {
+                    let (x, y) = (left + i - u0, top + j - v0);
+                    if x < 0 || y < 0 || x >= out.width() as i64 || y >= out.height() as i64 {
+                        continue;
+                    }
+                    let (px, py) = ((sx + i) as u32, (sy + j) as u32);
+                    if px >= t.img.width() || py >= t.img.height() || out.get_pixel(x as u32, y as u32)[3] > 0 {
+                        continue;
+                    }
+                    let p = *t.img.get_pixel(px, py);
+                    if p[3] > 0 {
+                        out.put_pixel(x as u32, y as u32, p);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A piece of ground (its outline, world px) built from a tileset's
+/// terrain, piece by piece, `k` world px a sheet pixel: in sheet pixels
+/// (drawn `k` times bigger), each column of them down from the ground's top
+/// there, its scenery on it. Returns the picture and where it goes.
+pub fn bake_terrain(
+    poly: &[Vec2],
+    k: f32,
+    t: &Terrain,
+    img: &RgbaImage,
+    scenery: &[Item],
+) -> Option<(RgbaImage, Rect)> {
+    if poly.len() < 3 || k <= 0.0 {
+        return None;
+    }
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for p in poly {
+        (x0, y0, x1, y1) = (x0.min(p.x), y0.min(p.y), x1.max(p.x), y1.max(p.y));
+    }
+    let spots = scenery_spots(poly, x0, x1, scenery);
+    let tall = spots.iter().map(|&(i, _)| scenery[i].reach().2 / k).fold(0.0f32, f32::max).ceil() as i64;
+    let (u0, u1) = ((x0 / k).floor() as i64, (x1 / k).ceil() as i64);
+    let (v0, v1) = ((y0 / k).floor() as i64 - TERRAIN_ABOVE.max(tall), (y1 / k).ceil() as i64);
+    let (w, h) = ((u1 - u0) as u32, (v1 - v0) as u32);
+    if w == 0 || h == 0 || w > 8192 || h > 8192 {
+        return None;
+    }
+    // The ground's top in each sheet column (whole sheet px).
+    let tops: Vec<Option<i64>> =
+        (u0..u1).map(|u| top_at(poly, (u as f32 + 0.5) * k).map(|y| (y / k).round() as i64)).collect();
+    let mut out = RgbaImage::new(w, h);
+    for v in v0..v1 {
+        let spans = spans_at(poly, (v as f32 + 0.5) * k);
+        for (i, top) in tops.iter().enumerate() {
+            let Some(top) = *top else { continue };
+            let u = u0 + i as i64;
+            let d = v - top;
+            let cx = (u as f32 + 0.5) * k;
+            // Below the top, only inside the ground; above, its grass.
+            let inside = spans.iter().any(|&(a, b)| cx >= a && cx < b);
+            if (d >= 0 && !inside) || d < -TERRAIN_ABOVE {
+                continue;
+            }
+            if let Some(p) = terrain_px(t, img, u, d) {
+                out.put_pixel(i as u32, (v - v0) as u32, p);
+            }
+        }
+    }
+    put_scenery(&mut out, u0, v0, k, scenery, &spots);
+    Some((out, Rect::new(u0 as f32 * k, v0 as f32 * k, w as f32 * k, h as f32 * k)))
+}
+
+/// A ledge in the air along `line` (its centre line, world px), `thick`
+/// px thick, built from a tileset's terrain: its tufts, grass into earth
+/// and the piece under that, its top on the ledge's.
+pub fn bake_terrain_ledge(
+    line: &[Vec2],
+    thick: f32,
+    k: f32,
+    t: &Terrain,
+    img: &RgbaImage,
+) -> Option<(RgbaImage, Rect)> {
+    let (lo, hi) = line.iter().fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p.x), b.max(p.x)));
+    let top = line.iter().map(|p| p.y).fold(f32::MAX, f32::min) - thick / 2.0;
+    let (u0, u1) = (((lo - thick / 2.0) / k).floor() as i64, ((hi + thick / 2.0) / k).ceil() as i64);
+    let piece = PIECE as i64;
+    let vt = (top / k).round() as i64;
+    let (v0, v1) = (vt - piece, vt + 2 * piece);
+    let (w, h) = ((u1 - u0) as u32, (v1 - v0) as u32);
+    if w == 0 || w > 8192 || k <= 0.0 {
+        return None;
+    }
+    let mut out = RgbaImage::new(w, h);
+    for v in v0..v1 {
+        for u in u0..u1 {
+            // Its own tufts only (no tall grass on a ledge).
+            let d = v - vt;
+            let p = if d < 0 {
+                t.columns
+                    .get(u.div_euclid(piece).rem_euclid(t.columns.len().max(1) as i64) as usize)
+                    .and_then(|c| c.tuft)
+                    .and_then(|p| {
+                        let px = *img.get_pixel(p.0 + u.rem_euclid(piece) as u32, p.1 + d.rem_euclid(piece) as u32);
+                        (px[3] > 0).then_some(px)
+                    })
+            } else {
+                terrain_px(t, img, u, if d < piece { d } else { d + piece })
+            };
+            if let Some(p) = p {
+                out.put_pixel((u - u0) as u32, (v - v0) as u32, p);
+            }
+        }
+    }
+    Some((out, Rect::new(u0 as f32 * k, v0 as f32 * k, w as f32 * k, h as f32 * k)))
+}
+
 /// What `o` looks like with the zone's tiles (none: its own sprite).
 fn skin_for(o: &Object, world: &PhysWorld, zone: &Sheet) -> Option<(Texture2D, Rect)> {
     let img = zone.image.as_deref()?;
@@ -296,6 +458,20 @@ fn skin_for(o: &Object, world: &PhysWorld, zone: &Sheet) -> Option<(Texture2D, R
             Some(Item { tiles, weight })
         })
         .collect();
+    // A tileset's terrain, piece by piece, when the game knows it.
+    if let Some(t) = &zone.terrain {
+        let made = match o.material.skin {
+            Skin::Ground if d.closed => bake_terrain(&pts, zone.k(), t, img, &scenery),
+            Skin::Grass => return Some((Texture2D::empty(), Rect::default())),
+            Skin::Platform if !d.closed => {
+                bake_terrain_ledge(&pts, d.thickness * o.size.x.max(o.size.y), zone.k(), t, img)
+            }
+            _ => None,
+        };
+        let (img, r) = made?;
+        let texture = crate::sonic::sheet::upload(&img);
+        return Some((texture, Rect::new(r.x - pos.x, r.y - pos.y, r.w, r.h)));
+    }
     let made = match o.material.skin {
         Skin::Ground if d.closed => bake_ground(&pts, tile("ground")?, tile("grass"), &scenery),
         // The ground draws the grass along it.
@@ -362,6 +538,57 @@ mod tests {
         let (pic, r) = bake_platform(&line, 4.0, grass_tile).unwrap();
         assert_eq!(r, Rect::new(98.0, 47.0, 12.0, 2.0));
         assert_eq!(pic.get_pixel(1, 1).0, grass);
+    }
+
+    /// A tileset of 8 × 8 pieces, each one colour: two columns.
+    fn little_terrain() -> (RgbaImage, Terrain) {
+        use crate::sonic::zone::Column;
+        let mut img = RgbaImage::new(48, 8);
+        let colours = [[0, 200, 0, 255], [90, 40, 0, 255], [240, 120, 0, 255], [0, 150, 0, 255]];
+        for (k, c) in colours.iter().enumerate() {
+            for y in 0..8 {
+                for x in 0..8 {
+                    img.put_pixel(k as u32 * 8 + x, y, Rgba(*c));
+                }
+            }
+        }
+        let (top, earth, under, tuft) = ((0, 0), (8, 0), (16, 0), (24, 0));
+        let columns = vec![
+            Column { tall: [None, None], tuft: Some(tuft), top, earth: Some(earth), under, plain: [1, 2, 3, 255] },
+            Column { tall: [None, None], tuft: None, top, earth: None, under, plain: [1, 2, 3, 255] },
+        ];
+        (img, Terrain { columns, grass: None })
+    }
+
+    #[test]
+    fn a_tileset_terrain_is_built_piece_by_piece_down_from_the_top() {
+        let (img, t) = little_terrain();
+        let k = 1.5;
+        // A flat block whose top is at 150 world px (100 sheet px).
+        let poly = [vec2(0.0, 150.0), vec2(48.0, 150.0), vec2(48.0, 300.0), vec2(0.0, 300.0)];
+        let (pic, r) = bake_terrain(&poly, k, &t, &img, &[]).unwrap();
+        // In sheet pixels, drawn k times bigger, on the sheet's grid.
+        assert_eq!(pic.width(), 32);
+        assert_eq!((r.x, r.y, r.w), (0.0, (100 - TERRAIN_ABOVE) as f32 * k, 48.0));
+        let at = |u: u32, d: i64| pic.get_pixel(u, (TERRAIN_ABOVE + d) as u32).0;
+        // Column 0: its top, earth, under, earth…; a tuft above.
+        assert_eq!(
+            [at(3, 0), at(3, 8), at(3, 16), at(3, 24)],
+            [img.get_pixel(0, 0).0, [90, 40, 0, 255], [240, 120, 0, 255], [90, 40, 0, 255]]
+        );
+        assert_eq!(at(3, -1), [0, 150, 0, 255], "its tuft above the ground's top");
+        // Column 1 has no earth piece: its plain colour; nothing above.
+        assert_eq!((at(12, 8), at(12, -1)[3]), ([1, 2, 3, 255], 0));
+        // Then the columns go round.
+        assert_eq!(at(19, -1), [0, 150, 0, 255]);
+        // A ledge: tufts, the top, the piece under.
+        let line = [vec2(0.0, 60.0), vec2(48.0, 60.0)];
+        let (pic, r) = bake_terrain_ledge(&line, 6.0, k, &t, &img).unwrap();
+        assert_eq!((pic.height(), r.y), (24, (38 - 8) as f32 * k));
+        assert_eq!(
+            [pic.get_pixel(2, 7).0, pic.get_pixel(2, 8).0, pic.get_pixel(2, 16).0],
+            [[0, 150, 0, 255], [0, 200, 0, 255], [240, 120, 0, 255]]
+        );
     }
 
     #[test]

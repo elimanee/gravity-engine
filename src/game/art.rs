@@ -806,7 +806,7 @@ pub fn zone_backdrop(z: &Sheet, sw: f32, sh: f32, scroll: f32, t: f32, a: f32) -
     let tint = Color::new(1.0, 1.0, 1.0, a);
     // Sheet px to the screen: as the games show them, two to one at 720.
     let s = (sh / 360.0).max(1.0);
-    let horizon = (sh * 0.74).round();
+    let horizon = (sh * 0.64).round();
     // One layer, its bottom at `bottom`, repeated across from `off`.
     let layer = |src: Rect, bottom: f32, off: f32| {
         let (w, h) = (src.w * s, src.h * s);

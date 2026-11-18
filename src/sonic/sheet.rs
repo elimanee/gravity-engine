@@ -773,6 +773,8 @@ pub struct Sheet {
     pub name: String,
     /// The zone's picture as drawn, for its ground (none for a character).
     pub image: Option<std::rc::Rc<image::RgbaImage>>,
+    /// A tileset's terrain, built piece by piece (when the game knows it).
+    pub terrain: Option<super::zone::Terrain>,
 }
 
 /// The sheets of all the characters (each one optional), and the zone's.
@@ -1436,6 +1438,7 @@ impl Editable {
             scale: self.scale,
             name: self.name.clone(),
             image: (self.owner == Owner::Zone).then(|| std::rc::Rc::new(self.drawn(false))),
+            terrain: (self.owner == Owner::Zone).then(|| super::zone::ninja_terrain(&self.drawn(false))).flatten(),
         }
     }
 }
@@ -1470,8 +1473,9 @@ impl Sheet {
             return Err("no \"idle\" picture: give it one with Edit sprite regions…".into());
         }
         let texture = upload(&p.image);
+        let terrain = zone.then(|| super::zone::ninja_terrain(&p.image)).flatten();
         let image = zone.then(|| std::rc::Rc::new(p.image));
-        Ok(Some(Sheet { texture, super_texture, anims: p.anims, scale, name: p.name, image }))
+        Ok(Some(Sheet { texture, super_texture, anims: p.anims, scale, name: p.name, image, terrain }))
     }
 
     /// Copy a chosen sheet into the Sonic folder: as the character or the
