@@ -1438,7 +1438,7 @@ impl Editable {
             scale: self.scale,
             name: self.name.clone(),
             image: (self.owner == Owner::Zone).then(|| std::rc::Rc::new(self.drawn(false))),
-            terrain: (self.owner == Owner::Zone).then(|| super::zone::ninja_terrain(&self.drawn(false))).flatten(),
+            terrain: (self.owner == Owner::Zone).then(|| super::zone::terrain_for(&self.drawn(false))).flatten(),
         }
     }
 }
@@ -1473,7 +1473,7 @@ impl Sheet {
             return Err("no \"idle\" picture: give it one with Edit sprite regions…".into());
         }
         let texture = upload(&p.image);
-        let terrain = zone.then(|| super::zone::ninja_terrain(&p.image)).flatten();
+        let terrain = zone.then(|| super::zone::terrain_for(&p.image)).flatten();
         let image = zone.then(|| std::rc::Rc::new(p.image));
         Ok(Some(Sheet { texture, super_texture, anims: p.anims, scale, name: p.name, image, terrain }))
     }

@@ -9,7 +9,7 @@
 use super::*;
 use crate::physics::object::Skin;
 use crate::sonic::sheet::{Pic, Sheet};
-use crate::sonic::zone::{Terrain, PIECE};
+use crate::sonic::zone::Terrain;
 use image::{Rgba, RgbaImage};
 
 /// A tile of the zone's picture, `k` world px a pixel of it.
@@ -275,19 +275,23 @@ pub fn bake_platform(line: &[Vec2], thick: f32, tile: Tile) -> Option<(RgbaImage
 /// sheet column `u` (counted over the whole world, so pieces line up): the
 /// columns side by side, each its pieces from the top down; tall grass in
 /// some stretches only. None: nothing there.
-fn terrain_px(t: &Terrain, img: &RgbaImage, u: i64, d: i64) -> Option<Rgba<u8>> {
-    let piece = PIECE as i64;
+pub fn terrain_px(t: &Terrain, img: &RgbaImage, u: i64, d: i64) -> Option<Rgba<u8>> {
+    let piece = t.grid.piece.max(1) as i64;
     let n = t.columns.len() as i64;
     if n == 0 {
         return None;
     }
     let c = &t.columns[u.div_euclid(piece).rem_euclid(n) as usize];
-    // Tall grass in about half the stretches the columns make, the same
-    // every time.
-    let tall = hash(u.div_euclid(piece * n)).is_multiple_of(2);
+    // Tall grass in one stretch of the columns in so many, the same every
+    // time.
+    let tall = t.tall_every > 0 && hash(u.div_euclid(piece * n)).is_multiple_of(t.tall_every as u64);
     let (x, y) = (u.rem_euclid(piece) as u32, d.rem_euclid(piece) as u32);
     let at = |p: (u32, u32)| {
-        let px = *img.get_pixel(p.0 + x, p.1 + y);
+        let (px, py) = (p.0 + x, p.1 + y);
+        if px >= img.width() || py >= img.height() {
+            return None;
+        }
+        let px = *img.get_pixel(px, py);
         (px[3] > 0).then_some(px)
     };
     match d.div_euclid(piece) {
@@ -299,15 +303,17 @@ fn terrain_px(t: &Terrain, img: &RgbaImage, u: i64, d: i64) -> Option<Rgba<u8>> 
             (None, true) => t.grass.and_then(at),
             (None, false) => None,
         },
-        0 => at(c.top),
-        r if r > 0 && r % 2 == 1 => c.earth.map_or(Some(Rgba(c.plain)), at),
-        r if r > 0 => at(c.under),
+        0 => c.top.and_then(at),
+        r if r > 0 && r % 2 == 1 => c.earth.map_or((c.plain[3] > 0).then_some(Rgba(c.plain)), at),
+        r if r > 0 => c.under.and_then(at),
         _ => None,
     }
 }
 
 /// Sheet px above the ground's top a tileset's terrain reaches (tall grass).
-const TERRAIN_ABOVE: i64 = 3 * PIECE as i64;
+fn terrain_above(t: &Terrain) -> i64 {
+    3 * t.grid.piece.max(1) as i64
+}
 
 /// The scenery, at `spots` (world px), put into a picture of sheet pixels
 /// whose top-left is sheet pixel (`u0`, `v0`), behind what is there.
@@ -358,7 +364,8 @@ pub fn bake_terrain(
     let spots = scenery_spots(poly, x0, x1, scenery);
     let tall = spots.iter().map(|&(i, _)| scenery[i].reach().2 / k).fold(0.0f32, f32::max).ceil() as i64;
     let (u0, u1) = ((x0 / k).floor() as i64, (x1 / k).ceil() as i64);
-    let (v0, v1) = ((y0 / k).floor() as i64 - TERRAIN_ABOVE.max(tall), (y1 / k).ceil() as i64);
+    let above = terrain_above(t);
+    let (v0, v1) = ((y0 / k).floor() as i64 - above.max(tall), (y1 / k).ceil() as i64);
     let (w, h) = ((u1 - u0) as u32, (v1 - v0) as u32);
     if w == 0 || h == 0 || w > 8192 || h > 8192 {
         return None;
@@ -376,7 +383,7 @@ pub fn bake_terrain(
             let cx = (u as f32 + 0.5) * k;
             // Below the top, only inside the ground; above, its grass.
             let inside = spans.iter().any(|&(a, b)| cx >= a && cx < b);
-            if (d >= 0 && !inside) || d < -TERRAIN_ABOVE {
+            if (d >= 0 && !inside) || d < -above {
                 continue;
             }
             if let Some(p) = terrain_px(t, img, u, d) {
@@ -401,7 +408,7 @@ pub fn bake_terrain_ledge(
     let (lo, hi) = line.iter().fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p.x), b.max(p.x)));
     let top = line.iter().map(|p| p.y).fold(f32::MAX, f32::min) - thick / 2.0;
     let (u0, u1) = (((lo - thick / 2.0) / k).floor() as i64, ((hi + thick / 2.0) / k).ceil() as i64);
-    let piece = PIECE as i64;
+    let piece = t.grid.piece.max(1) as i64;
     let vt = (top / k).round() as i64;
     let (v0, v1) = (vt - piece, vt + 2 * piece);
     let (w, h) = ((u1 - u0) as u32, (v1 - v0) as u32);
@@ -552,12 +559,12 @@ mod tests {
                 }
             }
         }
-        let (top, earth, under, tuft) = ((0, 0), (8, 0), (16, 0), (24, 0));
+        let (top, earth, under, tuft) = (Some((0, 0)), Some((8, 0)), Some((16, 0)), Some((24, 0)));
         let columns = vec![
-            Column { tall: [None, None], tuft: Some(tuft), top, earth: Some(earth), under, plain: [1, 2, 3, 255] },
+            Column { tall: [None, None], tuft, top, earth, under, plain: [1, 2, 3, 255] },
             Column { tall: [None, None], tuft: None, top, earth: None, under, plain: [1, 2, 3, 255] },
         ];
-        (img, Terrain { columns, grass: None })
+        (img, Terrain { columns, grass: None, tall_every: 0, ..Terrain::default() })
     }
 
     #[test]
@@ -569,8 +576,9 @@ mod tests {
         let (pic, r) = bake_terrain(&poly, k, &t, &img, &[]).unwrap();
         // In sheet pixels, drawn k times bigger, on the sheet's grid.
         assert_eq!(pic.width(), 32);
-        assert_eq!((r.x, r.y, r.w), (0.0, (100 - TERRAIN_ABOVE) as f32 * k, 48.0));
-        let at = |u: u32, d: i64| pic.get_pixel(u, (TERRAIN_ABOVE + d) as u32).0;
+        let above = terrain_above(&t);
+        assert_eq!((r.x, r.y, r.w), (0.0, (100 - above) as f32 * k, 48.0));
+        let at = |u: u32, d: i64| pic.get_pixel(u, (above + d) as u32).0;
         // Column 0: its top, earth, under, earth…; a tuft above.
         assert_eq!(
             [at(3, 0), at(3, 8), at(3, 16), at(3, 24)],

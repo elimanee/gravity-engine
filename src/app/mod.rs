@@ -76,6 +76,7 @@ mod skins;
 mod soft;
 mod sonic;
 mod special;
+mod terrain;
 mod three;
 mod verify;
 mod weather;
@@ -193,6 +194,8 @@ pub struct App {
     /// tried, what to come back to.
     chars: Option<chars::CharEditor>,
     char_test: Option<chars::CharTest>,
+    /// The terrain editor (over the sprite region editor's Zone tab).
+    terrain_ed: Option<terrain::TerrainEditor>,
     /// The web version saves the settings as they change (closing the tab
     /// does not run `Drop`): what was saved last, and when to look again.
     autosaved: String,
@@ -340,6 +343,7 @@ impl App {
             sheet_prompt: None,
             chars: None,
             char_test: None,
+            terrain_ed: None,
             autosaved: String::new(),
             autosave_in: 2.0,
             game: None,
@@ -464,6 +468,11 @@ impl App {
             self.special_frame(dt);
             self.audio.tick();
             self.update_music();
+            return;
+        }
+        if self.terrain_ed.is_some() {
+            self.terrain_frame(dt);
+            self.audio.tick();
             return;
         }
         if self.region_test.is_some() && is_key_pressed(KeyCode::Escape) {

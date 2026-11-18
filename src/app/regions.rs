@@ -146,6 +146,8 @@ pub(super) enum Ask {
     OpenSheet(Owner),
     /// Play the character as edited.
     Try,
+    /// How the zone's tileset makes the ground (the terrain editor).
+    Terrain,
     /// Make a sheet of this character: as the game draws it, or (true)
     /// from the pictures its sheet uses.
     Generate(Character, bool),
@@ -233,6 +235,7 @@ enum Handle {
 enum Cmd {
     Owner(Owner),
     OpenSheet,
+    Terrain,
     Generate,
     Grid,
     Import,
@@ -1474,8 +1477,12 @@ impl RegionEditor {
         });
         let half = (b.w - 26.0) / 2.0;
         push(Rect::new(b.x + 10.0, b.y + 126.0, half, 26.0), "Open…", Cmd::OpenSheet, false, true);
-        let generates = self.character().is_some();
-        push(Rect::new(b.x + 16.0 + half, b.y + 126.0, half, 26.0), "Generate…", Cmd::Generate, false, generates);
+        if self.owner == Owner::Zone {
+            push(Rect::new(b.x + 16.0 + half, b.y + 126.0, half, 26.0), "Terrain…", Cmd::Terrain, false, true);
+        } else {
+            let generates = self.character().is_some();
+            push(Rect::new(b.x + 16.0 + half, b.y + 126.0, half, 26.0), "Generate…", Cmd::Generate, false, generates);
+        }
         push(Rect::new(b.x + 10.0, b.y + 158.0, half, 26.0), "Grid", Cmd::Grid, self.grid.is_some(), true);
         push(Rect::new(b.x + 16.0 + half, b.y + 158.0, half, 26.0), "Import…", Cmd::Import, false, true);
         push(Rect::new(b.x + 10.0, b.y + 190.0, half, 26.0), "Paint", Cmd::Paint, self.paint.is_some(), true);
@@ -1930,6 +1937,7 @@ impl RegionEditor {
             Cmd::GridCancel => self.grid = None,
             Cmd::OpenSheet => return self.leave(Ask::OpenSheet(self.owner)),
             Cmd::Try => return Some(Ask::Try),
+            Cmd::Terrain => return Some(Ask::Terrain),
             Cmd::Save => return Some(Ask::Save),
             Cmd::Close => return self.leave(Ask::Close),
             Cmd::Undo => self.undo(),
@@ -3209,6 +3217,7 @@ impl App {
             Some(Ask::Open(c)) => self.open_regions(Some(c)),
             Some(Ask::OpenSheet(c)) => self.choose_sheet(c),
             Some(Ask::Try) => self.try_regions(),
+            Some(Ask::Terrain) => self.open_terrain(),
             Some(Ask::Generate(c, from_sheet)) => self.generate_sheet(c, from_sheet),
             Some(Ask::UseGenerated(c)) => self.use_generated(c),
             Some(Ask::Import) => self.import_pictures(),

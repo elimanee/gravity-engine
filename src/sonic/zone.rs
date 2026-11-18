@@ -7,75 +7,185 @@
 
 use super::sheet::{Anim, Pic};
 use macroquad::prelude::{vec2, Rect};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// The side of a tileset's pieces (sheet px).
-pub const PIECE: u32 = 8;
+/// A piece of a tileset: its top-left on the sheet (sheet px).
+pub type Piece = (u32, u32);
 
-/// A column of a tileset's terrain: its pieces from the top down (each a
-/// piece's top-left on the sheet). The ground's top line is the top of
-/// `top`; above it the grass sticks out (tall grass, a tuft), below it the
-/// earth goes on down: `earth` (or a plain colour where the set has none)
-/// and `under`, again and again.
-#[derive(Clone, Debug, PartialEq)]
+/// A column of a tileset's terrain: its pieces from the top down. The
+/// ground's top line is the top of `top`; above it the grass sticks out
+/// (tall grass, a tuft), below it the earth goes on down: `earth` (or a
+/// plain colour where there is none) and `under`, again and again.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Column {
-    pub tall: [Option<(u32, u32)>; 2],
-    pub tuft: Option<(u32, u32)>,
-    pub top: (u32, u32),
-    pub earth: Option<(u32, u32)>,
-    pub under: (u32, u32),
-    /// Where the set has no `earth` piece: the colour it is.
+    pub tall: [Option<Piece>; 2],
+    pub tuft: Option<Piece>,
+    pub top: Option<Piece>,
+    pub earth: Option<Piece>,
+    pub under: Option<Piece>,
+    /// Where there is no `earth` piece: the colour it is (worked out from
+    /// the sheet, the main colour of the top row of `under`).
+    #[serde(skip)]
     pub plain: [u8; 4],
 }
 
-/// A tileset's terrain: its columns, which go side by side in order (and
-/// round again); and a piece all grass, where tall grass has no tuft under.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Terrain {
-    pub columns: Vec<Column>,
-    pub grass: Option<(u32, u32)>,
+/// Where a tileset's pieces are on its sheet: their side, the top-left of
+/// one, and the step from one to the next (side and gap).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Grid {
+    pub piece: u32,
+    pub origin: Piece,
+    pub step: u32,
 }
 
-/// NinjaCakes' terrain: 26 columns of pieces a pixel apart (its "main
-/// tiles", which its "grouped" strip shows put together), from the sheet
-/// with its background cleared (a piece is there when it is not all clear).
+impl Default for Grid {
+    fn default() -> Self {
+        Grid { piece: 8, origin: (0, 0), step: 8 }
+    }
+}
+
+impl Grid {
+    /// The piece at sheet point (x, y), if (x, y) is on one (not between).
+    pub fn piece_at(&self, x: f32, y: f32) -> Option<Piece> {
+        let (ox, oy) = (self.origin.0 as f32, self.origin.1 as f32);
+        if x < ox || y < oy || self.step == 0 {
+            return None;
+        }
+        let (step, piece) = (self.step as f32, self.piece as f32);
+        let (i, j) = (((x - ox) / step).floor(), ((y - oy) / step).floor());
+        let (px, py) = (ox + i * step, oy + j * step);
+        (x < px + piece && y < py + piece).then_some((px as u32, py as u32))
+    }
+}
+
+/// A tileset's terrain: its columns, which go side by side in order (and
+/// round again); a piece all grass, where tall grass has no tuft under; in
+/// how many stretches of columns one has tall grass (0: none); and where
+/// the pieces are on the sheet. Kept beside the zone's sheet as
+/// `zone.terrain.json` (the sheet's size with it).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Terrain {
+    pub size: [u32; 2],
+    pub grid: Grid,
+    pub columns: Vec<Column>,
+    pub grass: Option<Piece>,
+    pub tall_every: u32,
+}
+
+impl Default for Terrain {
+    fn default() -> Self {
+        Terrain { size: [0, 0], grid: Grid::default(), columns: vec![Column::default()], grass: None, tall_every: 2 }
+    }
+}
+
+impl Terrain {
+    /// Whether it can build ground: a column with a top at least.
+    pub fn usable(&self) -> bool {
+        self.columns.iter().any(|c| c.top.is_some())
+    }
+
+    /// Its pieces inside a sheet of `img`'s size, the plain colours worked
+    /// out from it.
+    pub fn fitted(mut self, img: &image::RgbaImage) -> Terrain {
+        let (w, h) = img.dimensions();
+        let n = self.grid.piece.clamp(1, 64);
+        self.grid.piece = n;
+        self.grid.step = self.grid.step.max(n);
+        let inside = |p: Option<Piece>| p.filter(|&(x, y)| x + n <= w && y + n <= h);
+        self.grass = inside(self.grass);
+        for c in &mut self.columns {
+            c.tall = [inside(c.tall[0]), inside(c.tall[1])];
+            (c.tuft, c.top, c.earth, c.under) = (inside(c.tuft), inside(c.top), inside(c.earth), inside(c.under));
+            // The colour most of the top row of `under` is.
+            let mut counts: Vec<([u8; 4], usize)> = vec![];
+            if let Some((x, y)) = c.under {
+                for px in x..x + n {
+                    let col = img.get_pixel(px, y).0;
+                    match counts.iter_mut().find(|(k, _)| *k == col) {
+                        Some((_, m)) => *m += 1,
+                        None => counts.push((col, 1)),
+                    }
+                }
+            }
+            c.plain = counts.iter().max_by_key(|(_, m)| *m).map_or([0, 0, 0, 0], |(col, _)| *col);
+        }
+        self.columns.truncate(256);
+        self
+    }
+}
+
+/// The file the zone's terrain is kept in.
+pub fn terrain_path() -> Option<std::path::PathBuf> {
+    super::sheet::dir().map(|d| d.join("zone.terrain.json"))
+}
+
+/// The terrain kept for a zone sheet of this size, if any.
+pub fn read_terrain(size: (u32, u32)) -> Option<Terrain> {
+    let text = std::fs::read_to_string(terrain_path()?).ok()?;
+    let t: Terrain = serde_json::from_str(&text).ok()?;
+    (t.size == [size.0, size.1]).then_some(t)
+}
+
+/// Keep `t` as the zone's terrain (none: the file goes, back to the sheet's
+/// own, if the game knows one).
+pub fn save_terrain(t: Option<&Terrain>) -> Result<(), String> {
+    let p = terrain_path().ok_or("no config directory")?;
+    match t {
+        Some(t) => {
+            if let Some(d) = p.parent() {
+                std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+            }
+            let json = serde_json::to_string_pretty(t).map_err(|e| e.to_string())?;
+            std::fs::write(&p, json).map_err(|e| e.to_string())
+        }
+        None => match std::fs::remove_file(&p) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+            _ => Ok(()),
+        },
+    }
+}
+
+/// The terrain a zone sheet is built with: the one kept for it, else the
+/// one the game knows for it (none: its ground is drawn from its tiles).
+pub fn terrain_for(img: &image::RgbaImage) -> Option<Terrain> {
+    read_terrain(img.dimensions()).or_else(|| ninja_terrain(img)).map(|t| t.fitted(img)).filter(Terrain::usable)
+}
+
+/// NinjaCakes' terrain: 26 columns of 8 × 8 pieces a pixel apart (its
+/// "main tiles", which its "grouped" strip shows put together), from the
+/// sheet with its background cleared (a piece is there when it is not all
+/// clear).
 pub fn ninja_terrain(img: &image::RgbaImage) -> Option<Terrain> {
     if img.dimensions() != NINJA_SIZE {
         return None;
     }
-    let there = |x: u32, y: u32| {
-        (y..y + PIECE).any(|py| (x..x + PIECE).any(|px| img.get_pixel(px, py)[3] > 0)).then_some((x, y))
-    };
-    let full = |x: u32, y: u32| (y..y + PIECE).all(|py| (x..x + PIECE).all(|px| img.get_pixel(px, py)[3] > 0));
+    let n = 8;
+    let there =
+        |x: u32, y: u32| (y..y + n).any(|py| (x..x + n).any(|px| img.get_pixel(px, py)[3] > 0)).then_some((x, y));
+    let full = |x: u32, y: u32| (y..y + n).all(|py| (x..x + n).all(|px| img.get_pixel(px, py)[3] > 0));
     // Rows: tall grass (two), tufts, grass into earth, earth, earth into
     // the next colour.
     let [t2, t1, tuft, top, earth, under] = [40, 49, 58, 67, 76, 85];
-    let columns: Option<Vec<Column>> = (0..26)
+    let columns = (0..26)
         .map(|i| {
             let x = 10 + 9 * i;
-            let under = there(x, under)?;
-            // The colour most of the top row of `under` is.
-            let mut counts: Vec<([u8; 4], usize)> = vec![];
-            for px in x..x + PIECE {
-                let c = img.get_pixel(px, under.1).0;
-                match counts.iter_mut().find(|(k, _)| *k == c) {
-                    Some((_, n)) => *n += 1,
-                    None => counts.push((c, 1)),
-                }
-            }
-            let plain = counts.iter().max_by_key(|(_, n)| *n).map_or([0, 0, 0, 255], |(c, _)| *c);
-            Some(Column {
+            Column {
                 tall: [there(x, t2), there(x, t1)],
                 tuft: there(x, tuft),
-                top: there(x, top)?,
+                top: there(x, top),
                 earth: there(x, earth),
-                under,
-                plain,
-            })
+                under: there(x, under),
+                plain: [0; 4],
+            }
         })
         .collect();
     let grass = (0..26).map(|i| 10 + 9 * i).find(|&x| full(x, tuft)).map(|x| (x, tuft));
-    Some(Terrain { columns: columns?, grass })
+    let grid = Grid { piece: n, origin: (1, 4), step: 9 };
+    let size = [NINJA_SIZE.0, NINJA_SIZE.1];
+    Some(Terrain { size, grid, columns, grass, tall_every: 2 }.fitted(img))
 }
 
 /// The tiles a zone's sheet can have, and what each is for.
@@ -239,8 +349,8 @@ mod tests {
         // Its terrain: 26 columns found on the sheet, a pixel apart.
         let mut img = image::RgbaImage::new(NINJA_SIZE.0, NINJA_SIZE.1);
         let mut paint = |x: u32, y: u32, c: [u8; 4]| {
-            for py in y..y + PIECE {
-                for px in x..x + PIECE {
+            for py in y..y + 8 {
+                for px in x..x + 8 {
                     img.put_pixel(px, py, image::Rgba(c));
                 }
             }
@@ -259,7 +369,18 @@ mod tests {
         assert_eq!((t.columns[0].earth, t.columns[1].earth), (Some((10, 76)), None));
         assert_eq!((t.columns[1].plain, t.columns[13].tuft), ([240, 120, 0, 255], Some((127, 58))));
         assert_eq!(t.grass, Some((127, 58)), "a tuft all grass, for under the tall grass");
-        assert!(ninja_terrain(&image::RgbaImage::new(10, 10)).is_none());
+        assert!(t.usable() && ninja_terrain(&image::RgbaImage::new(10, 10)).is_none());
+        // Its pieces are on its grid: a pixel apart.
+        assert_eq!(t.grid.piece_at(13.0, 70.0), Some((10, 67)));
+        assert_eq!(t.grid.piece_at(18.5, 70.0), None, "between two pieces");
+        // Kept as a file and read back the same (the plain colours worked
+        // out again from the sheet).
+        let json = serde_json::to_string(&t).unwrap();
+        let back: Terrain = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.fitted(&img), t);
+        // Pieces outside the sheet are dropped.
+        let odd = Terrain { columns: vec![Column { top: Some((9000, 0)), ..Column::default() }], ..Terrain::default() };
+        assert!(!odd.fitted(&img).usable());
         assert!(backdrop.iter().chain(&SCENERY).all(|t| n.contains_key(*t)), "the tileset's backdrop and scenery");
         assert_eq!(n["sea"].pics.len(), 6);
         // The backdrop's layers repeat across: as wide as each other.
