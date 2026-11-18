@@ -88,6 +88,8 @@ enum Cmd {
     BaseColours,
     Roll,
     SpinDash,
+    Magnet,
+    Breathe,
     BaseMoves,
     Kind(usize, i32),
     Key(usize),
@@ -134,6 +136,7 @@ struct Layout {
     right: Rect,
     physics: [Rect; 5],
     toggles: [Rect; 2],
+    passives: [Rect; 2],
     moves_y: f32,
     base_moves: Rect,
     blocks: Vec<BlockRects>,
@@ -352,23 +355,30 @@ impl CharEditor {
         let row3 = y + 2.0 * (SLIDER_ROW_H + 8.0);
         let toggles =
             [Rect::new(rx + col + 20.0, row3 - 4.0, col, 22.0), Rect::new(rx + col + 20.0, row3 + 22.0, col, 22.0)];
-        y += 3.0 * (SLIDER_ROW_H + 8.0) + 14.0;
+        y += 3.0 * (SLIDER_ROW_H + 8.0) + 4.0;
+        // What they just are: a ring magnet, breathing underwater.
+        let passives = [Rect::new(rx, y, col, 22.0), Rect::new(rx + col + 20.0, y, col, 22.0)];
+        y += 22.0 + 16.0;
         let moves_y = y;
         let base_moves = Rect::new(rx + rw - 130.0, y - 2.0, 130.0, 22.0);
         y += 22.0 + 18.0;
-        let blocks = (0..self.draft.kit.blocks.len())
+        // The moves close up to fit (the add button and a summary under them).
+        let n = self.draft.kit.blocks.len();
+        let room = right.bottom() - PAD - y - 30.0 - 22.0 - 8.0 - 2.0 * 16.0;
+        let block_h = if n > 0 { (room / n as f32).clamp(34.0, BLOCK_H) } else { BLOCK_H };
+        let blocks = (0..n)
             .map(|k| {
-                let by = y + k as f32 * BLOCK_H;
+                let by = y + k as f32 * block_h;
                 let kind = Rect::new(rx, by, 168.0, 32.0);
                 let key = Rect::new(kind.right() + 6.0, by, 92.0, 32.0);
                 let remove = Rect::new(rx + rw - 28.0, by, 28.0, 32.0);
                 let up = Rect::new(remove.x - 32.0, by, 28.0, 32.0);
                 let setting =
-                    Rect::new(key.right() + 12.0, by - 6.0, (up.x - 12.0 - key.right() - 12.0).max(40.0), 38.0);
+                    Rect::new(key.right() + 12.0, by - 4.0, (up.x - 12.0 - key.right() - 12.0).max(40.0), 36.0);
                 BlockRects { kind, key, setting, up, remove }
             })
             .collect();
-        y += self.draft.kit.blocks.len() as f32 * BLOCK_H;
+        y += n as f32 * block_h;
         let add = Rect::new(rx, y, 150.0, 30.0);
         let about_y = y + 30.0 + 22.0;
         Layout {
@@ -393,6 +403,7 @@ impl CharEditor {
             right,
             physics,
             toggles,
+            passives,
             moves_y,
             base_moves,
             blocks,
@@ -524,11 +535,15 @@ impl CharEditor {
         }
         on(l.toggles[0], Cmd::Roll, input);
         on(l.toggles[1], Cmd::SpinDash, input);
+        on(l.passives[0], Cmd::Magnet, input);
+        on(l.passives[1], Cmd::Breathe, input);
         on(l.base_moves, Cmd::BaseMoves, input);
         for (k, r) in l.blocks.iter().enumerate() {
             on(r.up, Cmd::Up(k), input);
             on(r.remove, Cmd::Remove(k), input);
-            on(r.key, Cmd::Key(k), input);
+            if self.draft.kit.blocks[k].ability.fixed_button().is_none() {
+                on(r.key, Cmd::Key(k), input);
+            }
             let toggle = self.draft.kit.blocks[k].ability.setting().is_some_and(|s| s.unit == "toggle");
             if toggle {
                 on(r.setting, Cmd::Flip(k), input);
@@ -580,6 +595,8 @@ impl CharEditor {
             Cmd::BaseColours => d.colours = None,
             Cmd::Roll => d.kit.roll = !d.kit.roll,
             Cmd::SpinDash => d.kit.spin_dash = !d.kit.spin_dash,
+            Cmd::Magnet => d.kit.magnet = !d.kit.magnet,
+            Cmd::Breathe => d.kit.breathe = !d.kit.breathe,
             Cmd::BaseMoves => d.kit = Kit::of(d.base),
             Cmd::Kind(k, dir) => {
                 if let Some(b) = d.kit.blocks.get_mut(k) {
@@ -865,10 +882,11 @@ impl CharEditor {
         clip(Some(pv));
         set_camera(&cam);
         let drawn = sheet.is_some_and(|sh| sh.draw_anim(name, t, 12.0, Vec2::ZERO, 1.0, WHITE));
+        s.facing = 1.0;
         if !drawn {
-            s.facing = 1.0;
             art::draw_at(&s, self.clock);
         }
+        art::move_effects(&s, self.clock);
         set_default_camera();
         clip(None);
         text(caption, pv.x + 12.0, baseline(pv.y + 16.0, 12.0), 12.0, TEXT_DIM);
@@ -892,6 +910,8 @@ impl CharEditor {
         }
         draw_toggle_row(l.toggles[0], "Roll (↓ on the run)", k.roll, l.toggles[0].contains(m), 1.0);
         draw_toggle_row(l.toggles[1], "Spin dash (↓ + Space)", k.spin_dash, l.toggles[1].contains(m), 1.0);
+        draw_toggle_row(l.passives[0], "Ring magnet", k.magnet, l.passives[0].contains(m), 1.0);
+        draw_toggle_row(l.passives[1], "Breathes underwater", k.breathe, l.passives[1].contains(m), 1.0);
 
         section(rx, l.moves_y, rw - 140.0, "MOVES", 1.0);
         let copy = format!("{} moves", whose(self.draft.base.short()));
@@ -900,8 +920,14 @@ impl CharEditor {
         text(hint, rx, l.moves_y + 34.0, 11.0, TEXT_MUTED);
         for (i, (r, b)) in l.blocks.iter().zip(&k.blocks).enumerate() {
             draw_stepper(r.kind, &format!("{}", i + 1), b.ability.name(), ACCENT_HI, m, 1.0);
-            let key = if b.on == Key::Action { "Action (X)" } else { "Jump again" };
-            draw_button(r.key, key, r.key.contains(m), false, 1.0);
+            // What is held down stays on its button.
+            let (key, fixed) = match b.ability.fixed_button() {
+                Some(Key::Action) => ("Hold X", true),
+                Some(Key::JumpAgain) => ("Hold jump", true),
+                None if b.on == Key::Action => ("Action (X)", false),
+                None => ("Jump again", false),
+            };
+            draw_button(r.key, key, r.key.contains(m) && !fixed, false, if fixed { 0.7 } else { 1.0 });
             match b.ability.setting() {
                 Some(st) if st.unit == "toggle" => {
                     // Its name above, as the sliders have, and the switch.
@@ -935,14 +961,15 @@ impl CharEditor {
         if k.blocks.len() < MOST_BLOCKS {
             draw_button(l.add, "+ Add a move", l.add.contains(m), false, 1.0);
         } else {
-            text("Six moves at most", l.add.x, baseline(l.add.y + l.add.h / 2.0, 12.0), 12.0, TEXT_MUTED);
+            let most = format!("{MOST_BLOCKS} moves at most");
+            text(&most, l.add.x, baseline(l.add.y + l.add.h / 2.0, 12.0), 12.0, TEXT_MUTED);
         }
         if k.blocks.is_empty() {
             let s = "No moves of its own: it runs, rolls and jumps";
             text(s, l.add.right() + 12.0, baseline(l.add.y + l.add.h / 2.0, 12.0), 12.0, TEXT_MUTED);
         }
         section(rx, l.about_y - 22.0, rw, "IN SHORT", 1.0);
-        for (i, line) in crate::ui::library::wrap(&k.about(), rw, 12.0).iter().take(3).enumerate() {
+        for (i, line) in crate::ui::library::wrap(&k.about(), rw, 12.0).iter().take(2).enumerate() {
             text(line, rx, l.about_y + 8.0 + i as f32 * 16.0, 12.0, TEXT_DIM);
         }
     }

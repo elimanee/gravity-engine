@@ -64,6 +64,25 @@ const HOMING_SPEED: f32 = 12.0;
 const HOMING_TIME: u32 = 50;
 const DOUBLE_SHOW: u32 = 16;
 const THROW_SHOW: u32 = 12;
+/// The drop dash (frames to charge), the peel out (frames to rev), the
+/// insta-shield (frames, reach in guide px), the bounce (down speed, how
+/// much higher than a jump), the wall jump (push off, how close a wall
+/// must be in metres, frames shown and frames without steering), the
+/// boost (speed, fall, least to start, how much slower it fills): as in 2D.
+const DROP_READY: u32 = 20;
+const PEEL_READY: u32 = 30;
+const SHIELD_TIME: u32 = 16;
+const SHIELD_REACH: f32 = 24.0;
+const BOUNCE_DOWN: f32 = 8.0;
+const BOUNCE_UP: f32 = 1.15;
+const WALL_KICK: f32 = 4.5;
+const WALL_NEAR: f32 = 0.25;
+const KICK_SHOW: u32 = 12;
+const KICK_LOCK: u32 = 8;
+const BOOST: f32 = 12.0;
+const BOOST_FALL: f32 = 1.0;
+const BOOST_LEAST: f32 = 15.0;
+const BOOST_REFILL: f32 = 3.0;
 
 /// What the player asks for this frame. `dir` is where to go, in the
 /// world (flat, at most 1 long: a stick pushed half way is half).
@@ -92,6 +111,11 @@ pub enum Event {
     AirDash,
     Stomp,
     Stomped,
+    /// Up again off a bounce, an insta-shield, a boost begun, a kick off a wall.
+    Bounce,
+    InstaShield,
+    Boost,
+    WallJump,
     /// Something thrown from `from` along `dir` (flat, normalised) at
     /// `speed` (guide px a frame).
     Shoot {
@@ -158,6 +182,21 @@ pub struct Runner {
     pub stomping: Option<f32>,
     /// What a homing attack can go for (badniks), told him by the world.
     pub targets: Vec<Vec3>,
+    /// A drop dash charging (frames) and its speed; a peel out revving
+    /// (frames) and its speed.
+    pub drop_charge: Option<u32>,
+    drop_speed: f32,
+    pub peeling: Option<u32>,
+    peel_speed: f32,
+    /// Frames into an insta-shield; bouncing down (to go up this fast), and
+    /// up off a bounce; frames since kicking off a wall.
+    pub shielding: Option<u32>,
+    pub bouncing: Option<f32>,
+    bounced: bool,
+    pub kicked: Option<u32>,
+    /// Boosting, and the boost left (frames).
+    pub boosting: bool,
+    pub boost_left: f32,
 }
 
 /// `v` along the plane whose normal is `n`.
@@ -205,6 +244,16 @@ impl Runner {
             homing: None,
             stomping: None,
             targets: vec![],
+            drop_charge: None,
+            drop_speed: 8.0,
+            peeling: None,
+            peel_speed: 12.0,
+            shielding: None,
+            bouncing: None,
+            bounced: false,
+            kicked: None,
+            boosting: false,
+            boost_left: f32::INFINITY,
         }
     }
 
@@ -212,9 +261,93 @@ impl Runner {
         self.rolling || self.spindash.is_some() || (self.jumping && self.flying.is_none() && self.gliding.is_none())
     }
 
-    /// Curled up, gliding or swinging the hammer: badniks break.
+    /// Curled up, gliding, swinging the hammer or boosting: badniks break.
     pub fn attacking(&self) -> bool {
-        self.is_ball() || self.gliding.is_some() || self.hammer.is_some_and(|t| (4..16).contains(&t))
+        self.is_ball() || self.gliding.is_some() || self.hammer.is_some_and(|t| (4..16).contains(&t)) || self.boosting
+    }
+
+    /// How much further than himself he reaches (metres): an insta-shield.
+    pub fn reach(&self) -> f32 {
+        if self.shielding.is_some() {
+            SHIELD_REACH * K
+        } else {
+            0.0
+        }
+    }
+
+    /// Nothing hurts him for a moment (an insta-shield's flash).
+    pub fn shielded(&self) -> bool {
+        self.shielding.is_some()
+    }
+
+    /// A drop dash charged and ready for the landing.
+    pub fn drop_ready(&self) -> bool {
+        self.drop_charge.is_some_and(|f| f >= DROP_READY)
+    }
+
+    /// The longest boost his moves give (frames), if he has one.
+    fn boost_most(&self) -> Option<f32> {
+        self.kit.blocks.iter().find_map(|b| match b.ability {
+            Ability::Boost { seconds } => Some(seconds * 60.0),
+            _ => None,
+        })
+    }
+
+    /// How full the boost is (0 to 1), if he has one.
+    pub fn boost_gauge(&self) -> Option<f32> {
+        self.boost_most().map(|most| (self.boost_left / most).clamp(0.0, 1.0))
+    }
+
+    fn start_boost(&mut self, events: &mut Vec<Event>) -> bool {
+        if self.boosting || self.boost_left < BOOST_LEAST {
+            return false;
+        }
+        self.boosting = true;
+        events.push(Event::Boost);
+        true
+    }
+
+    /// Boosting: at least [`BOOST`] the way he goes while the button is
+    /// held and some is left; off, it fills again slowly.
+    fn boost_frame(&mut self, c: Controls, events: &mut Vec<Event>) {
+        let Some(most) = self.boost_most() else {
+            self.boosting = false;
+            return;
+        };
+        self.boost_left = self.boost_left.min(most);
+        if self.boosting && (!c.action || self.boost_left <= 0.0 || self.hurt || self.spindash.is_some()) {
+            self.boosting = false;
+        }
+        if !self.boosting {
+            self.boost_left = (self.boost_left + 1.0 / BOOST_REFILL).min(most);
+            return;
+        }
+        self.boost_left = (self.boost_left - 1.0).max(0.0);
+        let speed = BOOST.max(TOP * self.kit.physics.speed * 2.0);
+        if self.grounded {
+            let dir = self.vel.normalize_or(flat(self.facing, self.up).normalize_or(self.facing));
+            self.vel = dir * self.vel.length().max(speed);
+            self.rolling = false;
+        } else {
+            let h = flat(self.vel, Vec3::Y);
+            let dir = h.normalize_or(flat(self.facing, Vec3::Y).normalize_or(Vec3::X));
+            let h = dir * h.length().max(speed);
+            self.vel = vec3(h.x, self.vel.y.max(-BOOST_FALL), h.z);
+        }
+        if self.boost_left <= 0.0 {
+            self.boosting = false;
+            events.push(Event::Skid);
+        }
+    }
+
+    /// Drop what is going on of the newer moves (landing keeps a boost).
+    fn end_new_moves(&mut self) {
+        self.drop_charge = None;
+        self.peeling = None;
+        self.shielding = None;
+        self.bouncing = None;
+        self.bounced = false;
+        self.kicked = None;
     }
 
     pub fn half(&self) -> f32 {
@@ -247,6 +380,8 @@ impl Runner {
         self.dashing = None;
         self.homing = None;
         self.stomping = None;
+        self.end_new_moves();
+        self.boosting = false;
     }
 
     /// Bounced off a badnik he broke in the air: out of a homing attack,
@@ -279,6 +414,7 @@ impl Runner {
         } else {
             self.air_frame(world, c, &mut events);
         }
+        self.boost_frame(c, &mut events);
         self.idle = if self.grounded && self.speed() < 0.01 { self.idle + 1 } else { 0 };
         events
     }
@@ -340,6 +476,31 @@ impl Runner {
             self.vel = Vec3::ZERO;
             return;
         }
+        // Revving a peel out he stands still (turning with the stick); let
+        // go of the button, he is off if it was revved enough. A jump drops it.
+        if let Some(t) = self.peeling {
+            if c.jump_pressed {
+                self.peeling = None;
+            } else if c.action {
+                self.peeling = Some(t + 1);
+                if t + 1 == PEEL_READY {
+                    events.push(Event::Rev);
+                }
+                if d != Vec3::ZERO {
+                    self.facing = d;
+                }
+                self.vel = Vec3::ZERO;
+                self.stick(world, events);
+                return;
+            } else {
+                self.peeling = None;
+                if t >= PEEL_READY {
+                    speed = self.peel_speed;
+                    dir = flat(self.facing, n).normalize_or(dir);
+                    events.push(Event::Dash);
+                }
+            }
+        }
         if c.jump_pressed {
             self.vel = dir * speed + n * jmp;
             self.used = 0;
@@ -350,7 +511,7 @@ impl Runner {
             return;
         }
         // The action button's moves that work on the ground: the first one.
-        if c.action_pressed && self.hammer.is_none() {
+        if c.action_pressed && self.hammer.is_none() && !self.boosting {
             match ground_move {
                 Some((Ability::Hammer, _)) => {
                     self.hammer = Some(0);
@@ -358,6 +519,17 @@ impl Runner {
                 }
                 Some((Ability::Shoot { speed }, _)) => self.throw(speed, events),
                 Some((Ability::Teleport { distance }, _)) => self.teleport(world, distance, events),
+                Some((Ability::PeelOut { speed: s }, _)) if speed < 0.5 => {
+                    self.peeling = Some(0);
+                    self.peel_speed = s;
+                    events.push(Event::Rev);
+                    self.vel = Vec3::ZERO;
+                    self.stick(world, events);
+                    return;
+                }
+                Some((Ability::Boost { .. }, _)) => {
+                    self.start_boost(events);
+                }
                 _ => {}
             }
         }
@@ -383,7 +555,9 @@ impl Runner {
 
         let locked = self.control_lock > 0;
         self.control_lock = self.control_lock.saturating_sub(1);
-        let d = if locked { Vec3::ZERO } else { d };
+        // Boosting, he steers but does not brake.
+        let back = self.boosting && d.dot(dir) < -0.5;
+        let d = if locked || back { Vec3::ZERO } else { d };
         let onward = d != Vec3::ZERO && d.dot(dir) > 0.5;
         self.skidding = false;
         if self.rolling {
@@ -521,7 +695,11 @@ impl Runner {
                     Button::Action => c.action_pressed,
                 };
                 if pressed && self.used & (1 << k) == 0 && self.start_move(b.ability, world, events) {
-                    self.used |= 1 << k;
+                    // A wall jump and a boost can go again.
+                    let again = matches!(b.ability, Ability::WallJump { .. } | Ability::Boost { .. });
+                    if !again {
+                        self.used |= 1 << k;
+                    }
                     break;
                 }
             }
@@ -529,6 +707,17 @@ impl Runner {
         for t in [&mut self.doubled, &mut self.throwing] {
             *t = t.map(|f| f + 1).filter(|&f| f < DOUBLE_SHOW.max(THROW_SHOW));
         }
+        if let Some(f) = self.drop_charge {
+            // Charging while jump is held; let go, it is gone.
+            self.drop_charge = c.jump.then_some(f + 1);
+            if f + 1 == DROP_READY && c.jump {
+                events.push(Event::Rev);
+            }
+        }
+        self.shielding = self.shielding.map(|f| f + 1).filter(|&f| f < SHIELD_TIME);
+        self.kicked = self.kicked.map(|f| f + 1).filter(|&f| f < KICK_SHOW);
+        // Just off a wall, he does not steer.
+        let d = if self.kicked.is_some_and(|f| f < KICK_LOCK) { Vec3::ZERO } else { d };
         if let Some(f) = self.dashing {
             self.dashing = (f + 1 < if self.homing.is_some() { HOMING_TIME } else { DASH_TIME }).then_some(f + 1);
         }
@@ -543,13 +732,16 @@ impl Runner {
         }
         let p = self.kit.physics;
         let (air, top, grv, release) = (AIR * p.air, TOP * p.speed, GRV * p.gravity, RELEASE * p.jump);
-        if self.jumping && !c.jump && self.vel.y > release && self.doubled.is_none() {
+        if self.jumping && !c.jump && self.vel.y > release && self.doubled.is_none() && !self.bounced {
             self.vel.y = release;
         }
-        // Dashing, homing in or stomping, the move is the motion.
-        if self.dashing.is_some() || self.stomping.is_some() {
+        // Dashing, homing in, stomping or bouncing, the move is the motion.
+        if self.dashing.is_some() || self.stomping.is_some() || self.bouncing.is_some() {
             if let Some(speed) = self.stomping {
                 self.vel = Vec3::NEG_Y * speed;
+            }
+            if self.bouncing.is_some() {
+                self.vel.y = (self.vel.y - grv).min(-BOUNCE_DOWN);
             }
             let steps = (self.vel.length() / 6.0).ceil().max(1.0) as usize;
             for _ in 0..steps {
@@ -653,6 +845,17 @@ impl Runner {
             return false;
         }
         self.pos = hit.point + hit.normal * half;
+        // Bouncing: back up off it, every move ready again.
+        if let Some(up) = self.bouncing.filter(|_| !self.hurt) {
+            self.vel = flat(self.vel, Vec3::Y) + hit.normal * up;
+            self.bouncing = None;
+            self.bounced = true;
+            self.jumping = true;
+            self.used = 0;
+            events.push(Event::Bounce);
+            return true;
+        }
+        let drop = self.drop_charge.filter(|&f| f >= DROP_READY && !self.hurt).map(|_| self.drop_speed);
         self.up = hit.normal;
         // The momentum carries into the ground.
         let speed_along = flat(self.vel, self.up);
@@ -674,8 +877,31 @@ impl Runner {
         self.dashing = None;
         self.homing = None;
         self.doubled = None;
+        self.end_new_moves();
         events.push(Event::Land);
+        if let Some(speed) = drop {
+            // As in Sonic Mania: going his way, a quarter of his speed on
+            // top (up to half as much again); else the dash's own speed.
+            let dir = flat(self.facing, self.up).normalize_or(self.facing);
+            let s = self.vel.length();
+            let s = if self.vel.dot(dir) > 0.0 { (s / 4.0 + speed).min(speed * 1.5) } else { speed };
+            self.vel = dir * s;
+            self.rolling = true;
+            events.push(Event::Dash);
+        }
         true
+    }
+
+    /// A wall close by in the air: the way off it (flat, away from it).
+    fn wall_beside(&self, world: &impl Sense) -> Option<Vec3> {
+        let ahead = flat(self.facing, Vec3::Y).normalize_or(Vec3::X);
+        let side = vec3(-ahead.z, 0.0, ahead.x);
+        [ahead, side, -side, -ahead, (ahead + side).normalize(), (ahead - side).normalize()]
+            .into_iter()
+            .filter_map(|d| world.ray(self.pos, d, REACH + WALL_NEAR))
+            .filter(|h| h.normal.y.abs() < 0.6 && h.moving.is_none())
+            .min_by(|a, b| a.dist.total_cmp(&b.dist))
+            .map(|h| flat(h.normal, Vec3::Y).normalize_or(-ahead))
     }
 
     /// Start one of his moves in the air; false if it cannot go now.
@@ -737,6 +963,33 @@ impl Runner {
                 events.push(Event::Stomp);
             }
             Ability::Shoot { speed } => self.throw(speed, events),
+            Ability::DropDash { speed } if self.drop_charge.is_none() => {
+                self.drop_charge = Some(0);
+                self.drop_speed = speed;
+            }
+            Ability::InstaShield if self.shielding.is_none() => {
+                self.shielding = Some(0);
+                self.jumping = true;
+                events.push(Event::InstaShield);
+            }
+            Ability::Bounce { height } if self.bouncing.is_none() => {
+                self.bouncing = Some(JMP * self.kit.physics.jump * height * BOUNCE_UP);
+                self.jumping = true;
+                self.vel = flat(self.vel, Vec3::Y) * 0.25 - Vec3::Y * BOUNCE_DOWN;
+                self.drop_charge = None;
+                events.push(Event::Stomp);
+            }
+            Ability::WallJump { power } => {
+                let Some(away) = self.wall_beside(world) else { return false };
+                self.vel = away * WALL_KICK * power + Vec3::Y * JMP * self.kit.physics.jump * 0.9 * power;
+                self.facing = away;
+                self.jumping = true;
+                self.used = 0;
+                self.kicked = Some(0);
+                (self.dashing, self.homing, self.bouncing, self.drop_charge) = (None, None, None, None);
+                events.push(Event::WallJump);
+            }
+            Ability::Boost { .. } => return self.start_boost(events),
             _ => return false,
         }
         true
@@ -1053,5 +1306,89 @@ mod tests {
             fell |= !slow.grounded && slow.up.y < 0.9;
         }
         assert!(fell, "too slow for the loop");
+    }
+
+    #[test]
+    fn the_newer_moves_work_in_3d_too() {
+        use crate::sonic::kit::Block;
+        let w = floor();
+        let with = |blocks: Vec<Block>| {
+            let mut r = Runner::new(Character::Sonic, Vec3::ZERO, Vec3::X);
+            r.kit.blocks = blocks;
+            r
+        };
+        let press = Controls { jump: true, jump_pressed: true, ..Controls::default() };
+        let hold = Controls { jump: true, ..Controls::default() };
+        let held = Controls { action: true, ..Controls::default() };
+        let action = Controls { action_pressed: true, ..held };
+        // A drop dash: charged in the air, off rolling on landing.
+        let mut d = with(vec![Block::new(Ability::DropDash { speed: 8.0 })]);
+        d.frame(&w, press);
+        run(&mut d, &w, hold, 6);
+        d.frame(&w, press);
+        let mut events = vec![];
+        for _ in 0..200 {
+            events.extend(d.frame(&w, hold));
+            if d.grounded {
+                break;
+            }
+        }
+        assert!(d.grounded && d.rolling && d.speed() >= 8.0, "rolling off: {}", d.speed());
+        assert!(events.contains(&Event::Dash));
+        // A peel out: revved standing, off running.
+        let mut p = with(vec![Block::new(Ability::PeelOut { speed: 12.0 })]);
+        p.frame(&w, action);
+        run(&mut p, &w, held, PEEL_READY as usize + 2);
+        assert!(p.peeling.is_some() && p.speed() < 0.01 && p.pos.x.abs() < 0.01);
+        assert!(p.frame(&w, Controls::default()).contains(&Event::Dash));
+        assert!(p.speed() > 11.5 && !p.rolling, "off running: {}", p.speed());
+        // An insta-shield: further reach for a moment, once a jump.
+        let mut i = with(vec![Block::new(Ability::InstaShield)]);
+        i.frame(&w, press);
+        run(&mut i, &w, hold, 6);
+        assert!(i.frame(&w, press).contains(&Event::InstaShield) && i.reach() > 0.5 && i.shielded());
+        run(&mut i, &w, hold, SHIELD_TIME as usize);
+        assert!(i.reach() == 0.0 && !i.frame(&w, press).contains(&Event::InstaShield));
+        // A bounce: down hard, and back up off the ground.
+        let mut b = with(vec![Block { ability: Ability::Bounce { height: 1.0 }, on: Button::Action }]);
+        b.frame(&w, press);
+        run(&mut b, &w, hold, 10);
+        assert!(b.frame(&w, action).contains(&Event::Stomp) && b.vel.y <= -BOUNCE_DOWN);
+        let events: Vec<Event> = (0..80).flat_map(|_| b.frame(&w, Controls::default())).collect();
+        assert!(events.contains(&Event::Bounce), "bounced");
+        // A boost: fast at once, and it runs down.
+        let mut o = with(vec![Block { ability: Ability::Boost { seconds: 2.0 }, on: Button::Action }]);
+        assert!(o.frame(&w, action).contains(&Event::Boost));
+        run(&mut o, &w, held, 10);
+        assert!(o.boosting && o.speed() >= BOOST && o.attacking() && o.boost_gauge().unwrap() < 1.0);
+        run(&mut o, &w, Controls::default(), 1);
+        assert!(!o.boosting);
+    }
+
+    #[test]
+    fn a_wall_jump_kicks_off_a_wall_in_3d() {
+        use crate::sonic::kit::Block;
+        let mut w = floor();
+        // A wall across x = 3.
+        let pts = [vec3(3.0, 0.0, -5.0), vec3(3.0, 0.0, 5.0), vec3(3.0, 6.0, 5.0), vec3(3.0, 6.0, -5.0)];
+        w.add_mesh(&pts, &[[0, 1, 2], [0, 2, 3]]);
+        w.refresh();
+        let mut r = Runner::new(Character::Sonic, vec3(1.0, 0.0, 0.0), Vec3::X);
+        r.kit.blocks = vec![Block::new(Ability::WallJump { power: 1.0 })];
+        r.vel = Vec3::X * 4.0;
+        r.frame(&w, Controls { dir: Vec3::X, jump: true, jump_pressed: true, ..Controls::default() });
+        run(&mut r, &w, Controls { dir: Vec3::X, jump: true, ..Controls::default() }, 10);
+        assert!(r.pos.x > 2.4, "against the wall: {:?}", r.pos);
+        let events = r.frame(&w, Controls { dir: Vec3::X, jump: true, jump_pressed: true, ..Controls::default() });
+        assert!(events.contains(&Event::WallJump), "kicked off");
+        assert!(r.vel.x < -3.0 && r.vel.y > 4.0 && r.facing.x < -0.9, "{:?}", r.vel);
+        // Away from walls it does nothing.
+        let mut r = Runner::new(Character::Sonic, vec3(-20.0, 0.0, 0.0), Vec3::X);
+        r.kit.blocks = vec![Block::new(Ability::WallJump { power: 1.0 })];
+        r.frame(&w, Controls { jump: true, jump_pressed: true, ..Controls::default() });
+        run(&mut r, &w, Controls { jump: true, ..Controls::default() }, 10);
+        assert!(!r
+            .frame(&w, Controls { jump: true, jump_pressed: true, ..Controls::default() })
+            .contains(&Event::WallJump));
     }
 }

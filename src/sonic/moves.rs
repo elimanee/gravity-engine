@@ -194,6 +194,32 @@ const HOMING_SPEED: f32 = 12.0;
 const HOMING_TIME: u32 = 45;
 const DOUBLE_SHOW: u32 = 16;
 const THROW_SHOW: u32 = 12;
+/// A drop dash is ready after this many frames held (as in Sonic Mania).
+pub(super) const DROP_READY: u32 = 20;
+/// A peel out is ready after this many frames revved (as in Sonic CD).
+const PEEL_READY: u32 = 30;
+/// An insta-shield: how long it lasts (frames) and how far round him it
+/// reaches (guide px, as in Sonic 3 & Knuckles).
+const SHIELD_TIME: u32 = 16;
+const SHIELD_REACH: f32 = 24.0;
+/// A bounce: how fast it goes down, and how much higher than a jump it
+/// comes back up (Sonic 3's bubble shield: 8, and 7.5 for a 6.5 jump).
+const BOUNCE_DOWN: f32 = 8.0;
+const BOUNCE_UP: f32 = 1.15;
+/// A wall jump: its push off the wall, how close a wall must be (guide
+/// px) and how long it shows.
+const WALL_KICK: f32 = 4.5;
+const WALL_NEAR: f32 = 4.0;
+const KICK_SHOW: u32 = 12;
+/// Frames after a wall jump before he steers again.
+const KICK_LOCK: u32 = 8;
+/// A boost: its speed (at least), how fast he may fall boosting in the
+/// air, the least of it to start, and how many times slower it fills
+/// than it drains.
+const BOOST: f32 = 12.0;
+const BOOST_FALL: f32 = 1.0;
+const BOOST_LEAST: f32 = 15.0;
+const BOOST_REFILL: f32 = 3.0;
 
 impl Sonic {
     /// Turn into `c` where he is, feet staying on the ground.
@@ -226,6 +252,13 @@ impl Sonic {
         self.throwing = None;
         self.homing = None;
         self.stomping = None;
+        self.drop_charge = None;
+        self.peeling = None;
+        self.shielding = None;
+        self.bouncing = None;
+        self.bounced = false;
+        self.kicked = None;
+        self.boosting = false;
     }
 
     /// The hammer is out and hitting.
@@ -237,8 +270,12 @@ impl Sonic {
         }
     }
 
-    /// The box the hammer hits beyond his own (centre, half size; world px).
+    /// The box the hammer (or an insta-shield) hits beyond his own
+    /// (centre, half size; world px).
     pub fn reach(&self) -> Option<(Vec2, Vec2)> {
+        if self.shielding.is_some() {
+            return Some((self.pos, Vec2::splat(SHIELD_REACH * SCALE)));
+        }
         if !self.hammer_hits() || self.hammer_air {
             return None;
         }
@@ -258,6 +295,8 @@ impl Sonic {
             Some(if self.hammer_air { 1.0 } else { 3.0 })
         } else if self.gliding.is_some() || self.sliding {
             Some(f32::INFINITY)
+        } else if let Some(t) = self.peeling {
+            Some((8.0 - t as f32 * 0.25).max(0.0))
         } else if self.warp.is_some() || self.dashing.is_some() || self.homing.is_some() || self.throwing.is_some() {
             Some(3.0)
         } else {
@@ -268,6 +307,87 @@ impl Sonic {
     /// Tired of flying.
     pub fn tired(&self) -> bool {
         self.flying.is_some_and(|f| f >= self.fly_time)
+    }
+
+    /// Nothing hurts him for a moment (an insta-shield's flash).
+    pub fn shielded(&self) -> bool {
+        self.shielding.is_some()
+    }
+
+    /// A drop dash charged and ready for the landing.
+    pub fn drop_ready(&self) -> bool {
+        self.drop_charge.is_some_and(|f| f >= DROP_READY)
+    }
+
+    /// A peel out revved enough to go.
+    pub fn peel_ready(&self) -> bool {
+        self.peeling.is_some_and(|t| t >= PEEL_READY)
+    }
+
+    /// The longest boost his moves give (frames), if he has one.
+    pub fn boost_most(&self) -> Option<f32> {
+        self.kit.blocks.iter().find_map(|b| match b.ability {
+            Ability::Boost { seconds } => Some(seconds * FPS),
+            _ => None,
+        })
+    }
+
+    /// How full the boost is (0 to 1), if he has one.
+    pub fn boost_gauge(&self) -> Option<f32> {
+        self.boost_most().map(|most| (self.boost_left / most).clamp(0.0, 1.0))
+    }
+
+    /// Start boosting, if there is enough of it left.
+    fn start_boost(&mut self, events: &mut Vec<Event>) -> bool {
+        if self.boosting || self.boost_left < BOOST_LEAST {
+            return false;
+        }
+        self.boosting = true;
+        events.push(Event::Boost);
+        true
+    }
+
+    /// Boosting: at least [`BOOST`] (more if he is faster) his way while
+    /// the button is held and some is left; off, it fills again slowly.
+    /// `top`: his top speed.
+    pub(super) fn boost_frame(&mut self, input: Input, top: f32, events: &mut Vec<Event>) {
+        let Some(most) = self.boost_most() else {
+            self.boosting = false;
+            return;
+        };
+        self.boost_left = self.boost_left.min(most);
+        let busy = self.climbing.is_some() || self.climb_up.is_some() || self.spindash.is_some() || self.dead;
+        if self.boosting && (!input.action || self.boost_left <= 0.0 || self.hurt || busy) {
+            self.boosting = false;
+        }
+        if !self.boosting {
+            self.boost_left = (self.boost_left + 1.0 / BOOST_REFILL).min(most);
+            return;
+        }
+        self.boost_left = (self.boost_left - 1.0).max(0.0);
+        let speed = BOOST.max(top * 2.0);
+        let f = self.facing;
+        if self.grounded {
+            self.gsp = f * self.gsp.abs().max(speed);
+            self.rolling = false;
+            self.crouching = false;
+        } else {
+            self.xsp = f * self.xsp.abs().max(speed);
+            self.ysp = self.ysp.min(BOOST_FALL);
+        }
+        if self.boost_left <= 0.0 {
+            self.boosting = false;
+            events.push(Event::Skid);
+        }
+    }
+
+    /// A wall close beside him in the air: the side it is on (the way he
+    /// faces first).
+    fn wall_beside(&self, world: &PhysWorld, env: Env) -> Option<f32> {
+        [self.facing, -self.facing].into_iter().find(|&d| {
+            self.cast(world, env, self.pos, vec2(d, 0.0), PUSH + WALL_NEAR)
+                .is_some_and(|h| h.normal.x.abs() > 0.7 && h.ground.mass <= 0.0 && h.ground.bounce < 0.6)
+        })
     }
 
     /// On the ground, before moving: Amy's hammer and Knuckles' slide take
@@ -281,8 +401,36 @@ impl Sonic {
             }
             return Input::default();
         }
+        // Revving a peel out he stands still (turning round if asked);
+        // let go of the button, he is off if it was revved enough. A jump
+        // drops it.
+        if let Some(t) = self.peeling {
+            if input.jump_pressed {
+                self.peeling = None;
+                return input;
+            }
+            if input.action {
+                self.peeling = Some(t + 1);
+                if t + 1 == PEEL_READY {
+                    events.push(Event::Rev);
+                }
+                if input.left != input.right {
+                    self.facing = if input.left { -1.0 } else { 1.0 };
+                }
+                self.gsp = 0.0;
+                self.crouching = false;
+                self.looking_up = false;
+                return Input::default();
+            }
+            self.peeling = None;
+            if t >= PEEL_READY {
+                self.gsp = self.facing * self.peel_speed;
+                events.push(Event::Dash);
+            }
+            return input;
+        }
         // The action button's moves that work on the ground: the first one.
-        let busy = self.hammer.is_some() || self.rolling || self.spindash.is_some();
+        let busy = self.hammer.is_some() || self.rolling || self.spindash.is_some() || self.boosting;
         if input.action_pressed && !busy {
             let ground = self
                 .kit
@@ -300,8 +448,21 @@ impl Sonic {
                 }
                 Some((Ability::Shoot { speed }, _)) => self.throw_one(speed, events),
                 Some((Ability::Teleport { distance }, _)) => self.teleport(world, env, distance, events),
+                Some((Ability::PeelOut { speed }, _)) if self.gsp.abs() < 0.5 => {
+                    self.peeling = Some(0);
+                    self.peel_speed = speed;
+                    events.push(Event::Rev);
+                }
+                Some((Ability::Boost { .. }, _)) => {
+                    self.start_boost(events);
+                }
                 _ => {}
             }
+        }
+        // Boosting he goes on his way: no braking, no turning round.
+        if self.boosting {
+            let onward = |d: f32| self.facing * d > 0.0;
+            return Input { left: input.left && onward(-1.0), right: input.right && onward(1.0), ..input };
         }
         if let Some(t) = self.throwing {
             self.throwing = (t + 1 < THROW_SHOW).then_some(t + 1);
@@ -372,13 +533,31 @@ impl Sonic {
                     Button::Action => action,
                 };
                 if pressed && self.used & (1 << k) == 0 && self.start_move(b.ability, world, env, jmp, events) {
-                    self.used |= 1 << k;
+                    // A wall jump and a boost can go again (a wall jump
+                    // even makes the others ready again).
+                    let again = matches!(b.ability, Ability::WallJump { .. } | Ability::Boost { .. });
+                    if !again {
+                        self.used |= 1 << k;
+                    }
                     break;
                 }
             }
         }
         if let Some(f) = self.doubled {
             self.doubled = (f + 1 < DOUBLE_SHOW).then_some(f + 1);
+        }
+        if let Some(f) = self.drop_charge {
+            // Charging while jump is held; let go, it is gone.
+            self.drop_charge = input.jump.then_some(f + 1);
+            if f + 1 == DROP_READY && input.jump {
+                events.push(Event::Rev);
+            }
+        }
+        if let Some(f) = self.shielding {
+            self.shielding = (f + 1 < SHIELD_TIME).then_some(f + 1);
+        }
+        if let Some(f) = self.kicked {
+            self.kicked = (f + 1 < KICK_SHOW).then_some(f + 1);
         }
         if let Some(t) = self.throwing {
             self.throwing = (t + 1 < THROW_SHOW).then_some(t + 1);
@@ -436,7 +615,7 @@ impl Sonic {
             self.xsp = speed * self.facing;
             return false;
         }
-        !self.dropping
+        !self.dropping && !self.kicked.is_some_and(|f| f < KICK_LOCK)
     }
 
     /// Start one of his moves in the air; false if it cannot go now.
@@ -500,6 +679,35 @@ impl Sonic {
                 events.push(Event::Stomp);
             }
             Ability::Shoot { speed } => self.throw_one(speed, events),
+            Ability::DropDash { speed } if self.drop_charge.is_none() => {
+                self.drop_charge = Some(0);
+                self.drop_speed = speed;
+            }
+            Ability::InstaShield if self.shielding.is_none() => {
+                self.shielding = Some(0);
+                self.jumping = true;
+                events.push(Event::InstaShield);
+            }
+            Ability::Bounce { height } if self.bouncing.is_none() => {
+                self.bouncing = Some(jmp * height * BOUNCE_UP);
+                self.jumping = true;
+                self.xsp *= 0.25;
+                self.ysp = BOUNCE_DOWN;
+                self.drop_charge = None;
+                events.push(Event::Stomp);
+            }
+            Ability::WallJump { power } => {
+                let Some(side) = self.wall_beside(world, env) else { return false };
+                self.facing = -side;
+                self.xsp = -side * WALL_KICK * power;
+                self.ysp = -jmp * 0.9 * power;
+                self.jumping = true;
+                self.used = 0;
+                self.kicked = Some(0);
+                (self.dashing, self.homing, self.bouncing, self.drop_charge) = (None, None, None, None);
+                events.push(Event::WallJump { side });
+            }
+            Ability::Boost { .. } => return self.start_boost(events),
             _ => return false,
         }
         true
@@ -549,6 +757,9 @@ impl Sonic {
         if let Some(speed) = self.stomping {
             return self.ysp.max(speed);
         }
+        if self.bouncing.is_some() {
+            return (self.ysp + grv).clamp(BOUNCE_DOWN, MAX_FALL);
+        }
         if self.gliding.is_some() {
             let toward = if self.ysp < GLIDE_FALL { GLIDE_GRV } else { -GLIDE_GRV };
             return (self.ysp + toward * k.max(0.1)).clamp(-MAX_FALL, MAX_FALL);
@@ -566,8 +777,11 @@ impl Sonic {
         if self.stomping.is_some() {
             events.push(Event::Stomped);
         }
+        // A boost goes on along the ground.
+        let boosting = self.boosting;
         self.end_moves();
         self.sliding = slide;
+        self.boosting = boosting;
     }
 
     /// Gliding into a wall (`hit`, on side `d`), Knuckles grabs it.
@@ -991,5 +1205,169 @@ mod tests {
         run(&mut n, &w, Input { down: true, ..Input::default() }, 2);
         n.frame(&w, &walls, Input { down: true, jump: true, jump_pressed: true, ..Input::default() }, None, 1.0);
         assert!(n.spindash.is_none());
+    }
+
+    #[test]
+    fn a_drop_dash_charged_in_the_air_rolls_off_on_landing() {
+        let w = world();
+        let press = Input { jump: true, jump_pressed: true, ..Input::default() };
+        let hold = Input { jump: true, ..Input::default() };
+        let mut d = with(vec![block(Ability::DropDash { speed: 8.0 }, Button::JumpAgain)], 500.0);
+        d.frame(&w, &walls, press, None, 1.0);
+        run(&mut d, &w, hold, 6);
+        d.frame(&w, &walls, press, None, 1.0);
+        assert!(d.drop_charge.is_some() && !d.drop_ready());
+        let mut events = vec![];
+        for _ in 0..200 {
+            events.extend(d.frame(&w, &walls, hold, None, 1.0));
+            if d.grounded {
+                break;
+            }
+        }
+        assert!(d.grounded && d.rolling && d.gsp >= 8.0, "off rolling: {} {}", d.rolling, d.gsp);
+        assert!(events.contains(&Event::Dash));
+        // Let go of jump before landing: no dash.
+        let mut d = with(vec![block(Ability::DropDash { speed: 8.0 }, Button::JumpAgain)], 500.0);
+        d.frame(&w, &walls, press, None, 1.0);
+        run(&mut d, &w, hold, 6);
+        d.frame(&w, &walls, press, None, 1.0);
+        run(&mut d, &w, hold, DROP_READY as usize + 2);
+        assert!(d.drop_ready());
+        run(&mut d, &w, Input::default(), 1);
+        assert!(d.drop_charge.is_none());
+        run(&mut d, &w, Input::default(), 200);
+        assert!(d.grounded && !d.rolling && d.gsp.abs() < 1.0);
+    }
+
+    #[test]
+    fn a_peel_out_revs_standing_and_goes_off_running() {
+        let w = world();
+        let peel = || with(vec![block(Ability::PeelOut { speed: 12.0 }, Button::Action)], 500.0);
+        let held = Input { action: true, ..Input::default() };
+        let mut p = peel();
+        p.frame(&w, &walls, Input { action_pressed: true, ..held }, None, 1.0);
+        let x = p.pos.x;
+        run(&mut p, &w, held, PEEL_READY as usize + 5);
+        assert!(p.peel_ready() && (p.pos.x - x).abs() < 0.5, "revs where he stands");
+        assert_eq!(p.poses()[0], "peel_out");
+        let events = run(&mut p, &w, Input::default(), 1);
+        assert!(events.contains(&Event::Dash) && p.gsp >= 11.5 && !p.rolling, "off running: {}", p.gsp);
+        // Too short a rev: nothing.
+        let mut p = peel();
+        p.frame(&w, &walls, Input { action_pressed: true, ..held }, None, 1.0);
+        run(&mut p, &w, held, 8);
+        run(&mut p, &w, Input::default(), 1);
+        assert!(p.gsp.abs() < 0.5 && p.peeling.is_none());
+        // Turning round while revving goes the other way.
+        let mut p = peel();
+        p.frame(&w, &walls, Input { action_pressed: true, ..held }, None, 1.0);
+        run(&mut p, &w, Input { left: true, ..held }, PEEL_READY as usize + 1);
+        run(&mut p, &w, Input::default(), 1);
+        assert!(p.gsp <= -11.5);
+    }
+
+    #[test]
+    fn an_insta_shield_reaches_further_for_a_moment() {
+        let w = world();
+        let press = Input { jump: true, jump_pressed: true, ..Input::default() };
+        let mut s = with(vec![block(Ability::InstaShield, Button::JumpAgain)], 500.0);
+        s.frame(&w, &walls, press, None, 1.0);
+        run(&mut s, &w, Input { jump: true, ..Input::default() }, 6);
+        assert!(s.reach().is_none());
+        assert!(s.frame(&w, &walls, press, None, 1.0).contains(&Event::InstaShield));
+        let (c, half) = s.reach().expect("a reach");
+        assert!(c == s.pos && half.x >= SHIELD_REACH * SCALE && s.shielded());
+        run(&mut s, &w, Input { jump: true, ..Input::default() }, SHIELD_TIME as usize);
+        assert!(!s.shielded() && s.reach().is_none(), "over");
+        // Once a jump.
+        assert!(!s.frame(&w, &walls, press, None, 1.0).contains(&Event::InstaShield));
+    }
+
+    #[test]
+    fn a_bounce_goes_down_and_back_up_again_and_again() {
+        let w = world();
+        let press = Input { jump: true, jump_pressed: true, ..Input::default() };
+        let action = Input { action: true, action_pressed: true, ..Input::default() };
+        let mut b = with(vec![block(Ability::Bounce { height: 1.0 }, Button::Action)], 500.0);
+        b.frame(&w, &walls, press, None, 1.0);
+        run(&mut b, &w, Input { jump: true, ..Input::default() }, 10);
+        assert!(b.frame(&w, &walls, action, None, 1.0).contains(&Event::Stomp));
+        assert!(b.ysp >= BOUNCE_DOWN && b.bouncing.is_some());
+        let mut events = vec![];
+        for _ in 0..80 {
+            events.extend(b.frame(&w, &walls, Input::default(), None, 1.0));
+            if events.contains(&Event::Bounce) {
+                break;
+            }
+        }
+        assert!(events.contains(&Event::Bounce) && !b.grounded && b.ysp < -6.0, "up again: {}", b.ysp);
+        // Up higher than a jump, and ready to bounce again.
+        let mut top = b.pos.y;
+        for _ in 0..30 {
+            b.frame(&w, &walls, Input::default(), None, 1.0);
+            top = top.min(b.pos.y);
+        }
+        assert!(floor_y() - top > 100.0, "{}", floor_y() - top);
+        assert!(b.frame(&w, &walls, action, None, 1.0).contains(&Event::Stomp));
+    }
+
+    #[test]
+    fn a_wall_jump_kicks_off_walls_and_else_lets_the_next_move_go() {
+        let w = world();
+        let right_wall = W - WALL_T * PPM;
+        let press = Input { jump: true, jump_pressed: true, ..Input::default() };
+        let right = Input { right: true, ..Input::default() };
+        let moves = vec![
+            block(Ability::WallJump { power: 1.0 }, Button::JumpAgain),
+            block(Ability::DoubleJump { power: 0.8 }, Button::JumpAgain),
+        ];
+        let mut k = with(moves.clone(), right_wall - 20.0);
+        k.frame(&w, &walls, Input { right: true, ..press }, None, 1.0);
+        run(&mut k, &w, Input { jump: true, ..right }, 12);
+        let events = k.frame(&w, &walls, Input { right: true, ..press }, None, 1.0);
+        assert!(events.iter().any(|e| matches!(e, Event::WallJump { side } if *side == 1.0)));
+        assert!(k.xsp < -3.0 && k.ysp < -4.0 && k.facing == -1.0, "off it: {} {}", k.xsp, k.ysp);
+        // Kicking off again, the other moves are ready again.
+        assert_eq!(k.used, 0);
+        // No wall: the double jump instead.
+        let mut k = with(moves, 500.0);
+        k.frame(&w, &walls, press, None, 1.0);
+        run(&mut k, &w, Input { jump: true, ..Input::default() }, 12);
+        let events = k.frame(&w, &walls, press, None, 1.0);
+        assert!(events.contains(&Event::DoubleJump) && !events.iter().any(|e| matches!(e, Event::WallJump { .. })));
+    }
+
+    #[test]
+    fn a_boost_runs_fast_while_held_and_fills_again_slowly() {
+        let w = world();
+        let mut b = with(vec![block(Ability::Boost { seconds: 1.0 }, Button::Action)], 500.0);
+        let held = Input { action: true, ..Input::default() };
+        assert_eq!(b.boost_gauge(), Some(1.0));
+        let events = run(&mut b, &w, Input { action_pressed: true, ..held }, 1);
+        assert!(events.contains(&Event::Boost) && b.boosting && b.gsp >= BOOST);
+        assert!(b.attacking(), "breaks what it meets");
+        run(&mut b, &w, held, 20);
+        assert!(b.gsp >= BOOST && b.boost_gauge().unwrap() < 0.7);
+        // Let go: it stops, and fills again (slowly).
+        run(&mut b, &w, Input::default(), 1);
+        assert!(!b.boosting);
+        let g = b.boost_gauge().unwrap();
+        run(&mut b, &w, Input::default(), 30);
+        let g2 = b.boost_gauge().unwrap();
+        assert!(g2 > g && g2 < g + 0.25, "{g} → {g2}");
+        // Held until it is gone: it stops, and cannot start again at once.
+        run(&mut b, &w, Input { action_pressed: true, ..held }, 1);
+        run(&mut b, &w, held, 80);
+        assert!(!b.boosting && b.boost_left < BOOST_LEAST);
+        run(&mut b, &w, Input::default(), 1);
+        run(&mut b, &w, Input { action_pressed: true, ..held }, 1);
+        assert!(!b.boosting);
+        // In the air too, falling slowly.
+        let mut b = with(vec![block(Ability::Boost { seconds: 3.0 }, Button::Action)], 500.0);
+        b.frame(&w, &walls, Input { jump: true, jump_pressed: true, ..Input::default() }, None, 1.0);
+        run(&mut b, &w, Input::default(), 30);
+        run(&mut b, &w, Input { action_pressed: true, ..held }, 1);
+        run(&mut b, &w, held, 10);
+        assert!(b.boosting && b.xsp >= BOOST && b.ysp <= BOOST_FALL + 0.3);
     }
 }

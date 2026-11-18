@@ -6,6 +6,7 @@
 
 use super::{Character, Sonic};
 use macroquad::prelude::*;
+use std::f32::consts::TAU;
 
 const SKIN: Color = Color::new(1.0, 0.82, 0.62, 1.0);
 const RED: Color = Color::new(0.88, 0.12, 0.14, 1.0);
@@ -184,6 +185,83 @@ pub fn draw_at(s: &Sonic, t: f32) {
     }
 }
 
+/// What some moves add round the character, sprite sheet or not: a
+/// boost's aura, a peel out's dust, a bounce's bubble, a drop dash's
+/// sparks, an insta-shield's flash.
+pub fn move_effects(s: &Sonic, t: f32) {
+    let k = super::SCALE;
+    let at = s.pos;
+    let ring = |r: f32, w: f32, c: Color| {
+        let n = 28;
+        for i in 0..n {
+            let (a, b) = (i as f32 / n as f32 * TAU, (i + 1) as f32 / n as f32 * TAU);
+            draw_line(at.x + a.cos() * r, at.y + a.sin() * r, at.x + b.cos() * r, at.y + b.sin() * r, w, c);
+        }
+    };
+    if s.boosting {
+        // A pale blue shell in front, streaks behind.
+        let front = at + vec2(s.facing * 6.0 * k, 0.0);
+        draw_ellipse(front.x, front.y, 22.0 * k, 17.0 * k, 0.0, Color::new(0.55, 0.85, 1.0, 0.22));
+        draw_ellipse_lines(front.x, front.y, 22.0 * k, 17.0 * k, 0.0, 1.5, Color::new(0.85, 0.95, 1.0, 0.7));
+        for i in 0..5 {
+            let y = at.y + (i as f32 - 2.0) * 5.0 * k;
+            let len = (18.0 + ((t * 30.0 + i as f32 * 1.7).sin() * 0.5 + 0.5) * 22.0) * k;
+            let x0 = at.x - s.facing * 14.0 * k;
+            draw_line(x0, y, x0 - s.facing * len, y, 2.0, Color::new(0.8, 0.95, 1.0, 0.5));
+        }
+    }
+    if s.peel_ready() {
+        // Revved: dust thrown up behind his feet.
+        let feet = at + vec2(0.0, s.radii().1 * k);
+        for i in 0..4 {
+            let q = (t * 9.0 + i as f32 * 1.9).sin().abs();
+            let p = feet + vec2(-s.facing * (10.0 + q * 14.0) * k, -(2.0 + q * 5.0) * k);
+            draw_circle(p.x, p.y, (2.5 + q * 2.0) * k, Color::new(0.85, 0.85, 0.9, 0.55));
+        }
+    }
+    if s.bouncing.is_some() {
+        draw_circle(at.x, at.y, 17.0 * k, Color::new(0.5, 0.8, 1.0, 0.18));
+        ring(17.0 * k, 1.5, Color::new(0.8, 0.95, 1.0, 0.8));
+        draw_circle(at.x - 6.0 * k, at.y - 7.0 * k, 3.0 * k, Color::new(1.0, 1.0, 1.0, 0.6));
+    }
+    if s.drop_ready() {
+        // Charged: a glow, and sparks going round.
+        ring(16.0 * k, 2.0, Color::new(1.0, 0.95, 0.6, 0.45 + 0.25 * (t * 20.0).sin()));
+        for i in 0..4 {
+            let a = t * 14.0 + i as f32 * TAU / 4.0;
+            let p = at + vec2(a.cos(), a.sin()) * 17.0 * k;
+            draw_circle(p.x, p.y, 3.2 * k, Color::new(1.0, 0.85, 0.3, 0.9));
+            draw_circle(p.x, p.y, 1.6 * k, Color::new(1.0, 1.0, 0.95, 1.0));
+        }
+    }
+    if let Some(f) = s.shielding {
+        // A flash spreading out and fading.
+        let q = f as f32 / 16.0;
+        let r = (14.0 + q * 12.0) * k;
+        draw_circle(at.x, at.y, r, Color::new(1.0, 1.0, 0.85, 0.25 * (1.0 - q)));
+        ring(r, 2.5, Color::new(1.0, 1.0, 0.9, 0.9 * (1.0 - q)));
+        for i in 0..6 {
+            let a = i as f32 * TAU / 6.0 + q;
+            let (p, e) = (at + vec2(a.cos(), a.sin()) * r * 0.7, at + vec2(a.cos(), a.sin()) * r * 1.2);
+            draw_line(p.x, p.y, e.x, e.y, 2.0, Color::new(1.0, 1.0, 1.0, 0.8 * (1.0 - q)));
+        }
+    }
+}
+
+/// The boost left, over his head while it is not full (or he boosts).
+pub fn boost_gauge(s: &Sonic) {
+    if let Some(g) = s.boost_gauge().filter(|g| *g < 0.999 || s.boosting) {
+        let (w, h) = (34.0, 5.0);
+        let top = s.pos - vec2(w / 2.0, s.radii().1 * super::SCALE + 16.0);
+        draw_rectangle(top.x - 1.0, top.y - 1.0, w + 2.0, h + 2.0, Color::new(0.0, 0.0, 0.0, 0.55));
+        let c = if g < BOOST_LOW { Color::new(1.0, 0.45, 0.3, 0.95) } else { Color::new(0.45, 0.85, 1.0, 0.95) };
+        draw_rectangle(top.x, top.y, w * g, h, c);
+    }
+}
+
+/// Below this much boost left, its gauge turns red.
+const BOOST_LOW: f32 = 0.25;
+
 fn ball(f: &Frame, s: &Sonic, l: &Look) {
     // The ball sits on the ground: centre on his (smaller) centre.
     let r = 13.0;
@@ -259,7 +337,9 @@ fn hammer(f: &Frame, hand: (f32, f32), a: f32) {
 fn body(f: &Frame, s: &Sonic, l: &Look, t_now: f32) {
     let ch = s.character.base();
     let speed = s.gsp.abs();
-    let running = s.grounded && speed >= 6.0 && !s.sliding;
+    // Revving a peel out, his legs are a blur already.
+    let revving = s.peeling.is_some_and(|t| t > 10);
+    let running = s.grounded && (speed >= 6.0 || revving) && !s.sliding;
     let walking = s.grounded && speed > 0.05 && !s.sliding;
     let crouch = if s.crouching { 6.0 } else { 0.0 };
     let look_up = if s.looking_up { -2.0 } else { 0.0 };

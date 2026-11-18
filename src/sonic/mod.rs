@@ -138,7 +138,8 @@ pub struct Input {
     /// Jump held, and pressed since the last frame.
     pub jump: bool,
     pub jump_pressed: bool,
-    /// The action button (Amy's hammer) pressed since the last frame.
+    /// The action button (Amy's hammer) held, and pressed since the last frame.
+    pub action: bool,
     pub action_pressed: bool,
 }
 
@@ -189,6 +190,14 @@ pub enum Event {
     AirDash,
     Stomp,
     Stomped,
+    /// Bounced up off the ground (the bounce move), an insta-shield's
+    /// flash, a boost begun, a kick off a wall on this side (±1).
+    Bounce,
+    InstaShield,
+    Boost,
+    WallJump {
+        side: f32,
+    },
     /// Something thrown from `from` (world px), this way (±1), this fast
     /// (guide px a frame).
     Shoot {
@@ -317,7 +326,31 @@ pub struct Sonic {
     /// What a homing attack can go for (world px): badniks and monitors,
     /// told him by the game.
     pub targets: Vec<Vec2>,
+    /// A drop dash: frames charged (jump held since pressing it again),
+    /// and its speed.
+    pub drop_charge: Option<u32>,
+    drop_speed: f32,
+    /// A peel out: frames revved (standing, the action button held), and
+    /// its speed.
+    pub peeling: Option<u32>,
+    peel_speed: f32,
+    /// Frames into an insta-shield.
+    pub shielding: Option<u32>,
+    /// Bouncing down, to go up this fast off the ground; and up off a
+    /// bounce (letting go of jump does not cut it short).
+    pub bouncing: Option<f32>,
+    bounced: bool,
+    /// Frames since kicking off a wall (for the drawing).
+    pub kicked: Option<u32>,
+    /// Boosting, and the boost left (frames).
+    pub boosting: bool,
+    pub boost_left: f32,
 }
+
+/// A ring magnet: how close rings must be to fly to him (guide px, as
+/// Sonic 3's lightning shield), and how fast they come (guide px a frame).
+pub const MAGNET: f32 = 64.0;
+pub const MAGNET_PULL: f32 = 8.0;
 
 /// Unit vector "down" for his feet in each ground mode.
 fn mode_down(angle: f32) -> Vec2 {
@@ -409,6 +442,16 @@ impl Sonic {
             homing: None,
             stomping: None,
             targets: vec![],
+            drop_charge: None,
+            drop_speed: 8.0,
+            peeling: None,
+            peel_speed: 12.0,
+            shielding: None,
+            bouncing: None,
+            bounced: false,
+            kicked: None,
+            boosting: false,
+            boost_left: f32::INFINITY,
         }
     }
 
@@ -472,7 +515,13 @@ impl Sonic {
     /// Attacking: curled up (rolling, jumping, spin dash), gliding, or
     /// swinging the hammer.
     pub fn attacking(&self) -> bool {
-        self.is_ball() || self.gliding.is_some() || self.hammer_hits()
+        self.is_ball() || self.gliding.is_some() || self.hammer_hits() || self.boosting
+    }
+
+    /// Goes through breakable things and bowls over what moves: curled up,
+    /// or boosting.
+    fn smashes(&self) -> bool {
+        self.is_ball() || self.boosting
     }
 
     /// Back to where he started, standing still.
@@ -658,7 +707,10 @@ impl Sonic {
         } else {
             self.air_frame(world, env, input, c, (grv, gravity.max(0.0)), &mut events);
         }
-        self.stride += self.gsp.abs().max(0.6) * 0.07;
+        self.boost_frame(input, c.top, &mut events);
+        // Revving a peel out, his legs go faster and faster.
+        let pace = self.peeling.map_or(self.gsp.abs(), |t| (t as f32 * 0.4).min(12.0));
+        self.stride += pace.max(0.6) * 0.07;
         // The games hold each frame for (8 − speed) frames, (4 − speed) curled up.
         let speed = if self.grounded { self.gsp.abs() } else { self.xsp.abs() };
         let hold = if let Some(hold) = self.move_hold() {
@@ -715,10 +767,21 @@ impl Sonic {
             (self.throwing.is_some(), "throw"),
             (self.doubled.is_some(), "double_jump"),
             (self.spindash.is_some(), "spindash"),
+            (self.shielding.is_some(), "insta_shield"),
+            (self.drop_charge.is_some_and(|f| f >= moves::DROP_READY), "drop_dash"),
+            (self.bouncing.is_some(), "bounce"),
+            (self.kicked.is_some(), "wall_jump"),
+            (self.boosting, "boost"),
+            (self.peeling.is_some(), "peel_out"),
         ] {
             if when {
                 out.push(name);
             }
+        }
+        // Revving a peel out looks like running flat out.
+        if self.peeling.is_some() {
+            out.extend(["full_speed", "run", "walk"]);
+            return out;
         }
         let speed = if self.grounded { self.gsp.abs() } else { self.xsp.abs() };
         if self.is_ball() {
@@ -1004,7 +1067,7 @@ impl Sonic {
     /// `dir` afterwards.
     fn shove(&self, world: &PhysWorld, hit: &Hit, dir: Vec2, speed: f32, events: &mut Vec<Event>) -> f32 {
         // Curled up, he goes straight through breakable things.
-        if hit.ground.breakable && self.is_ball() {
+        if hit.ground.breakable && self.smashes() {
             events.push(Event::Break { collider: hit.collider, at: hit.point });
             return speed;
         }
@@ -1025,7 +1088,7 @@ impl Sonic {
         }
         let shared = (MASS * speed + m * vb) / (MASS + m);
         // Curled up he bowls things over.
-        let target = if self.is_ball() { 2.0 * shared - vb } else { shared };
+        let target = if self.smashes() { 2.0 * shared - vb } else { shared };
         events.push(Event::Push { collider: hit.collider, at: hit.point, impulse: dir * m * (target - vb) });
         shared
     }
@@ -1076,7 +1139,7 @@ impl Sonic {
         self.skidding = false;
         self.pushing = false;
         let steer = self.air_moves(world, env, input, c.jmp, events);
-        if self.jumping && !input.jump && self.ysp < -c.release {
+        if self.jumping && !input.jump && self.ysp < -c.release && !self.bounced {
             self.ysp = -c.release;
         }
         if steer && input.right {
@@ -1170,6 +1233,22 @@ impl Sonic {
             self.spring(hit, events);
             return true;
         }
+        // Bouncing: back up off it, every move ready again.
+        if let Some(up) = self.bouncing.filter(|_| !self.hurt) {
+            if hit.ground.mass > 0.0 {
+                events.push(Event::Push { collider: hit.collider, at: hit.point, impulse: down * MASS * self.ysp });
+            }
+            let n = hit.normal;
+            (self.xsp, self.ysp) = (self.xsp + n.x * up, n.y * up);
+            self.bouncing = None;
+            self.bounced = true;
+            self.jumping = true;
+            self.used = 0;
+            events.push(Event::Bounce);
+            return true;
+        }
+        // A drop dash charged: off rolling as he lands.
+        let drop = self.drop_charge.filter(|&f| f >= moves::DROP_READY && !self.hurt).map(|_| self.drop_speed);
         // Ground speed from the landing, as in the guide.
         let deg = degrees(self.angle);
         let s = -self.angle.sin().signum();
@@ -1195,6 +1274,14 @@ impl Sonic {
         self.control_lock = 0;
         self.land_on(world, hit, events);
         events.push(Event::Land);
+        if let Some(speed) = drop {
+            // As in Sonic Mania: going his way, a quarter of his speed on
+            // top (up to half as much again); else the dash's own speed.
+            let f = self.facing;
+            self.gsp = if self.gsp * f > 0.0 { f * (self.gsp.abs() / 4.0 + speed).min(speed * 1.5) } else { f * speed };
+            self.rolling = true;
+            events.push(Event::Dash);
+        }
         true
     }
 }

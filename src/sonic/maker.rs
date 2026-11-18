@@ -326,6 +326,18 @@ pub fn posed(c: Character, name: &str, k: usize, n: usize, at: Vec2) -> (Sonic, 
         "air_dash" => (s.grounded, s.jumping, s.dashing, s.xsp, s.spin) = (false, true, Some(0), 9.0, f * TAU / 5.0),
         "stomp" => (s.grounded, s.jumping, s.stomping, s.ysp, s.spin) = (false, true, Some(12.0), 12.0, f * TAU / 5.0),
         "throw" => s.throwing = Some(k as u32),
+        "drop_dash" => {
+            (s.grounded, s.jumping, s.drop_charge, s.spin) =
+                (false, true, Some(super::moves::DROP_READY), f * TAU / 5.0)
+        }
+        "bounce" => (s.grounded, s.jumping, s.bouncing, s.ysp, s.spin) = (false, true, Some(7.0), 8.0, f * TAU / 5.0),
+        "insta_shield" => {
+            let flash = Some((f * 16.0) as u32);
+            (s.grounded, s.jumping, s.shielding, s.spin) = (false, true, flash, f * TAU / 5.0)
+        }
+        "wall_jump" => (s.grounded, s.kicked, s.xsp, s.ysp) = (false, Some(0), -4.5, -5.0),
+        "boost" => (s.gsp, s.boosting, s.stride) = (12.0, true, f * PI),
+        "peel_out" => (s.peeling, s.stride) = (Some(40), f * PI),
         _ => {}
     }
     (s, t)
@@ -671,18 +683,21 @@ mod tests {
         use crate::sonic::custom::{self, Custom, PREVIEW};
         use crate::sonic::kit::{Ability, Block, Kit};
         let _held = custom::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let blocks = Ability::ALL.into_iter().take(6).map(Block::new).collect();
-        custom::set_preview(Some(Custom {
-            name: "Every move".into(),
-            kit: Kit { blocks, ..Kit::default() },
-            ..Custom::default()
-        }));
-        let c = Character::Custom(PREVIEW);
-        let names: Vec<&str> = drawn_animations(c).into_iter().map(|(n, _)| n).collect();
-        for name in ["double_jump", "air_dash", "stomp", "throw", "fly"] {
-            assert!(names.contains(&name), "{name} in {names:?}");
-            let (s, _) = posed(c, name, 1, 4, vec2(100.0, 100.0));
-            assert_eq!(s.poses()[0], name);
+        // As many at a time as a character can have.
+        for some in Ability::ALL.chunks(crate::sonic::kit::MOST_BLOCKS) {
+            let blocks = some.iter().copied().map(Block::new).collect();
+            custom::set_preview(Some(Custom {
+                name: "Every move".into(),
+                kit: Kit { blocks, ..Kit::default() },
+                ..Custom::default()
+            }));
+            let c = Character::Custom(PREVIEW);
+            let names: Vec<&str> = drawn_animations(c).into_iter().map(|(n, _)| n).collect();
+            for &(name, _) in some.iter().flat_map(|a| a.animations()) {
+                assert!(names.contains(&name), "{name} in {names:?}");
+                let (s, _) = posed(c, name, 1, 4, vec2(100.0, 100.0));
+                assert_eq!(s.poses()[0], name);
+            }
         }
         custom::set_preview(None);
     }

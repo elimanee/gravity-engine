@@ -196,6 +196,7 @@ impl App {
             down: key(KeyCode::Down) || gp.down(),
             jump: (key(KeyCode::Space) && !shift) || gp.jump(),
             jump_pressed: run.jump || gp_jump,
+            action: (key(KeyCode::X) && !shift) || gp.held(crate::gamepad::Button::West),
             action_pressed: run.action || gp_action,
         };
         if locked {
@@ -256,7 +257,7 @@ impl App {
             }
         }
         self.sonic_events(&s, &events, step);
-        self.collect_rings(&s);
+        self.collect_rings(&s, step);
         if self.pan_last.is_none() && !s.dead {
             let screen = vec2(screen_width(), screen_height());
             // In a boss's arena the view holds still on it.
@@ -379,6 +380,31 @@ impl App {
                         self.game_effects(fx);
                     }
                 }
+                Event::Bounce => {
+                    self.sound(Sound::Spring, feet, 0.35);
+                    if self.s.effects {
+                        self.effects.dust(feet, 6.0);
+                    }
+                }
+                Event::InstaShield => {
+                    self.sound(Sound::Dash, s.pos, 0.5);
+                    if self.s.effects {
+                        self.effects.sparks(s.pos, vec2(0.0, -1.0), 10.0);
+                    }
+                }
+                Event::Boost => {
+                    self.sound(Sound::Dash, s.pos, 0.7);
+                    self.pad.rumble(0.4, 0.2);
+                    if self.s.effects {
+                        self.effects.sparks(s.pos, vec2(-s.facing, 0.0), 14.0);
+                    }
+                }
+                Event::WallJump { side } => {
+                    self.sound(Sound::Jump, s.pos, 0.5);
+                    if self.s.effects {
+                        self.effects.dust(s.pos + vec2(side * s.radii().0 * SCALE, 0.0), 6.0);
+                    }
+                }
                 Event::Shoot { from, dir, speed } => {
                     self.sound(Sound::Shot, from, 0.5);
                     let vel = vec2(dir * speed, 0.0) * SCALE * FPS;
@@ -399,7 +425,17 @@ impl App {
         }
     }
 
-    fn collect_rings(&mut self, s: &Sonic) {
+    fn collect_rings(&mut self, s: &Sonic, step: f32) {
+        // A ring magnet pulls the rings close by in.
+        if s.kit.magnet && !s.dead {
+            let pull = crate::sonic::MAGNET_PULL * SCALE * FPS * step;
+            for r in &mut self.rings {
+                let to = s.pos - *r;
+                if to.length() < crate::sonic::MAGNET * SCALE {
+                    *r += to.clamp_length_max(pull);
+                }
+            }
+        }
         let (wr, hr) = s.radii();
         let reach = vec2(wr * SCALE + 10.0, hr * SCALE + 10.0);
         let (got, left): (Vec<Vec2>, Vec<Vec2>) = std::mem::take(&mut self.rings)
@@ -478,6 +514,8 @@ impl App {
                 Some(sheet) => sheet.draw(&run.sonic),
                 None => art::draw(&run.sonic),
             }
+            art::move_effects(&run.sonic, get_time() as f32);
+            art::boost_gauge(&run.sonic);
         }
     }
 

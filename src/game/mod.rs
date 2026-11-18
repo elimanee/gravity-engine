@@ -759,9 +759,9 @@ impl Game {
         sonic.attacking() || self.sturdy(sonic)
     }
 
-    /// Nothing hurts him (invincible or super).
+    /// Nothing hurts him (invincible, super, or in an insta-shield's flash).
     fn sturdy(&self, sonic: &Sonic) -> bool {
-        self.invincible > 0.0 || sonic.super_form
+        self.invincible > 0.0 || sonic.super_form || sonic.shielded()
     }
 
     /// Seconds of air left while the countdown shows (5 … 0 over his head).
@@ -1144,7 +1144,8 @@ impl Game {
         if sonic.dead {
             return;
         }
-        if !sonic.underwater {
+        // Some never run out of air.
+        if !sonic.underwater || sonic.kit.breathe {
             if self.air < DROWNING {
                 out.push(Effect::Breathe(sonic.pos));
             }
@@ -1410,9 +1411,14 @@ impl Game {
         // Scattered rings bounce about, blink, and can be caught again.
         let mut caught = 0;
         let gravity = 0.09375 * SCALE * FPS * FPS;
+        let magnet = sonic.kit.magnet && live;
         self.lost.retain_mut(|r| {
             r.age += dt;
             r.vel.y += gravity * dt;
+            // A ring magnet pulls them in once they can be caught.
+            if magnet && r.age > RING_CATCHABLE && (me - r.pos).length() < crate::sonic::MAGNET * SCALE {
+                r.vel = (me - r.pos).normalize_or_zero() * crate::sonic::MAGNET_PULL * SCALE * FPS;
+            }
             let step = r.vel * dt;
             if r.vel.y > 0.0 && ray(world, solid, r.pos, vec2(0.0, 1.0), step.y + RING_R).is_some() {
                 r.vel.y = -r.vel.y * 0.75;
@@ -1903,6 +1909,40 @@ mod tests {
             died |= g.update(1.0 / 60.0, &w, &all, &mut s, 1e9).iter().any(|e| matches!(e, Effect::Died(_)));
         }
         assert!(died && s.dead);
+    }
+
+    #[test]
+    fn some_breathe_underwater_and_some_pull_rings_in() {
+        let mut w = world();
+        let mut g = Game::new(&LevelSpec::default(), &mut w, vec2(0.0, 0.0));
+        let mut s = standing(0.0);
+        s.underwater = true;
+        s.kit.breathe = true;
+        for _ in 0..(40.0 * 60.0) as usize {
+            g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        }
+        assert!(!s.dead && g.air == AIR, "never out of air");
+        // Scattered rings close by fly to a ring magnet.
+        s.underwater = false;
+        s.kit.magnet = true;
+        g.rings = 3;
+        g.scatter(s.pos);
+        let caught = (0..200).any(|_| g.update(1.0 / 60.0, &w, &all, &mut s, 1e9).contains(&Effect::RingCaught(s.pos)));
+        assert!(caught && g.rings > 0, "pulled in and caught: {}", g.rings);
+    }
+
+    #[test]
+    fn an_insta_shield_breaks_badniks_further_off_and_nothing_hurts() {
+        let mut w = world();
+        let spec =
+            LevelSpec { enemies: vec![Placed { kind: EnemyKind::Puffer, at: [0.0, 3.0] }], ..LevelSpec::default() };
+        let mut g = Game::new(&spec, &mut w, vec2(0.0, 0.0));
+        let mut s = standing(0.0);
+        s.pos = g.enemies[0].pos + vec2(0.0, 40.0);
+        s.shielding = Some(0);
+        let out = g.update(1.0 / 60.0, &w, &all, &mut s, 1e9);
+        assert!(g.enemies.is_empty(), "spiky, and still broken");
+        assert!(!s.hurt && out.iter().any(|e| matches!(e, Effect::EnemyDown { .. })));
     }
 
     #[test]

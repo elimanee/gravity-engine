@@ -324,6 +324,10 @@ impl Looks {
 
 const RING_REACH: f32 = 1.1;
 const BADNIK_REACH: f32 = 1.2;
+/// A ring magnet: how close rings fly to him (metres), and how fast (metres
+/// a frame, at least).
+const MAGNET: f32 = 4.5;
+const MAGNET_PULL: f32 = 0.32;
 /// How far ahead the run is made (m along).
 const AHEAD: f32 = 260.0;
 /// How far behind it is kept.
@@ -609,6 +613,16 @@ impl World3 {
                     self.noises.push(Noise::Shot);
                 }
                 Move::Land => {}
+                Move::Bounce => {
+                    self.noises.push(Noise::Spring);
+                    self.pops.push((self.runner.pos - Vec3::Y * 0.4, 8));
+                }
+                Move::InstaShield => {
+                    self.noises.push(Noise::Dash);
+                    self.pops.push((self.runner.pos, 6));
+                }
+                Move::Boost => self.noises.push(Noise::Dash),
+                Move::WallJump => self.noises.push(Noise::Jump),
                 Move::Push { body, impulse, at } => self.phys.push(body, impulse, at),
             }
         }
@@ -701,6 +715,22 @@ impl World3 {
     /// Rings, springs, panels and badniks he touches.
     fn touch(&mut self) {
         let p = self.runner.pos;
+        // A ring magnet pulls the rings close by in (faster than he goes).
+        if self.runner.kit.magnet {
+            let pull = MAGNET_PULL.max(self.runner.speed() * K * 1.3);
+            for (r, _) in &mut self.rings {
+                let to = p - *r;
+                if to.length() < MAGNET {
+                    *r += to.clamp_length_max(pull);
+                }
+            }
+            for s in &mut self.spilled {
+                let to = p - s.at;
+                if s.life > 40 && to.length() < MAGNET {
+                    s.at += to.clamp_length_max(pull);
+                }
+            }
+        }
         let before = self.rings.len();
         self.rings.retain(|r| (r.0 - p).length() > RING_REACH);
         let got = (before - self.rings.len()) as u32;
@@ -741,11 +771,13 @@ impl World3 {
         }
         let mut hit_by = None;
         let attacking = self.runner.attacking();
+        // An insta-shield reaches further, and nothing hurts through it.
+        let (reach, shielded) = (BADNIK_REACH + self.runner.reach(), self.runner.shielded());
         let mut popped = vec![];
         for (k, (b, _)) in self.badniks.iter().enumerate() {
             let centre = b.at + Vec3::Y * 0.5;
-            if (centre - p).length() < BADNIK_REACH {
-                if attacking {
+            if (centre - p).length() < reach {
+                if attacking || shielded {
                     popped.push(k);
                 } else if self.invincible == 0 {
                     hit_by = Some(centre);
@@ -895,9 +927,11 @@ impl World3 {
     fn animate(&mut self) {
         let r = &self.runner;
         let speed = r.speed();
-        self.pose.phase += 0.1 + speed * 0.045;
+        // Revving a peel out, his legs go round as if flat out.
+        let legs = r.peeling.map_or(speed, |t| (t as f32 * 0.4).min(12.0));
+        self.pose.phase += 0.1 + legs * 0.045;
         self.pose.spin += 0.35 + speed * 0.12;
-        self.pose.speed = speed;
+        self.pose.speed = legs;
         self.pose.ball = r.is_ball();
         self.pose.air = !r.grounded;
         self.pose.flying = r.flying.is_some();
@@ -1210,12 +1244,51 @@ impl World3 {
                 None => looks.figure.draw(place, &self.pose),
             }
         }
+        self.draw_move_effects(props);
         drop(span);
         let span = crate::profile::span("3d/draw/to GPU");
         looks.gfx.end();
         set_default_camera();
         drop(span);
         self.hud();
+    }
+
+    /// What some moves add round him: a boost's trail, a bounce's ring, a
+    /// drop dash's sparks, an insta-shield's flash.
+    fn draw_move_effects(&self, props: &Props) {
+        let r = &self.runner;
+        let t = self.frames as f32;
+        let small = |at: Vec3, size: f32| Mat4::from_translation(at) * Mat4::from_scale(Vec3::splat(size));
+        if r.boosting {
+            let back = -r.vel.normalize_or(r.facing);
+            for k in 0..6 {
+                let along = 0.7 + k as f32 * 0.55 + (t * 0.4 + k as f32).sin().abs() * 0.15;
+                let side = vec3(-back.z, 0.0, back.x) * ((t * 0.9 + k as f32 * 2.1).sin() * 0.25);
+                let at = r.pos + back * along + side + Vec3::Y * ((t * 0.7 + k as f32 * 1.3).sin() * 0.15);
+                draw_at(&props.puff, small(at, 0.42 - k as f32 * 0.05));
+            }
+        }
+        if r.bouncing.is_some() {
+            for k in 0..8 {
+                let a = k as f32 / 8.0 * std::f32::consts::TAU + t * 0.2;
+                draw_at(&props.puff, small(r.pos + vec3(a.cos(), 0.0, a.sin()) * 0.75, 0.35));
+            }
+        }
+        if r.drop_ready() {
+            for k in 0..4 {
+                let a = t * 0.5 + k as f32 / 4.0 * std::f32::consts::TAU;
+                let at = r.pos + vec3(a.cos(), (a * 2.0).sin() * 0.3, a.sin()) * 0.7;
+                draw_at(&props.ring, small(at, 0.25) * Mat4::from_rotation_y(a));
+            }
+        }
+        if let Some(f) = r.shielding {
+            let out = 0.6 + f as f32 / 16.0 * 0.6;
+            for k in 0..12 {
+                let a = k as f32 / 12.0 * std::f32::consts::TAU;
+                let b = (k % 3) as f32 - 1.0;
+                draw_at(&props.puff, small(r.pos + vec3(a.cos(), b * 0.5, a.sin()) * out, 0.3));
+            }
+        }
     }
 
     fn hud(&self) {
@@ -1233,6 +1306,14 @@ impl World3 {
         let flash = self.ring_count == 0 && (self.frames / 20).is_multiple_of(2);
         shadowed("RINGS", 24.0, 96.0, 22.0, if flash { RED } else { yellow });
         shadowed(&self.ring_count.to_string(), 120.0, 96.0, 22.0, WHITE);
+        // The boost left.
+        if let Some(g) = self.runner.boost_gauge() {
+            shadowed("BOOST", 24.0, 124.0, 22.0, yellow);
+            let (x, y, bw, bh) = (120.0, 108.0, 120.0, 14.0);
+            draw_rectangle(x - 2.0, y - 2.0, bw + 4.0, bh + 4.0, Color::new(0.0, 0.0, 0.0, 0.55));
+            let c = if g < 0.25 { Color::new(1.0, 0.45, 0.3, 1.0) } else { Color::new(0.45, 0.85, 1.0, 1.0) };
+            draw_rectangle(x, y, bw * g, bh, c);
+        }
         if self.maker.endless() {
             shadowed(&format!("{} m", self.distance as u32), screen_width() - 160.0, 40.0, 26.0, WHITE);
             if self.best >= 20.0 {
@@ -1348,6 +1429,8 @@ fn anim_for(r: &Runner) -> (&'static str, f32) {
         ("PAIN", 0.1)
     } else if r.spindash.is_some() {
         ("SPIN", 0.6)
+    } else if let Some(t) = r.peeling {
+        ("DASH", 0.1 + (t as f32 * 0.01).min(0.4))
     } else if r.is_ball() {
         ("ROLL", 0.35 + speed * 0.04)
     } else if r.gliding.is_some() {
