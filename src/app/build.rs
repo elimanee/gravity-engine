@@ -95,10 +95,12 @@ impl App {
         self.record(kind.label());
         let speed = if kind == LinkKind::Motor { self.s.motor_speed } else { 0.0 };
         if let Some(mut l) = Link::new(&mut self.world, kind, a, b, pa, pb, speed) {
-            if kind == LinkKind::Motor && self.s.motor_drive {
-                // Rebuilt as a driven motor (it coasts until ← or → is held).
+            if kind == LinkKind::Motor && (self.s.motor_drive || self.s.motor_channel.is_some()) {
+                // Rebuilt as a driven motor (it coasts until ← or → is held,
+                // or its signal is on).
                 l.remove(&mut self.world);
-                l = Link::restore(&mut self.world, links::LinkSpec { drive: true, ..l.spec() });
+                let channel = self.s.motor_channel;
+                l = Link::restore(&mut self.world, links::LinkSpec { drive: true, channel, ..l.spec() });
             }
             self.links.push(l);
             let p = crate::physics::to_screen(pa.x, pa.y);

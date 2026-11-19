@@ -1,10 +1,11 @@
-//! The Gadget tool (lasers, thrusters, cannons, lamps, hooks) and what gadgets do each
-//! frame, plus motors driven with the arrow keys.
+//! The Gadget tool (lasers, thrusters, cannons, lamps, hooks, and the
+//! mechanisms: buttons, sensors, targets, timers, pistons) and what gadgets
+//! do each frame, plus motors driven with the arrow keys or a signal.
 
 use super::fire::point_gap_px;
 use super::*;
 use crate::audio::sfx::Sound;
-use crate::physics::gadgets::{self, Ammo, Beam, Gadget, GadgetKind, GadgetSpec, Surface, Trigger};
+use crate::physics::gadgets::{self, Ammo, Beam, Gadget, GadgetKind, GadgetSpec, Surface, Trigger, CHANNELS};
 use crate::physics::to_screen;
 use rapier2d::prelude::{nalgebra, vector, ColliderHandle, Vector};
 
@@ -36,6 +37,22 @@ fn screen_dir(d: Vector<f32>) -> Vec2 {
     vec2(d.x, -d.y)
 }
 
+/// A dashed line from `a` to `b` (screen).
+fn dashed(a: Vec2, b: Vec2, dash: f32, gap: f32, width: f32, c: Color) {
+    let len = a.distance(b);
+    if len < 1.0 {
+        return;
+    }
+    let d = (b - a) / len;
+    let mut s = 0.0;
+    while s < len {
+        let e = (s + dash).min(len);
+        let (p, q) = (a + d * s, a + d * e);
+        draw_line(p.x, p.y, q.x, q.y, width, c);
+        s += dash + gap;
+    }
+}
+
 impl App {
     pub(super) fn gadget_press(&mut self, m: Vec2) {
         let (x, y) = to_phys(m.x, m.y);
@@ -55,6 +72,8 @@ impl App {
             GadgetKind::Cannon => vec2(0.7, -0.7).normalize(),
             GadgetKind::Lamp => vec2(0.0, 1.0),
             GadgetKind::Grapple => vec2(0.0, -1.0),
+            GadgetKind::Sensor => vec2(1.0, 0.0),
+            GadgetKind::Button | GadgetKind::Target | GadgetKind::Timer | GadgetKind::Piston => vec2(0.0, -1.0),
         }
     }
 
@@ -65,6 +84,10 @@ impl App {
         let aim = if aim.length() > 12.0 { aim.normalize() } else { Self::default_aim(kind) };
         let world_angle = (-aim.y).atan2(aim.x);
         let host = drag.host.filter(|(b, _)| self.world.bodies.contains(*b));
+        if kind == GadgetKind::Piston && host.is_none() {
+            self.toasts.status("gadget", "A piston goes on an object (a plank becomes a door or a lift)");
+            return;
+        }
         let (at, angle) = match host {
             Some((b, local)) => ([local.x, local.y], world_angle - self.world.bodies[b].rotation().angle()),
             None => {
@@ -75,23 +98,38 @@ impl App {
         let power = match kind {
             GadgetKind::Thruster => self.s.thrust,
             GadgetKind::Lamp => self.s.lamp_reach / PPM,
+            GadgetKind::Sensor => self.s.sensor_reach,
+            GadgetKind::Timer => self.s.timer_period,
+            GadgetKind::Piston => self.s.piston_travel,
             _ => self.s.cannon_speed,
         };
+        let rate = if kind == GadgetKind::Piston { self.s.piston_speed } else { self.s.cannon_rate };
+        // What sends a signal works by itself.
+        let trigger = if kind.sends() { Trigger::Always } else { self.s.gadget_trigger };
         let spread =
             if kind == GadgetKind::Lamp && self.s.lamp_spot { gadgets::SPOT_SPREAD } else { std::f32::consts::PI };
         let colour = gadgets::LAMP_COLOURS[self.s.lamp_colour.min(gadgets::LAMP_COLOURS.len() - 1)];
         let spec = GadgetSpec {
             kind,
-            trigger: self.s.gadget_trigger,
+            trigger,
             ammo: self.s.cannon_ammo,
             power,
-            rate: self.s.cannon_rate,
+            rate,
             at,
             angle,
             spread,
             colour,
+            channel: self.s.signal_channel,
+            mode: self.s.signal_mode,
+            ext: 0.0,
         };
         self.record(kind.label());
+        // A piston holds its object still (it is pinned) and slides it.
+        if let Some((b, _)) = host.filter(|_| kind == GadgetKind::Piston) {
+            if let Some(o) = self.objects.iter_mut().find(|o| o.body == b) {
+                o.set_pinned(&mut self.world, true);
+            }
+        }
         self.gadgets.push(Gadget::new(spec, host.map(|(b, _)| b)));
         self.sound(Sound::Snap, drag.start, 0.5);
         let what = match (kind, host.is_some()) {
@@ -102,6 +140,11 @@ impl App {
         };
         let msg = if kind == GadgetKind::Lamp && !self.s.night {
             format!("{what} added  ·  its light shows at night (Shift+T)")
+        } else if kind.sends() {
+            let how = if kind == GadgetKind::Timer { "while on" } else { spec.mode.about() };
+            format!("{what} added  ·  sends the {} signal {how}", gadgets::channel_name(spec.channel))
+        } else if kind == GadgetKind::Piston {
+            format!("Piston added  ·  slides its object {}", spec.trigger.label())
         } else {
             format!("{what} added  ·  works {}  ·  right-click it to remove", spec.trigger.label())
         };
@@ -141,14 +184,129 @@ impl App {
             Trigger::Left => key(KeyCode::Left) || gp.left(),
             Trigger::Right => key(KeyCode::Right) || gp.right(),
             Trigger::Beat => false,
+            Trigger::Signal(c) => self.signals.get(c as usize).copied().unwrap_or(false),
         }
     }
 
     /// Something is driven with ← (so holding it does not rewind).
     pub(super) fn listens_to_left(&self) -> bool {
         self.gadgets.iter().any(|g| g.spec.trigger == Trigger::Left)
-            || self.links.iter().any(|l| l.drive)
+            || self.links.iter().any(|l| l.drive && l.channel.is_none())
             || self.sonic.is_some()
+    }
+
+    /// Where the character is (centre and half size, m), for buttons and
+    /// sensors.
+    fn sonic_box(&self) -> Option<(Point<f32>, Vector<f32>)> {
+        let s = &self.sonic.as_ref()?.sonic;
+        if s.dead {
+            return None;
+        }
+        let (wr, hr) = s.radii();
+        let (x, y) = to_phys(s.pos.x, s.pos.y);
+        let k = crate::sonic::SCALE / PPM;
+        Some((Point::new(x, y), vector![wr * k, hr * k]))
+    }
+
+    /// Whether what is on button `i` presses it: anything that is not
+    /// fixed in place (pinned and driven things too), or the character.
+    fn button_pressed(&self, i: usize, sonic: Option<(Point<f32>, Vector<f32>)>) -> bool {
+        let g = &self.gadgets[i];
+        g.pad_touched(&self.world)
+            || sonic.zip(g.pad(&self.world)).is_some_and(|((c, half), (centre, _))| {
+                let r = gadgets::PAD_HALF.1;
+                (c.x - centre.x).abs() < half.x + r && (c.y - centre.y).abs() < half.y + r
+            })
+    }
+
+    /// Sensor `i`'s beam: how far it reaches (m) and whether something
+    /// that is not fixed in place (or the character) is in it.
+    fn sensor_beam(&self, i: usize, sonic: Option<(Point<f32>, Vector<f32>)>) -> (f32, bool) {
+        let g = &self.gadgets[i];
+        let (seen, moving) = g.sense(&self.world);
+        let crossed = g.muzzle(&self.world).zip(sonic).is_some_and(|((p, d), (c, half))| {
+            let (min, max) = ([c.x - half.x, c.y - half.y], [c.x + half.x, c.y + half.y]);
+            gadgets::segment_hits_rect(p, p + d * seen, min, max)
+        });
+        (seen, moving || crossed)
+    }
+
+    /// The mechanisms: what each one senses, and so which channels are on.
+    fn update_signals(&mut self, dt: f32, running: bool) {
+        if !self.gadgets.iter().any(|g| g.spec.kind.sends()) {
+            self.signals = [false; CHANNELS];
+            return;
+        }
+        if !running {
+            self.world.refresh_queries();
+        }
+        let sonic = self.sonic_box();
+        let mut signals = [false; CHANNELS];
+        let mut clicks = vec![];
+        for i in 0..self.gadgets.len() {
+            let kind = self.gadgets[i].spec.kind;
+            if !kind.sends() {
+                continue;
+            }
+            let raw = match kind {
+                GadgetKind::Button => self.button_pressed(i, sonic),
+                GadgetKind::Sensor => {
+                    let (seen, hit) = self.sensor_beam(i, sonic);
+                    self.gadgets[i].seen = seen;
+                    hit
+                }
+                GadgetKind::Target => self.gadgets[i].lit,
+                _ => {
+                    let g = &mut self.gadgets[i];
+                    let period = g.spec.power.max(0.1);
+                    if running {
+                        g.clock = (g.clock + dt) % period;
+                    }
+                    g.clock < period / 2.0
+                }
+            };
+            let g = &mut self.gadgets[i];
+            let was = g.on;
+            if g.signal(raw) {
+                signals[(g.spec.channel as usize).min(CHANNELS - 1)] = true;
+            }
+            if g.on != was && kind != GadgetKind::Timer {
+                if let Some((p, _)) = g.pose(&self.world) {
+                    clicks.push((to_screen(p.x, p.y), g.on));
+                }
+            }
+        }
+        self.signals = signals;
+        for (at, on) in clicks {
+            self.sound(Sound::Snap, at, if on { 0.4 } else { 0.2 });
+        }
+    }
+
+    /// Pistons slide their object out while they work, and back.
+    fn run_pistons(&mut self, dt: f32) {
+        for i in 0..self.gadgets.len() {
+            let g = &self.gadgets[i];
+            if g.spec.kind != GadgetKind::Piston {
+                continue;
+            }
+            let (Some(h), Some((_, d))) = (g.host, g.pose(&self.world)) else { continue };
+            // It holds its object (pinned again if it was let go).
+            if let Some(o) = self.objects.iter_mut().find(|o| o.body == h && !o.pinned) {
+                o.set_pinned(&mut self.world, true);
+            }
+            let g = &mut self.gadgets[i];
+            let (ext, goal, step) = (g.spec.ext, if g.on { g.spec.power } else { 0.0 }, g.spec.rate * dt);
+            let next = if ext < goal { (ext + step).min(goal) } else { (ext - step).max(goal) };
+            if next == ext {
+                continue;
+            }
+            g.spec.ext = next;
+            if let Some(b) = self.world.bodies.get_mut(h) {
+                let to = b.translation() + d * (next - ext);
+                b.set_next_kinematic_translation(to);
+            }
+            self.world.wake_around(h, 0.3);
+        }
     }
 
     /// Once per frame before the physics step: which gadgets work, thrust,
@@ -157,8 +315,12 @@ impl App {
     pub(super) fn update_gadgets(&mut self, dt: f32, running: bool, mouse: Vec2) {
         let world = &self.world;
         self.gadgets.retain(|g| g.host.is_none_or(|h| world.bodies.contains(h)));
+        self.update_signals(dt, running);
         let beat = running && self.audio.analyzer.beat_now;
         for i in 0..self.gadgets.len() {
+            if self.gadgets[i].spec.kind.sends() {
+                continue;
+            }
             let t = self.gadgets[i].spec.trigger;
             let held = self.trigger_held(t);
             let g = &mut self.gadgets[i];
@@ -180,12 +342,18 @@ impl App {
             } else {
                 None
             };
+            let signals = self.signals;
             for l in &self.links {
-                l.set_drive(&mut self.world, dir);
+                let d = match l.channel {
+                    Some(c) => signals[(c as usize).min(CHANNELS - 1)].then_some(1.0),
+                    None => dir,
+                };
+                l.set_drive(&mut self.world, d);
             }
             self.run_thrusters(dt);
             self.run_cannons(dt);
             self.run_grapples(dt, mouse);
+            self.run_pistons(dt);
         }
         self.trace_beams(dt, running);
     }
@@ -356,6 +524,9 @@ impl App {
     /// pushed and heated.
     fn trace_beams(&mut self, dt: f32, running: bool) {
         self.beams.clear();
+        for g in self.gadgets.iter_mut().filter(|g| g.spec.kind == GadgetKind::Target) {
+            g.lit = false;
+        }
         if !self.gadgets.iter().any(|g| g.on && g.spec.kind == GadgetKind::Laser) {
             return;
         }
@@ -388,6 +559,19 @@ impl App {
             let Some((p, d)) = g.muzzle(&self.world) else { continue };
             beams.push(gadgets::trace(&self.world, p, d, g.host, surface));
         }
+        // Targets stop the beams that reach them, and light up.
+        let targets: Vec<(usize, Point<f32>)> = (0..self.gadgets.len())
+            .filter(|&i| self.gadgets[i].spec.kind == GadgetKind::Target)
+            .filter_map(|i| self.gadgets[i].pose(&self.world).map(|(p, _)| (i, p)))
+            .collect();
+        if !targets.is_empty() {
+            let centres: Vec<Point<f32>> = targets.iter().map(|t| t.1).collect();
+            for beam in &mut beams {
+                if let Some(k) = gadgets::clip_at_target(beam, &centres) {
+                    self.gadgets[targets[k].0].lit = true;
+                }
+            }
+        }
         if running {
             let mut sparks = vec![];
             for beam in &beams {
@@ -418,6 +602,8 @@ impl App {
         for beam in &self.beams {
             gadgets::draw_beam(beam, t);
         }
+        self.draw_sensor_beams(t);
+        self.draw_wires(t);
         self.draw_hooks();
         for g in self.gadgets.iter().filter(|g| g.spec.kind != GadgetKind::Lamp) {
             let Some((p, d)) = g.pose(&self.world) else { continue };
@@ -425,6 +611,66 @@ impl App {
             gadgets::draw_gadget(g.spec.kind, to_screen(p.x, p.y), screen_dir(d), on, t);
         }
         self.draw_lamps();
+        // Each mechanism's channel, and what works on one.
+        for g in &self.gadgets {
+            let channel = if g.spec.kind.sends() { Some(g.spec.channel) } else { g.spec.trigger.channel() };
+            let (Some(c), Some((p, d))) = (channel, g.pose(&self.world)) else { continue };
+            let at = to_screen(p.x, p.y) - screen_dir(d) * 9.0 + vec2(9.0, -9.0);
+            let on = self.signals.get(c as usize).copied().unwrap_or(false);
+            gadgets::draw_channel_dot(at, c, on);
+        }
+    }
+
+    /// Sensors' beams: faint, bright while something crosses them.
+    fn draw_sensor_beams(&self, t: f32) {
+        for g in self.gadgets.iter().filter(|g| g.spec.kind == GadgetKind::Sensor) {
+            let Some((p, d)) = g.muzzle(&self.world) else { continue };
+            let (a, b) = (to_screen(p.x, p.y), to_screen(p.x + d.x * g.seen, p.y + d.y * g.seen));
+            let c = GadgetKind::Sensor.accent();
+            let alpha = if g.on { 0.85 } else { 0.3 + 0.08 * (t * 3.0).sin() };
+            dashed(a, b, 6.0, 4.0, 1.4, Color { a: alpha, ..c });
+            if g.on {
+                draw_circle(b.x, b.y, 4.0, Color { a: 0.5, ..c });
+            }
+        }
+    }
+
+    /// The wires from what sends each signal to what works on it, while
+    /// the Gadget or Link tool is out (brighter while it is on).
+    fn draw_wires(&self, t: f32) {
+        if !matches!(self.s.tool, Tool::Gadget | Tool::Link) {
+            return;
+        }
+        let at = |g: &Gadget| g.pose(&self.world).map(|(p, _)| to_screen(p.x, p.y));
+        for c in 0..CHANNELS as u8 {
+            let senders: Vec<Vec2> =
+                self.gadgets.iter().filter(|g| g.spec.kind.sends() && g.spec.channel == c).filter_map(at).collect();
+            if senders.is_empty() {
+                continue;
+            }
+            let mut ends: Vec<Vec2> =
+                self.gadgets.iter().filter(|g| g.spec.trigger == Trigger::Signal(c)).filter_map(at).collect();
+            for l in self.links.iter().filter(|l| l.channel == Some(c)) {
+                if let Some(b) = self.world.bodies.get(l.a) {
+                    let p = b.position() * l.la;
+                    ends.push(to_screen(p.x, p.y));
+                }
+            }
+            let on = self.signals[c as usize];
+            let colour = gadgets::channel_colour(c);
+            let colour = Color { a: if on { 0.75 } else { 0.35 }, ..colour };
+            for &a in &senders {
+                for &b in &ends {
+                    dashed(a, b, 7.0, 5.0, if on { 2.0 } else { 1.2 }, colour);
+                    if on {
+                        // A spark running along it.
+                        let u = (t * 0.8 + a.x * 0.001) % 1.0;
+                        let p = a + (b - a) * u;
+                        draw_circle(p.x, p.y, 2.5, Color { a: 0.9, ..colour });
+                    }
+                }
+            }
+        }
     }
 
     /// The Gadget tool: its aim while dragging, or what it would place.
@@ -451,7 +697,11 @@ impl App {
                 } else {
                     gadgets::draw_gadget(kind, m, Self::default_aim(kind), false, get_time() as f32);
                 }
-                icons::trigger(self.s.gadget_trigger, m + vec2(20.0, -18.0), 14.0, theme::alpha(c, 0.9));
+                if kind.sends() {
+                    gadgets::draw_channel_dot(m + vec2(20.0, -18.0), self.s.signal_channel, false);
+                } else {
+                    icons::trigger(self.s.gadget_trigger, m + vec2(20.0, -18.0), 14.0, theme::alpha(c, 0.9));
+                }
             }
         }
     }

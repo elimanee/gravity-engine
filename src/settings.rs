@@ -55,6 +55,8 @@ pub struct Settings {
     pub motor_speed: f32,
     /// New motors are driven with ← / → instead of turning by themselves.
     pub motor_drive: bool,
+    /// New motors turn on this signal channel (it wins over `motor_drive`).
+    pub motor_channel: Option<u8>,
 
     /// What the Gadget tool places, and when it works.
     pub gadget_kind: GadgetKind,
@@ -70,6 +72,15 @@ pub struct Settings {
     pub lamp_reach: f32,
     pub lamp_spot: bool,
     pub lamp_colour: usize,
+    /// Mechanisms: the channel a new one sends on, whether a press
+    /// switches it on and off, a sensor's reach (m), a timer's period
+    /// (s), and how far (m) and how fast (m/s) a piston slides.
+    pub signal_channel: u8,
+    pub signal_mode: crate::physics::gadgets::SendMode,
+    pub sensor_reach: f32,
+    pub timer_period: f32,
+    pub piston_travel: f32,
+    pub piston_speed: f32,
 
     pub zone_kind: ZoneKind,
     /// Wind direction in degrees (0 = right, 90 = up).
@@ -176,6 +187,7 @@ impl Default for Settings {
             link_kind: LinkKind::Rope,
             motor_speed: 4.0,
             motor_drive: false,
+            motor_channel: None,
             gadget_kind: GadgetKind::Laser,
             gadget_trigger: Trigger::Always,
             thrust: 2.0,
@@ -185,6 +197,12 @@ impl Default for Settings {
             lamp_reach: 380.0,
             lamp_spot: false,
             lamp_colour: 0,
+            signal_channel: 0,
+            signal_mode: crate::physics::gadgets::SendMode::Hold,
+            sensor_reach: 6.0,
+            timer_period: 2.0,
+            piston_travel: 2.0,
+            piston_speed: 1.5,
             zone_kind: ZoneKind::Wind,
             zone_angle: 0.0,
             zone_strength: 14.0,
@@ -246,6 +264,10 @@ pub const CANNON_SPEED_RANGE: (f32, f32) = (2.0, 40.0);
 pub const CANNON_RATE_RANGE: (f32, f32) = (0.3, 10.0);
 pub const DARKNESS_RANGE: (f32, f32) = (0.5, 0.95);
 pub const LAMP_REACH_RANGE: (f32, f32) = (120.0, 800.0);
+pub const SENSOR_REACH_RANGE: (f32, f32) = (0.5, 20.0);
+pub const TIMER_PERIOD_RANGE: (f32, f32) = (0.3, 10.0);
+pub const PISTON_TRAVEL_RANGE: (f32, f32) = (0.2, 8.0);
+pub const PISTON_SPEED_RANGE: (f32, f32) = (0.2, 8.0);
 
 impl Settings {
     fn path() -> Option<std::path::PathBuf> {
@@ -301,6 +323,16 @@ impl Settings {
         self.darkness = clamp(self.darkness, DARKNESS_RANGE, d.darkness);
         self.lamp_reach = clamp(self.lamp_reach, LAMP_REACH_RANGE, d.lamp_reach);
         self.lamp_colour = self.lamp_colour.min(crate::physics::gadgets::LAMP_COLOURS.len() - 1);
+        let last = crate::physics::gadgets::CHANNELS as u8 - 1;
+        self.signal_channel = self.signal_channel.min(last);
+        self.motor_channel = self.motor_channel.map(|c| c.min(last));
+        if let Trigger::Signal(c) = self.gadget_trigger {
+            self.gadget_trigger = Trigger::Signal(c.min(last));
+        }
+        self.sensor_reach = clamp(self.sensor_reach, SENSOR_REACH_RANGE, d.sensor_reach);
+        self.timer_period = clamp(self.timer_period, TIMER_PERIOD_RANGE, d.timer_period);
+        self.piston_travel = clamp(self.piston_travel, PISTON_TRAVEL_RANGE, d.piston_travel);
+        self.piston_speed = clamp(self.piston_speed, PISTON_SPEED_RANGE, d.piston_speed);
         self.world_size = self.world_size.clamp(1, 4);
         self.zone_strength = clamp(self.zone_strength, ZONE_STRENGTH_RANGE, d.zone_strength);
         self.zone_angle =

@@ -29,7 +29,7 @@ const COLUMNS: &[&[(&str, &str)]] = &[
         ("K", "Pour sand, liquid, beads"),
         ("C", "Knife: cut ropes and objects"),
         ("Y", "Fire: burn things, melt ice"),
-        ("L", "Gadgets: laser, lamp, hook…"),
+        ("L", "Gadgets: laser, lamp, button, piston…"),
         ("← ↑ → ↓", "Drive motors, fire gadgets"),
         ("Wheel", "Tool radius / thickness"),
         ("Shift+Wheel", "Tool strength"),

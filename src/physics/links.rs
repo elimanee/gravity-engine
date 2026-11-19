@@ -84,6 +84,9 @@ pub struct LinkSpec {
     pub speed: f32,
     /// Motor driven with the arrow keys (it coasts when none is held).
     pub drive: bool,
+    /// Motor that turns while this signal channel is on (it coasts when
+    /// it is off); see [`super::gadgets`].
+    pub channel: Option<u8>,
 }
 
 pub struct Link {
@@ -100,8 +103,9 @@ pub struct Link {
     /// Motor speed (rad/s, positive = clockwise on screen). Glue: angle of the
     /// joint frame on `b`.
     pub speed: f32,
-    /// Motor driven with ← / → (see [`LinkSpec::drive`]).
+    /// Motor driven with ← / → or a signal (see [`LinkSpec::drive`]).
     pub drive: bool,
+    pub channel: Option<u8>,
     pub joint: ImpulseJointHandle,
 }
 
@@ -128,19 +132,21 @@ impl Link {
         } else {
             ((pa - pb).norm().max(0.05), speed)
         };
-        Some(Self::restore(world, LinkSpec { kind, a, b, la, lb, length, speed, drive: false }))
+        Some(Self::restore(world, LinkSpec { kind, a, b, la, lb, length, speed, drive: false, channel: None }))
     }
 
     pub fn spec(&self) -> LinkSpec {
-        let (kind, a, b, la, lb, length, speed, drive) =
-            (self.kind, self.a, self.b, self.la, self.lb, self.length, self.speed, self.drive);
-        LinkSpec { kind, a, b, la, lb, length, speed, drive }
+        let (kind, a, b, la, lb, length, speed, drive, channel) =
+            (self.kind, self.a, self.b, self.la, self.lb, self.length, self.speed, self.drive, self.channel);
+        LinkSpec { kind, a, b, la, lb, length, speed, drive, channel }
     }
 
     /// Recreate a link from its local anchors (scenes, undo).
     pub fn restore(world: &mut PhysWorld, spec: LinkSpec) -> Self {
-        let LinkSpec { kind, a, b, la, lb, length, speed, drive } = spec;
-        let drive = drive && kind == LinkKind::Motor;
+        let LinkSpec { kind, a, b, la, lb, length, speed, drive, channel } = spec;
+        let channel = channel.filter(|_| kind == LinkKind::Motor).map(|c| c.min(super::gadgets::CHANNELS as u8 - 1));
+        // On a signal, it is driven like on the arrows.
+        let drive = (drive || channel.is_some()) && kind == LinkKind::Motor;
         let data: GenericJoint = match kind {
             LinkKind::Rope => RopeJointBuilder::new(length).local_anchor1(la).local_anchor2(lb).build().into(),
             // Rapier's spring joint ignores its rest length, so springs are
@@ -178,7 +184,7 @@ impl Link {
                 .into(),
         };
         let joint = world.impulse_joints.insert(a, b.unwrap_or(world.ground), data, true);
-        Link { kind, a, b, la, lb, length, speed, drive, joint }
+        Link { kind, a, b, la, lb, length, speed, drive, channel, joint }
     }
 
     /// Driven motor: turn at its speed one way (`Some(1.0)`), the other
@@ -301,7 +307,10 @@ impl Link {
                     let (s, co) = t.sin_cos();
                     draw_line(a.x + co * 4.0, a.y + s * 4.0, a.x + co * 9.0, a.y + s * 9.0, 2.0, c);
                 }
-                if self.drive {
+                if let Some(ch) = self.channel {
+                    // Its signal's colour.
+                    super::gadgets::draw_channel_dot(a + vec2(13.0, -10.0), ch, false);
+                } else if self.drive {
                     // Little ← → marks: it is driven with the arrows.
                     for side in [-1.0f32, 1.0] {
                         let tip = a + vec2(side * 18.0, 0.0);

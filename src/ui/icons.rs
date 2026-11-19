@@ -664,6 +664,43 @@ pub fn gadget_kind(kind: crate::physics::gadgets::GadgetKind, c: Vec2, size: f32
                 draw_line(tip.x, tip.y, p.x, p.y, 1.6 * s, color);
             }
         }
+        GadgetKind::Button => {
+            // A plate, its cap going down and up.
+            let k = ((t * 2.0).sin() * 0.5 + 0.5) * 3.0;
+            draw_rectangle(c.x - 9.0 * s, c.y + 4.0 * s, 18.0 * s, 3.0 * s, color);
+            draw_rectangle(c.x - 5.0 * s, c.y + (k - 2.0) * s, 10.0 * s, (6.0 - k) * s, color);
+            draw_line(c.x - 3.0 * s, c.y - 8.0 * s, c.x - 3.0 * s, c.y - 4.0 * s, 1.4 * s, soft);
+            draw_line(c.x + 3.0 * s, c.y - 8.0 * s, c.x + 3.0 * s, c.y - 4.0 * s, 1.4 * s, soft);
+        }
+        GadgetKind::Sensor => {
+            // An eye's beam, broken by something going through it.
+            draw_rectangle(c.x - 11.0 * s, c.y - 3.0 * s, 6.0 * s, 6.0 * s, color);
+            let mut x = -4.0;
+            while x < 10.0 {
+                draw_line(c.x + x * s, c.y, c.x + (x + 2.0) * s, c.y, 1.4 * s, soft);
+                x += 4.0;
+            }
+            let u = (t * 0.8) % 1.0;
+            draw_circle(c.x + 3.0 * s, c.y - 10.0 * s + u * 20.0 * s, 2.6 * s, color);
+        }
+        GadgetKind::Target => {
+            draw_circle_lines(c.x, c.y, 8.5 * s, 1.6 * s, color);
+            draw_circle_lines(c.x, c.y, 4.8 * s, 1.6 * s, color);
+            draw_circle(c.x, c.y, 1.8 * s, color);
+        }
+        GadgetKind::Timer => {
+            draw_circle_lines(c.x, c.y, 8.5 * s, 1.6 * s, color);
+            let a = t * 2.0;
+            draw_line(c.x, c.y, c.x + a.sin() * 6.0 * s, c.y - a.cos() * 6.0 * s, 1.6 * s, color);
+            draw_line(c.x, c.y, c.x, c.y - 4.0 * s, 1.6 * s, soft);
+        }
+        GadgetKind::Piston => {
+            // A cylinder pushing a block out and back.
+            let k = ((t * 1.6).sin() * 0.5 + 0.5) * 6.0;
+            draw_rectangle(c.x - 11.0 * s, c.y - 4.0 * s, 8.0 * s, 8.0 * s, color);
+            draw_line(c.x - 3.0 * s, c.y, c.x + (k - 1.0) * s, c.y, 2.0 * s, soft);
+            draw_rectangle(c.x + (k - 1.0) * s, c.y - 6.0 * s, 4.0 * s, 12.0 * s, color);
+        }
     }
 }
 
@@ -683,6 +720,12 @@ pub fn trigger(trigger: crate::physics::gadgets::Trigger, c: Vec2, size: f32, co
                 color,
             );
             draw_triangle(c + d * 7.0 * s, c + d * 1.0 * s + n * 5.0 * s, c + d * 1.0 * s - n * 5.0 * s, color);
+        }
+        None if trigger.channel().is_some() => {
+            // A signal: a dot of its channel's colour with a spark.
+            let ch = crate::physics::gadgets::channel_colour(trigger.channel().unwrap_or(0));
+            draw_circle(c.x, c.y, 5.5 * s, Color { a: color.a, ..ch });
+            draw_circle_lines(c.x, c.y, 7.0 * s, 1.2 * s, color);
         }
         None if trigger == Trigger::Beat => {
             draw_circle(c.x - 2.5 * s, c.y + 4.0 * s, 3.0 * s, color);

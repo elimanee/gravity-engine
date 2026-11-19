@@ -14,7 +14,7 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 |---|---|---|
 | ![Sandbox](docs/screenshots/sandbox.png) | ![Settings](docs/screenshots/settings.png) | ![Tools](docs/screenshots/tools.png) |
 
-## What's new in 3.6: the 3D mode and characters of your own
+## What's new in 3.6: the 3D mode, characters of your own and mechanisms
 
 | The endless 3D run | The 3D zone |
 |---|---|
@@ -29,6 +29,14 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 
 - **Characters of your own** (Library → Sonic → *Characters*, or `--characters`): give one a name, the look of a built-in character in **colours of your choosing**, how it runs and jumps (top speed, acceleration, jump, gravity, air control), and **up to eight moves to mix**, each on the jump button (in the air) or on `X`: a **double jump**, an **air dash**, a **homing attack** that goes for the nearest badnik or monitor (and bounces off it, ready for the next), a **stomp** straight down that breaks the badniks where it lands, something to **throw** that breaks badniks and monitors, Sonic Mania's **drop dash**, Sonic CD's **peel out**, Sonic 3's **insta-shield** and **bounce**, a **wall jump**, a **boost** with its gauge, and the built-in characters' own: flying, gliding (climbing or not), the hammer and the teleport. Each has its setting (how high, how fast, how far). They can also be a **ring magnet** and **breathe underwater**. The preview plays every move; **Try in 2D** and **Try in 3D** play the character as it is, saved or not, and `Esc` comes back. They play everywhere the others do: the acts, your levels, the endless run, the special stages, the sandbox and the 3D mode, chosen with *Yours* under *Play as* or `Shift+N`.
 - For a look of their own: **Make from drawing** makes them a sprite sheet from the game's drawing, in their colours, to paint over in the sprite region editor, or **Choose a picture…** takes any sheet; in 3D, any model of your model pack, by its name in `models.dat`, coloured like them. See [Characters of your own](#characters-of-your-own).
+
+![Chain reaction: a red ball on a button, its green wire to a piston that has lifted a door; a blue ball that went through a sensor's beam, its blue wire to a laser; the beam bent up by a mirror to a target, whose red wires go to a spinning windmill and a cannon firing at a tower of crates](docs/screenshots/chain-reaction.png)
+
+- **Mechanisms** (Gadget tool, `L`, second row): things that send a **signal**, and things that work on one, to build machines that set each other off.
+  - A **button** is pressed by whatever rests on it (an object, sand, a ragdoll, Sonic); a **sensor** casts an invisible beam that something crosses; a **target** lights up when a laser reaches it (mirrors can bring one round), and stops the beam; a **timer** is on half of each period.
+  - Each one sends on one of **four coloured channels**, red, green, blue or yellow, either while it is on, from the first press for good (*Stays on*), or switched at each press (*Flips*).
+  - Lasers, thrusters, cannons, lamps, hooks, the new **piston** and **motors** can work **on a signal** instead of always, on an arrow key or on the beat. A piston put on an object slides it out and back (a plank becomes a door, a lift, a crusher); a motor on a signal turns while it is on.
+  - With the Gadget or Link tool out, dashed **wires** of each channel's colour join what sends to what works on it, lit while the signal is on. Example scene *Chain reaction*.
 
 ## What's new in 3.5: zone gimmicks, a zone's sheet and a fuller sprite region editor
 
@@ -473,7 +481,7 @@ Without them, everything is drawn with shapes.
   | K | Pour | Pour sand, liquid or beads; right-drag erases |
   | C | Knife | Cut ropes, springs, joints and cloth; slice objects in two |
   | Y | Fire | Set things on fire, melt ice |
-  | L | Gadgets | Lasers, thrusters (or fans), cannons, lamps and grappling hooks, always on, on an arrow key or on the beat |
+  | L | Gadgets | Lasers, thrusters (or fans), cannons, lamps, grappling hooks and pistons, always on, on an arrow key, on the beat or on a signal; and buttons, sensors, targets and timers that send the signals |
 
   The tool card (bottom left) holds each tool's settings: radius / strength for area tools (mouse wheel: radius, `Shift`+wheel: strength), thickness, colour and pinning for Draw, the kind of link (and motor speed) for Link, the kind of zone for Zone, the selection commands for Select and the kind of grain for Pour.
 - **8 border modes** — `B` to cycle (`Shift+B` backwards):
@@ -507,6 +515,7 @@ Without them, everything is drawn with shapes.
 - **Fire and heat** (`Y`) — burning, spreading fire, ash, melting ice, cracking glass; water puts it out
 - **Jelly and cloth** (`U` / `Shift+U`) — soft bodies from any image or shape, and fabric that drapes, flaps in the wind and tears
 - **Gadgets** (`L`) — lasers that reflect off mirrors and cross glass, thrusters, fans, cannons, lamps and grappling hooks; motors driven with the arrow keys
+- **Mechanisms** (`L`) — buttons, sensors, laser targets and timers send signals on four coloured channels; lasers, thrusters, cannons, lamps, hooks, pistons (doors and lifts from any plank) and motors work on them
 - **Planets** — objects with their own gravity that others orbit
 - **Playable Sonic** (`Shift+O`) — arrows and `Space`, with the physics of the Mega Drive games: loops, rolling, spin dash, rings; **Tails, Knuckles, Amy and Sonic.exe** (`Shift+N`) fly, glide and climb, swing a hammer and teleport
 - **Halloween Night** — a graveyard act at night where Sonic.exe hunts you

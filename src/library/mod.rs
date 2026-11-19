@@ -165,7 +165,7 @@ impl Builder {
         let [ax, ay] = self.phys(pa.0, pa.1);
         let [bx, by] = self.phys(pb.0, pb.1);
         let length = ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt().max(0.05);
-        self.scene.links.push(SceneLink { kind, a, b, la, lb, length, speed, drive: false });
+        self.scene.links.push(SceneLink { kind, a, b, la, lb, length, speed, drive: false, channel: None });
     }
 
     /// A zone over the design rectangle `(x0, y0, x1, y1)`.
@@ -197,6 +197,14 @@ impl Builder {
     pub fn drive_last(&mut self) {
         if let Some(l) = self.scene.links.last_mut() {
             l.drive = true;
+        }
+    }
+
+    /// The last link becomes a motor that turns on signal channel `c`.
+    pub fn signal_last(&mut self, c: u8) {
+        if let Some(l) = self.scene.links.last_mut() {
+            l.drive = true;
+            l.channel = Some(c);
         }
     }
 

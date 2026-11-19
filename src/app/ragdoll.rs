@@ -157,6 +157,7 @@ impl App {
             length: rest + min,
             speed: rest + max,
             drive: false,
+            channel: None,
         };
         let link = Link::restore(&mut self.world, spec);
         self.links.push(link);

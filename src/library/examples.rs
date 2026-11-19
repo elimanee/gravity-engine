@@ -1,7 +1,7 @@
 //! Example scenes, opened from the library panel (E).
 
 use super::*;
-use crate::physics::gadgets::{LAMP_COLOURS, SPOT_SPREAD};
+use crate::physics::gadgets::{SendMode, LAMP_COLOURS, SPOT_SPREAD};
 
 pub const ALL: &[Example] = &[
     Example { name: "Newton's cradle", about: "Five steel balls on ropes", build: cradle },
@@ -13,6 +13,11 @@ pub const ALL: &[Example] = &[
     Example { name: "Parcel factory", about: "Conveyor belts sort falling parcels", build: factory },
     Example { name: "Portal loop", about: "Endless fall through a pair of portals", build: portals },
     Example { name: "Laser lab", about: "Mirrors bend the beam, glass tints it, wood burns", build: laser_lab },
+    Example {
+        name: "Chain reaction",
+        about: "A button opens a door, a sensor lights a laser, a target starts it all",
+        build: chain_reaction,
+    },
     Example { name: "Rocket car", about: "← → drive  ·  ↑ thruster  ·  ↓ cannon", build: rocket_car },
     Example { name: "Solar system", about: "Planets orbit a sun with its own gravity", build: solar_system },
     Example { name: "Night lights", about: "Lamps cast shadows in the rain  ·  Shift+T for day", build: night_lights },
@@ -186,6 +191,67 @@ fn laser_lab(b: &mut Builder) {
         b.shape(Shape::Box, WOOD, 200.0, y, 48.0);
     }
     b.shape(Shape::Box, WOOD, 250.0, 666.0, 48.0);
+}
+
+/// Mechanisms one after the other: a ball rolls onto a button (green),
+/// which has a piston lift a door; the ball behind it rolls out and falls
+/// through a sensor's beam (blue), which turns a laser on; a mirror sends
+/// the beam up to a target (red), which starts a windmill and a cannon.
+fn chain_reaction(b: &mut Builder) {
+    let (red, green, blue) = (0, 1, 2);
+    // Each one stays on once set off: the ball may bounce off the button,
+    // only goes through the sensor, and what the cannon knocks over may
+    // come between the laser and the target.
+    let send = |kind: GadgetKind, channel: u8, power: f32| GadgetSpec {
+        kind,
+        channel,
+        power,
+        mode: SendMode::Latch,
+        ..GadgetSpec::default()
+    };
+    // A ramp down to a shelf with a button, and a stop at its end.
+    b.wall(&[(40.0, 150.0), (320.0, 260.0)], STONE);
+    b.wall(&[(320.0, 260.0), (440.0, 260.0)], STONE);
+    b.wall(&[(440.0, 262.0), (440.0, 222.0)], STONE);
+    b.shape(Shape::Circle, CORAL, 75.0, 110.0, 40.0);
+    b.gadget(None, (405.0, 253.0), 90.0, send(GadgetKind::Button, green, 0.0));
+    // Below: a ball held on a slope by a door, which a piston lifts.
+    b.wall(&[(440.0, 420.0), (730.0, 470.0)], STONE);
+    b.wall(&[(440.0, 418.0), (440.0, 340.0)], STONE);
+    b.shape(Shape::Circle, SKY, 467.0, 393.0, 36.0);
+    let door = b.stroke(&dense(&[(494.0, 330.0), (494.0, 420.0)]), 14.0, WOOD, true, Material::DEFAULT);
+    let piston = GadgetSpec {
+        kind: GadgetKind::Piston,
+        trigger: Trigger::Signal(green),
+        power: 1.6,
+        rate: 1.2,
+        ..GadgetSpec::default()
+    };
+    b.gadget(Some(door), (494.0, 375.0), 90.0, piston);
+    // The ball falls off the end through a sensor's beam.
+    b.gadget(None, (712.0, 520.0), 0.0, send(GadgetKind::Sensor, blue, 5.0));
+    // The laser that comes on, a mirror up, and the target.
+    let laser = GadgetSpec { trigger: Trigger::Signal(blue), ..GadgetSpec::default() };
+    b.gadget(None, (40.0, 575.0), 0.0, laser);
+    b.stroke(&dense(&[(1012.0, 603.0), (1068.0, 547.0)]), 14.0, SNOW, true, Material::MIRROR);
+    b.gadget(None, (1040.0, 205.0), -90.0, send(GadgetKind::Target, red, 0.0));
+    // On red: a windmill turns and a cannon fires at a tower.
+    let blade = b.stroke(&dense(&[(740.0, 170.0), (900.0, 170.0)]), 14.0, LEAF, false, Material::DEFAULT);
+    b.link(LinkKind::Motor, blade, (820.0, 170.0), None, (820.0, 170.0), 3.0);
+    b.signal_last(red);
+    for row in 0..2 {
+        for k in 0..2 {
+            b.shape(Shape::Box, WOOD, 860.0 + k as f32 * 50.0, FLOOR - 26.0 - row as f32 * 50.0, 48.0);
+        }
+    }
+    let cannon = GadgetSpec {
+        kind: GadgetKind::Cannon,
+        trigger: Trigger::Signal(red),
+        power: 9.0,
+        rate: 1.0,
+        ..GadgetSpec::default()
+    };
+    b.gadget(None, (1060.0, 640.0), 168.0, cannon);
 }
 
 fn rocket_car(b: &mut Builder) {

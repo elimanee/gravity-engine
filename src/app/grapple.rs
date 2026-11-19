@@ -43,7 +43,7 @@ impl App {
                 g.cooldown = 0.0;
                 continue;
             }
-            let reels = g.spec.trigger.arrow().is_some() || g.spec.trigger == crate::physics::gadgets::Trigger::Beat;
+            let reels = g.spec.trigger != crate::physics::gadgets::Trigger::Always;
             match &mut g.hook {
                 Some(l) if reels && l.length > MIN_ROPE => {
                     let len = (l.length - REEL_SPEED * dt).max(MIN_ROPE);

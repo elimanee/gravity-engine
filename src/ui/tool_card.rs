@@ -1,14 +1,15 @@
 //! Bottom-left card with the current tool's settings: radius and strength
 //! for area tools, thickness / colour / pinning for Draw, the kind of link
 //! (and motor speed) for Link, the kind of zone for Zone, the selection
-//! commands for Select, and the gadget, its trigger and settings for Gadget.
+//! commands for Select, and the gadget, its trigger and settings for Gadget
+//! (with the mechanisms: the signal they send, or the one they work on).
 
 use super::spawner::spawn_color;
 use super::theme::*;
 use super::widgets::*;
 use super::{icons, Action, Input, SelectionCmd};
 use crate::config::{PPM, WALL_T};
-use crate::physics::gadgets::{Ammo, GadgetKind, Trigger, LAMP_COLOURS};
+use crate::physics::gadgets::{channel_colour, Ammo, GadgetKind, SendMode, Trigger, CHANNELS, LAMP_COLOURS};
 use crate::physics::grains::GrainKind;
 use crate::physics::links::LinkKind;
 use crate::physics::tools::Card;
@@ -33,13 +34,17 @@ enum SliderId {
     CannonSpeed,
     CannonRate,
     LampReach,
+    SensorReach,
+    TimerPeriod,
+    PistonTravel,
+    PistonSpeed,
 }
 
 pub struct ToolCard {
     shown: f32,
     /// Card kept on screen while sliding out.
     card: Card,
-    sliders: [SliderState; 9],
+    sliders: [SliderState; 13],
     /// Objects currently selected (set by the app each frame).
     pub selected: usize,
     /// Grains in the world (set by the app each frame).
@@ -77,10 +82,14 @@ struct Layout {
     commands: Vec<Rect>,
     /// Pour card: "clear grains" button.
     clear: Option<Rect>,
-    /// Link card: "drive the motor with the arrows" switch.
-    drive: Option<Rect>,
+    /// Link card: how a motor turns (by itself, with ← →, on a signal).
+    motor_modes: Vec<Rect>,
     /// Gadget card: trigger and ammunition buttons.
     triggers: Vec<Rect>,
+    /// Gadget card: the signal channels (sent, or worked on), and how a
+    /// mechanism sends (while on, or on and off at each press).
+    channels: Vec<Rect>,
+    modes: Vec<Rect>,
     ammo: Vec<Rect>,
     /// Lamp: bulb / spot buttons and colours.
     lamp_shapes: Vec<Rect>,
@@ -120,13 +129,17 @@ impl ToolCard {
                 add(50.0, 6.0);
                 if s.link_kind == LinkKind::Motor {
                     add(SLIDER_ROW_H, 8.0);
-                    add(28.0, 4.0);
+                    add(26.0, 18.0);
                 }
                 add(30.0, 6.0);
             }
             Card::Gadget => {
                 add(50.0, 6.0);
+                add(50.0, 6.0);
                 add(26.0, 18.0);
+                if !s.gadget_kind.sends() {
+                    add(26.0, 6.0);
+                }
                 match s.gadget_kind {
                     GadgetKind::Thruster => add(SLIDER_ROW_H, 8.0),
                     GadgetKind::Cannon => {
@@ -138,6 +151,16 @@ impl ToolCard {
                         add(26.0, 10.0);
                         add(20.0, 6.0);
                         add(SLIDER_ROW_H, 6.0);
+                    }
+                    GadgetKind::Button | GadgetKind::Target => add(26.0, 8.0),
+                    GadgetKind::Sensor => {
+                        add(26.0, 8.0);
+                        add(SLIDER_ROW_H, 6.0);
+                    }
+                    GadgetKind::Timer => add(SLIDER_ROW_H, 8.0),
+                    GadgetKind::Piston => {
+                        add(SLIDER_ROW_H, 8.0);
+                        add(SLIDER_ROW_H, 2.0);
                     }
                     GadgetKind::Laser | GadgetKind::Grapple => {}
                 }
@@ -189,14 +212,21 @@ impl ToolCard {
                 l.kinds = row_of(next(), LinkKind::ALL.len(), 5.0);
                 if s.link_kind == LinkKind::Motor {
                     l.sliders.push((SliderId::MotorSpeed, next()));
-                    l.drive = Some(next());
+                    l.motor_modes = row_of(next(), 2 + CHANNELS, 4.0);
                 }
                 next();
                 l.hint = Some(s.link_kind.hint());
             }
             Card::Gadget => {
-                l.kinds = row_of(next(), GadgetKind::ALL.len(), 6.0);
-                l.triggers = row_of(next(), Trigger::ALL.len(), 4.0);
+                let first = GadgetKind::FIRST_ROW;
+                l.kinds = row_of(next(), first, 6.0);
+                l.kinds.extend(row_of(next(), GadgetKind::ALL.len() - first, 6.0));
+                if s.gadget_kind.sends() {
+                    l.channels = row_of(next(), CHANNELS, 6.0);
+                } else {
+                    l.triggers = row_of(next(), Trigger::ALL.len(), 4.0);
+                    l.channels = row_of(next(), CHANNELS, 6.0);
+                }
                 match s.gadget_kind {
                     GadgetKind::Thruster => l.sliders.push((SliderId::Thrust, next())),
                     GadgetKind::Cannon => {
@@ -208,6 +238,16 @@ impl ToolCard {
                         l.lamp_shapes = row_of(next(), 2, 6.0);
                         l.lamp_colours = row_of(next(), LAMP_COLOURS.len(), 6.0);
                         l.sliders.push((SliderId::LampReach, next()));
+                    }
+                    GadgetKind::Button | GadgetKind::Target => l.modes = row_of(next(), SendMode::ALL.len(), 6.0),
+                    GadgetKind::Sensor => {
+                        l.modes = row_of(next(), SendMode::ALL.len(), 6.0);
+                        l.sliders.push((SliderId::SensorReach, next()));
+                    }
+                    GadgetKind::Timer => l.sliders.push((SliderId::TimerPeriod, next())),
+                    GadgetKind::Piston => {
+                        l.sliders.push((SliderId::PistonTravel, next()));
+                        l.sliders.push((SliderId::PistonSpeed, next()));
                     }
                     GadgetKind::Laser | GadgetKind::Grapple => {}
                 }
@@ -259,6 +299,10 @@ impl ToolCard {
             SliderId::CannonSpeed => (&mut s.cannon_speed, CANNON_SPEED_RANGE),
             SliderId::CannonRate => (&mut s.cannon_rate, CANNON_RATE_RANGE),
             SliderId::LampReach => (&mut s.lamp_reach, LAMP_REACH_RANGE),
+            SliderId::SensorReach => (&mut s.sensor_reach, SENSOR_REACH_RANGE),
+            SliderId::TimerPeriod => (&mut s.timer_period, TIMER_PERIOD_RANGE),
+            SliderId::PistonTravel => (&mut s.piston_travel, PISTON_TRAVEL_RANGE),
+            SliderId::PistonSpeed => (&mut s.piston_speed, PISTON_SPEED_RANGE),
         }
     }
 
@@ -289,6 +333,19 @@ impl ToolCard {
                 ("Rate", s.cannon_rate, format!("{:.1} shots / s", s.cannon_rate), CANNON_RATE_RANGE)
             }
             SliderId::LampReach => ("Reach", s.lamp_reach, format!("{} px", s.lamp_reach as i32), LAMP_REACH_RANGE),
+            SliderId::SensorReach => {
+                let px = (s.sensor_reach * PPM) as i32;
+                ("Reach", s.sensor_reach, format!("{px} px"), SENSOR_REACH_RANGE)
+            }
+            SliderId::TimerPeriod => ("Period", s.timer_period, format!("{:.1} s", s.timer_period), TIMER_PERIOD_RANGE),
+            SliderId::PistonTravel => {
+                let px = (s.piston_travel * PPM) as i32;
+                ("Slides", s.piston_travel, format!("{px} px"), PISTON_TRAVEL_RANGE)
+            }
+            SliderId::PistonSpeed => {
+                let px = (s.piston_speed * PPM) as i32;
+                ("Speed", s.piston_speed, format!("{px} px / s"), PISTON_SPEED_RANGE)
+            }
         };
         (SliderSpec { label, value_text: text, min: range.0, max: range.1, accent }, value)
     }
@@ -322,8 +379,25 @@ impl ToolCard {
         if l.pin.is_some_and(|r| toggle_row(r, input)) {
             s.draw_pinned = !s.draw_pinned;
         }
-        if l.drive.is_some_and(|r| toggle_row(r, input)) {
-            s.motor_drive = !s.motor_drive;
+        for (i, r) in l.motor_modes.iter().enumerate() {
+            if button(*r, input) {
+                s.motor_drive = i == 1;
+                s.motor_channel = (i >= 2).then_some((i - 2) as u8);
+            }
+        }
+        for (i, r) in l.channels.iter().enumerate() {
+            if button(*r, input) {
+                if s.gadget_kind.sends() {
+                    s.signal_channel = i as u8;
+                } else {
+                    s.gadget_trigger = Trigger::Signal(i as u8);
+                }
+            }
+        }
+        for (i, r) in l.modes.iter().enumerate() {
+            if button(*r, input) {
+                s.signal_mode = SendMode::ALL[i];
+            }
         }
         for (i, r) in l.triggers.iter().enumerate() {
             if button(*r, input) {
@@ -415,9 +489,6 @@ impl ToolCard {
         if let Some(r) = l.pin {
             draw_toggle_row(r, "Pin drawings  (Shift inverts)", s.draw_pinned, r.contains(mouse), f);
         }
-        if let Some(r) = l.drive {
-            draw_toggle_row(r, "Drive it with ← →", s.motor_drive, r.contains(mouse), f);
-        }
         let small_button = |r: Rect, active: bool| {
             let hov = r.contains(mouse);
             let bg = if active {
@@ -438,6 +509,50 @@ impl ToolCard {
         if let Some(r) = l.triggers.first() {
             let label = format!("Works {}", s.gadget_trigger.label());
             text(&label, r.x, r.y - 3.0, 10.0, fade(TEXT_MUTED, f));
+        }
+        // The channels: a dot of each colour.
+        let sends = s.gadget_kind.sends();
+        for (i, r) in l.channels.iter().enumerate() {
+            let on = if sends { s.signal_channel as usize == i } else { s.gadget_trigger == Trigger::Signal(i as u8) };
+            small_button(*r, on);
+            let c = channel_colour(i as u8);
+            draw_circle(r.x + r.w / 2.0, r.y + r.h / 2.0, 6.0, fade(c, f));
+            if on {
+                draw_circle_lines(r.x + r.w / 2.0, r.y + r.h / 2.0, 9.0, 1.4, fade(c, f));
+            }
+        }
+        if sends {
+            if let Some(r) = l.channels.first() {
+                let name = crate::physics::gadgets::channel_name(s.signal_channel);
+                let how = if s.gadget_kind == GadgetKind::Timer { "while on" } else { s.signal_mode.about() };
+                text(&format!("Sends the {name} signal {how}"), r.x, r.y - 3.0, 10.0, fade(TEXT_MUTED, f));
+            }
+        }
+        for (i, r) in l.modes.iter().enumerate() {
+            let col = small_button(*r, s.signal_mode == SendMode::ALL[i]);
+            text_centered(SendMode::ALL[i].label(), r.x + r.w / 2.0, r.y + r.h / 2.0, 11.0, col);
+        }
+        for (i, r) in l.motor_modes.iter().enumerate() {
+            let on = match i {
+                0 => !s.motor_drive && s.motor_channel.is_none(),
+                1 => s.motor_drive && s.motor_channel.is_none(),
+                _ => s.motor_channel == Some((i - 2) as u8),
+            };
+            let col = small_button(*r, on);
+            let c = vec2(r.x + r.w / 2.0, r.y + r.h / 2.0);
+            match i {
+                0 => icons::trigger(Trigger::Always, c, 16.0, col),
+                1 => text_centered("← →", c.x, c.y, 11.0, col),
+                _ => draw_circle(c.x, c.y, 6.0, fade(channel_colour((i - 2) as u8), f)),
+            }
+        }
+        if let Some(r) = l.motor_modes.first() {
+            let how = match (s.motor_drive, s.motor_channel) {
+                (_, Some(ch)) => format!("Turns on the {} signal", crate::physics::gadgets::channel_name(ch)),
+                (true, None) => "Turns while ← or → is held".to_string(),
+                (false, None) => "Turns by itself".to_string(),
+            };
+            text(&how, r.x, r.y - 3.0, 10.0, fade(TEXT_MUTED, f));
         }
         for (i, r) in l.ammo.iter().enumerate() {
             let col = small_button(*r, Ammo::ALL[i] == s.cannon_ammo);

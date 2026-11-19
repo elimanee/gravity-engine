@@ -254,6 +254,39 @@ impl PhysWorld {
             .map(|(c, hit)| (c, hit.time_of_impact, hit.normal))
     }
 
+    /// The colliders `shape` overlaps, placed at `at` (m), but those
+    /// `filter` leaves out.
+    pub fn overlapping(&self, at: &Isometry<f32>, shape: &dyn Shape, filter: QueryFilter) -> Vec<ColliderHandle> {
+        let mut out = vec![];
+        self.query.intersections_with_shape(&self.bodies, &self.colliders, at, shape, filter, |c| {
+            out.push(c);
+            true
+        });
+        out
+    }
+
+    /// Wake up what is around body `h` (within `margin` m of it): things
+    /// that came to rest against it go on when it moves away.
+    pub fn wake_around(&mut self, h: RigidBodyHandle, margin: f32) {
+        let Some(b) = self.bodies.get(h) else { return };
+        let mut near = vec![];
+        for &c in b.colliders() {
+            let Some(col) = self.colliders.get(c) else { continue };
+            let aabb = col.compute_aabb().loosened(margin);
+            self.query.colliders_with_aabb_intersecting_aabb(&aabb, |&other| {
+                if let Some(p) = self.colliders.get(other).and_then(|o| o.parent()).filter(|&p| p != h) {
+                    near.push(p);
+                }
+                true
+            });
+        }
+        for p in near {
+            if let Some(b) = self.bodies.get_mut(p).filter(|b| b.is_dynamic() && b.is_sleeping()) {
+                b.wake_up(true);
+            }
+        }
+    }
+
     /// Bring ray casts up to date without stepping (while paused).
     pub fn refresh_queries(&mut self) {
         self.query.update(&self.colliders);

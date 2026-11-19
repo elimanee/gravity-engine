@@ -158,6 +158,8 @@ pub struct App {
     gadgets: Vec<crate::physics::gadgets::Gadget>,
     gadget_drag: Option<gadgets::GadgetDrag>,
     beams: Vec<crate::physics::gadgets::Beam>,
+    /// Which signal channels are on this frame (see the mechanisms).
+    signals: [bool; crate::physics::gadgets::CHANNELS],
     glass_tints: HashMap<RigidBodyHandle, Color>,
     /// Seconds until the thrusters' roar is played again.
     thrust_sound: f32,
@@ -322,6 +324,7 @@ impl App {
             gadgets: Vec::new(),
             gadget_drag: None,
             beams: Vec::new(),
+            signals: [false; crate::physics::gadgets::CHANNELS],
             glass_tints: HashMap::new(),
             thrust_sound: 0.0,
             grains: Grains::default(),

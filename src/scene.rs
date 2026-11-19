@@ -18,8 +18,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// 2: drawings, links, object properties and water. 3: motors and zones.
-/// 4: gadgets and driven motors.
-const VERSION: u32 = 4;
+/// 4: gadgets and driven motors. 5: mechanisms (signals between them).
+const VERSION: u32 = 5;
 const EMBED_LIMIT: u64 = 4 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -91,6 +91,9 @@ pub struct SceneLink {
     /// Motor driven with the arrow keys.
     #[serde(default)]
     pub drive: bool,
+    /// Motor that turns on a signal channel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<u8>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -185,6 +188,7 @@ pub fn capture(
                 length: l.length,
                 speed: l.speed,
                 drive: l.drive,
+                channel: l.channel,
             })
         })
         .collect();
@@ -322,7 +326,8 @@ pub fn instantiate(scene: &SceneFile, world: &mut PhysWorld) -> Instantiated {
             let length = if l.length.is_finite() { l.length.max(0.05) } else { 1.0 };
             let speed = if l.speed.is_finite() { l.speed.clamp(-50.0, 50.0) } else { 0.0 };
             let (la, lb) = (Point::new(l.la[0], l.la[1]), Point::new(l.lb[0], l.lb[1]));
-            Some(Link::restore(world, LinkSpec { kind: l.kind, a, b, la, lb, length, speed, drive: l.drive }))
+            let (drive, channel) = (l.drive, l.channel);
+            Some(Link::restore(world, LinkSpec { kind: l.kind, a, b, la, lb, length, speed, drive, channel }))
         })
         .collect();
     let gadgets = restore_gadgets(&scene.gadgets, &handles);
@@ -362,6 +367,7 @@ mod tests {
                 length: 2.0,
                 speed: 3.0,
                 drive: true,
+                channel: None,
             }],
             water: Some(SceneWater { level: 0.4, density: 2.0 }),
             zones: vec![Zone {
@@ -387,6 +393,12 @@ mod tests {
         assert_eq!(back.border, BorderMode::Portal);
         assert_eq!(back.objects[0].material, Material::ICE);
         assert_eq!((back.links[0].kind, back.links[0].speed, back.links[0].drive), (LinkKind::Motor, 3.0, true));
+        // A motor on a signal keeps its channel.
+        let mut on_signal = back.links[0].clone();
+        on_signal.channel = Some(2);
+        let json = serde_json::to_string(&on_signal).unwrap();
+        assert!(json.contains("\"channel\":2"), "{json}");
+        assert_eq!(serde_json::from_str::<SceneLink>(&json).unwrap().channel, Some(2));
         assert_eq!(back.zones[0].strength, 12.0);
         assert_eq!(back.gadgets, scene.gadgets);
         assert_eq!(back.water, Some(SceneWater { level: 0.4, density: 2.0 }));
