@@ -171,6 +171,8 @@ pub(super) struct CharEditor {
     backspace: f32,
     /// Just back from trying: the key that ended it is not for the editor.
     pub fresh: bool,
+    /// In the studio: *Play as* is *Use in game* (the game plays as them).
+    pub in_studio: bool,
 }
 
 /// A name no character has yet.
@@ -219,6 +221,7 @@ impl CharEditor {
             notes: vec![],
             backspace: 0.0,
             fresh: false,
+            in_studio: false,
         };
         match open.filter(|&i| i < custom::count()) {
             Some(i) => ed.open(i),
@@ -695,6 +698,7 @@ impl CharEditor {
                 Cmd::Ask(Ask::Save) => "Save",
                 Cmd::Ask(Ask::Delete) if self.delete_asked > 0.0 => "Sure?",
                 Cmd::Ask(Ask::Delete) => "Delete",
+                _ if self.in_studio => "Use in game",
                 _ => "Play as ▶",
             };
             let lit = matches!(c, Cmd::Ask(Ask::Save)) && self.dirty() || matches!(c, Cmd::Ask(Ask::PlayAs));
@@ -992,12 +996,9 @@ impl App {
             _ => None,
         };
         self.library.fader.open = false;
-        self.chars = Some(CharEditor::new(i.or(played)));
-    }
-
-    /// Into the editor from the command line (`--characters`).
-    pub fn edit_characters(&mut self) {
-        self.open_chars(None);
+        let mut ed = CharEditor::new(i.or(played));
+        ed.in_studio = self.studio;
+        self.chars = Some(ed);
     }
 
     /// A frame of the editor, over the whole screen.
@@ -1028,7 +1029,9 @@ impl App {
             Ask::Close => {
                 self.chars = None;
                 custom::set_preview(None);
-                self.library.open_sonic();
+                if !self.studio {
+                    self.library.open_sonic();
+                }
             }
             Ask::Save => {
                 self.save_char();
@@ -1040,6 +1043,11 @@ impl App {
                     return;
                 }
                 let Some(i) = self.chars.as_ref().and_then(|ed| ed.index()) else { return };
+                // The studio has no game to play: the game plays as them.
+                if self.studio {
+                    self.use_in_game(Character::Custom(i));
+                    return;
+                }
                 self.set_character(Character::Custom(i));
                 self.chars = None;
                 custom::set_preview(None);

@@ -7,7 +7,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-cargo build --release --target wasm32-unknown-unknown
+# Only the game: the web version keeps its editors in it (no studio).
+cargo build --release --target wasm32-unknown-unknown --bin gravity_engine
 
 out=web/dist
 rm -rf "$out"

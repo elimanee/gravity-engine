@@ -59,7 +59,7 @@ impl App {
                 Event::Jump => self.sound(Sound::Jump, centre, 0.4),
                 Event::Won => {
                     self.s.emeralds |= 1 << index;
-                    let _ = self.s.save();
+                    self.keep_settings();
                     self.play_jingle(Jingle::Emerald);
                     self.pad.rumble(0.5, 0.4);
                 }

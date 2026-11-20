@@ -76,10 +76,13 @@ mod skins;
 mod soft;
 mod sonic;
 mod special;
+mod studio;
 mod terrain;
 mod three;
 mod verify;
 mod weather;
+
+pub use studio::studio_arg;
 
 const TIME_STEPS: &[f32] = &[0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
 const SPAWN_REPEAT: f32 = 0.11;
@@ -198,6 +201,14 @@ pub struct App {
     char_test: Option<chars::CharTest>,
     /// The terrain editor (over the sprite region editor's Zone tab).
     terrain_ed: Option<terrain::TerrainEditor>,
+    /// This is the studio (`gravity_studio`), not the game: its page shows
+    /// when no editor is open, and the game's settings are not saved.
+    studio: bool,
+    /// In the game: the studio it opened, while it is open, and the
+    /// character the settings on disk named then (the studio's *Use in
+    /// game* changes it).
+    #[cfg(not(target_arch = "wasm32"))]
+    studio_child: Option<(std::process::Child, String)>,
     /// The web version saves the settings as they change (closing the tab
     /// does not run `Drop`): what was saved last, and when to look again.
     autosaved: String,
@@ -347,6 +358,9 @@ impl App {
             chars: None,
             char_test: None,
             terrain_ed: None,
+            studio: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            studio_child: None,
             autosaved: String::new(),
             autosave_in: 2.0,
             game: None,
@@ -422,7 +436,18 @@ impl App {
         app
     }
 
+    /// Keep the settings now (a record, an emerald): not in the studio.
+    fn keep_settings(&mut self) {
+        if !self.studio {
+            let _ = self.s.save();
+        }
+    }
+
     fn save_settings(&mut self) {
+        // The studio leaves the game's settings alone.
+        if self.studio {
+            return;
+        }
         self.s.volume = self.s.volume.clamp(0.0, 1.0);
         self.s.playlist = self.audio.playlist.iter().map(|e| e.path.clone()).collect();
         if let Err(e) = self.s.save() {
@@ -499,6 +524,13 @@ impl App {
             self.audio.tick();
             return;
         }
+        // The studio's page, when none of its editors is open.
+        if self.studio && self.char_test.is_none() && self.region_test.is_none() {
+            self.studio_frame(dt);
+            self.audio.tick();
+            return;
+        }
+        self.poll_studio();
 
         let arena = self.arena();
         if (arena.0 - self.last_size.0).abs() > 1.0 || (arena.1 - self.last_size.1).abs() > 1.0 {
@@ -1354,12 +1386,12 @@ impl App {
                 self.toggle_sonic(at);
             }
             Action::LoadSonicSheet => self.pick_sonic_sheet(),
-            Action::EditSpriteRegions => self.open_regions(None),
+            Action::EditSpriteRegions => self.edit_regions_or_studio(None),
             Action::LevelContinue => self.level_continue(),
             Action::OpenAct(i) => self.open_act(i),
             Action::RandomAct { edit } => self.random_act(edit),
             Action::Play3d { zone } => self.play_3d(zone),
-            Action::EditCharacters => self.open_chars(None),
+            Action::EditCharacters => self.edit_characters_or_studio(),
             Action::OpenLevel(i) => self.open_level(i),
             Action::EditLevel(i) => self.open_level_editor(i),
             Action::Level(cmd) => self.level_cmd(cmd),

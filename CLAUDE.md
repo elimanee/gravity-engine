@@ -4,6 +4,13 @@ A 2D physics sandbox (Rust, macroquad 0.4, rapier2d) that grew a Sonic game
 (acts, endless run, special stages, level and sprite editors) and a 3D mode
 (rapier3d). Native on Linux / Windows, and a web version (wasm32).
 
+Two programs on one library (`src/lib.rs`): the game (`gravity_engine`,
+`src/main.rs`) and **the studio** (`gravity_studio`,
+`src/bin/gravity_studio.rs`: the character editor and the sprite region
+editor, opened from a page of their own). In the game, their buttons open
+the studio found beside it (`src/app/studio.rs`); the web version only
+builds the game and keeps the editors in it.
+
 ## Working with the owner
 
 - **Talk to the user in French.** The repository itself (code, comments,
@@ -64,8 +71,10 @@ DISPLAY=:99 import -window root shot.png
 ```
 
 Shortcuts: `--no-title`, `--act=N` (1–7), `--special-stage=N`,
-`--3d=run` / `--3d=zone`, `--sprite-regions[=sonic|tails|…|zone]`,
-`--benchmark`, `--verify-challenges`. The settings file is
+`--3d=run` / `--3d=zone`, `--benchmark`, `--verify-challenges`; the studio:
+`target/debug/gravity_studio --characters` or
+`--sprite-regions[=sonic|tails|…|zone|custom:NAME]` (the game's same
+options open the studio). The settings file is
 `$HOME/.config/gravity_engine/settings.json` (`"character": "exe"`,
 lowercase; `"show_title": false`).
 
@@ -73,7 +82,8 @@ lowercase; `"show_title": false`).
 
 - **Test build** of a branch: run the *CI* workflow (`ci.yml`,
   workflow_dispatch) on it; its artifacts `gravity_engine-linux-x86_64` and
-  `gravity_engine-windows-x86_64` are the builds to give the owner. Runs can
+  `gravity_engine-windows-x86_64` (each with the game and the studio) are
+  the builds to give the owner. Runs can
   sit "queued" for a while on GitHub's side; relaunch once if one never
   starts.
 - **Release** `vX.Y.Z`: set `version` in `Cargo.toml`, move the CHANGELOG's

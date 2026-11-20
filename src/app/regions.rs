@@ -3193,11 +3193,6 @@ impl App {
         }
     }
 
-    /// Into the editor from the command line (`--sprite-regions`).
-    pub fn edit_regions(&mut self, c: Option<Owner>) {
-        self.open_regions(c);
-    }
-
     /// A frame of the editor, over the whole screen.
     pub(super) fn regions_frame(&mut self, dt: f32) {
         set_default_camera();

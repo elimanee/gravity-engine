@@ -87,7 +87,9 @@ impl App {
         if t.world.over && hands.again && bench.is_none() {
             let zone = t.zone;
             self.s.run_3d_best = self.s.run_3d_best.max(t.world.distance);
-            let _ = self.s.save();
+            if !self.studio {
+                let _ = self.s.save();
+            }
             t.world.restart(maker(zone, None));
         } else {
             let _t = crate::profile::span("3d/update");
@@ -121,7 +123,7 @@ impl App {
         }
         if over && distance > self.s.run_3d_best && bench.is_none() {
             self.s.run_3d_best = distance;
-            let _ = self.s.save();
+            self.keep_settings();
         }
         if is_key_pressed(KeyCode::Escape) || self.pad.pressed(Button::Select) {
             self.three = None;

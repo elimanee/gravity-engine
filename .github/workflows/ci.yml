@@ -45,17 +45,22 @@ jobs:
       - name: Release build
         run: cargo build --release
 
-      - name: Check the glibc it needs
+      - name: Check the glibc they need
         run: |
-          need=$(objdump -T target/release/gravity_engine | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
-          echo "Needs $need"
-          [ "$(printf '%s\n' "$need" GLIBC_2.35 | sort -V | tail -1)" = GLIBC_2.35 ]
+          for program in gravity_engine gravity_studio; do
+            need=$(objdump -T target/release/$program | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+            echo "$program needs $need"
+            [ "$(printf '%s\n' "$need" GLIBC_2.35 | sort -V | tail -1)" = GLIBC_2.35 ]
+          done
 
-      # Test builds of any branch, downloadable from the run's page.
+      # Test builds of any branch (the game and the studio), downloadable
+      # from the run's page.
       - uses: actions/upload-artifact@v4
         with:
           name: gravity_engine-linux-x86_64
-          path: target/release/gravity_engine
+          path: |
+            target/release/gravity_engine
+            target/release/gravity_studio
           retention-days: 14
 
   windows:
@@ -92,7 +97,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path test-build | Out-Null
-          Copy-Item target\release\gravity_engine.exe test-build\
+          Copy-Item target\release\gravity_engine.exe, target\release\gravity_studio.exe test-build\
           Copy-Item "$env:OPENMPT_BIN_DIR\*.dll" test-build\
 
       - uses: actions/upload-artifact@v4

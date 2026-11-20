@@ -5,10 +5,22 @@ edition     = "2021"
 description = "A 2D physics sandbox: drop images, shapes and web buttons and watch them fly"
 readme      = "README.md"
 build       = "build.rs"
+default-run = "gravity_engine"
+
+# The game and the studio (the character editor and the sprite region
+# editor) are two programs on one library.
+[lib]
+name    = "gravity_engine"
+path    = "src/lib.rs"
+doctest = false
 
 [[bin]]
 name = "gravity_engine"
 path = "src/main.rs"
+
+[[bin]]
+name = "gravity_studio"
+path = "src/bin/gravity_studio.rs"
 
 [dependencies]
 # Window + input + rendering

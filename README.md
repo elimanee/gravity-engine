@@ -25,9 +25,13 @@ A 2D physics sandbox built with Rust, [macroquad](https://github.com/not-fl3/mac
 - **The 3D zone**: green hills to roam freely, ringed by mountains, with a loop, ramps, platforms reached by springs, rings, badniks and trees, and **things to knock over**: a stack of crates, barrels and a big ball (3D physics with rapier3d). `N` drops another, `B` blows up everything near.
 - **Your own 3D models**: the characters, badniks, rings and springs can be drawn from a model pack made for *Sonic Robo Blast 2* (MD3 models, with their animations and their colours), put in your `sonic/` folder; see [3D models](#3d-models). Without one, they are built from simple shapes, as in the pictures. *(No models from any game are included.)*
 
+![The studio's page: two cards, Characters with three made-up characters running, and Sprite regions with a sheet of Sonic's pictures, one of them boxed with its centre; under it buttons for Sonic, Tails, Knuckles, Amy, Exe and the zone](docs/screenshots/studio.png)
+
+- **The studio** (`gravity_studio`, beside the game): the character editor and the sprite region editor are a program of their own, opened on a page to choose between them. The game's buttons for them (Library → Sonic → *Characters*, *Edit sprite regions…*) open it, and the game reads the characters and sheets again when it is closed. See [The studio](#the-studio).
+
 ![The character editor: Ember, an orange character drawn like Knuckles, gliding in the preview; beside it its colours, its physics (faster, quicker, floatier in the air) and its four moves: an air dash and a glide on the jump button, a stomp and a boost on X, and it is a ring magnet](docs/screenshots/character-editor.png)
 
-- **Characters of your own** (Library → Sonic → *Characters*, or `--characters`): give one a name, the look of a built-in character in **colours of your choosing**, how it runs and jumps (top speed, acceleration, jump, gravity, air control), and **up to eight moves to mix**, each on the jump button (in the air) or on `X`: a **double jump**, an **air dash**, a **homing attack** that goes for the nearest badnik or monitor (and bounces off it, ready for the next), a **stomp** straight down that breaks the badniks where it lands, something to **throw** that breaks badniks and monitors, Sonic Mania's **drop dash**, Sonic CD's **peel out**, Sonic 3's **insta-shield** and **bounce**, a **wall jump**, a **boost** with its gauge, and the built-in characters' own: flying, gliding (climbing or not), the hammer and the teleport. Each has its setting (how high, how fast, how far). They can also be a **ring magnet** and **breathe underwater**. The preview plays every move; **Try in 2D** and **Try in 3D** play the character as it is, saved or not, and `Esc` comes back. They play everywhere the others do: the acts, your levels, the endless run, the special stages, the sandbox and the 3D mode, chosen with *Yours* under *Play as* or `Shift+N`.
+- **Characters of your own** (in the studio, or Library → Sonic → *Characters*): give one a name, the look of a built-in character in **colours of your choosing**, how it runs and jumps (top speed, acceleration, jump, gravity, air control), and **up to eight moves to mix**, each on the jump button (in the air) or on `X`: a **double jump**, an **air dash**, a **homing attack** that goes for the nearest badnik or monitor (and bounces off it, ready for the next), a **stomp** straight down that breaks the badniks where it lands, something to **throw** that breaks badniks and monitors, Sonic Mania's **drop dash**, Sonic CD's **peel out**, Sonic 3's **insta-shield** and **bounce**, a **wall jump**, a **boost** with its gauge, and the built-in characters' own: flying, gliding (climbing or not), the hammer and the teleport. Each has its setting (how high, how fast, how far). They can also be a **ring magnet** and **breathe underwater**. The preview plays every move; **Try in 2D** and **Try in 3D** play the character as it is, saved or not, and `Esc` comes back. They play everywhere the others do: the acts, your levels, the endless run, the special stages, the sandbox and the 3D mode, chosen with *Yours* under *Play as* or `Shift+N`.
 - For a look of their own: **Make from drawing** makes them a sprite sheet from the game's drawing, in their colours, to paint over in the sprite region editor, or **Choose a picture…** takes any sheet; in 3D, any model of your model pack, by its name in `models.dat`, coloured like them. See [Characters of your own](#characters-of-your-own).
 
 ![Chain reaction: a red ball on a button, its green wire to a piston that has lifted a door; a blue ball that went through a sensor's beam, its blue wire to a laser; the beam bent up by a mirror to a target, whose red wires go to a spinning windmill and a cannon firing at a tower of crates](docs/screenshots/chain-reaction.png)
@@ -177,11 +181,23 @@ Gravity Engine 3.0 is also a Sonic game: Sonic and his friends play in the sandb
 
 While someone plays, `X` is the action button (the Winamp player is on `X` otherwise). The controller's A, B and Y jump.
 
+### The studio
+
+![The studio](docs/screenshots/studio.png)
+
+The character editor and the sprite region editor are a program of their own, **the studio** (`gravity_studio`, `gravity_studio.exe` on Windows), shipped beside the game. It opens on a page with the two: **Characters** (`C`) and **Sprite regions** (`R`), or straight onto a sheet with the buttons under it (Sonic, Tails, Knuckles, Amy, Exe, the zone). Closing an editor comes back to that page; `Esc` there quits.
+
+- What it makes is kept where the game finds it (`~/.config/gravity_engine/`: `characters/`, and the sheets and their regions in `sonic/`). It never changes the game's settings, but for **Use in game** in the character editor, which makes the game play as that character from then on.
+- In the game, Library → Sonic → *Characters* and *Edit sprite regions…* in the settings open the studio. When it is closed, the game reads the characters and the sheets again, so what was made there plays at once.
+- *Try in 2D*, *Try in 3D* and the region editor's *Try* work in the studio as in the game.
+- From the command line: `gravity_studio --characters`, or `gravity_studio --sprite-regions[=WHO]` (`sonic`, `tails`, `knuckles`, `amy`, `exe`, `zone`, or `custom:NAME`). The game's own `--characters` and `--sprite-regions` open the studio too.
+- Without the studio beside it (and in the web version, which cannot open programs), the game opens the editors itself, as before.
+
 ### Characters of your own
 
 ![The character editor](docs/screenshots/character-editor.png)
 
-**Library → Sonic → Characters** (or `--characters`) opens the character editor over the whole window. *New character* starts one; your characters are listed on the left (they are kept in `~/.config/gravity_engine/characters/`, one `.json` each, easy to share).
+**Characters** in the studio (or `gravity_studio --characters`) opens the character editor over the whole window. *New character* starts one; your characters are listed on the left (they are kept in `~/.config/gravity_engine/characters/`, one `.json` each, easy to share).
 
 - **Looks like**: the built-in character it is drawn as (its shape and size, its sprite sheet's layout), and **its colours**: the body, the belly and muzzle, the shoes, picked from the palette (*Base's colours* puts the built-in's back).
 - **How they move**: top speed, acceleration, jump, gravity and air control, as multiples of Sonic's (the Sonic Physics Guide's), and whether they roll and spin dash. Two switches more: a **ring magnet** (rings close by fly to them, as with Sonic 3's lightning shield, scattered ones too) and **breathes underwater** (never out of air).
@@ -250,7 +266,7 @@ Tails, Knuckles and Amy can have theirs as well, recognised by their size and ke
 
 #### The zone's sheet
 
-The levels can be drawn from a sheet too, kept as `zone.png`: the ground of the acts and of your levels, the ledges in the air, the zone's gimmicks (bridges, swinging platforms, crumbling ledges, walls, spiked logs, rocks), and if it has them a backdrop and scenery. Two sheets are recognised as they are (*Sonic sprites…* puts them in place by their size): the Green Hill Zone objects sheet from The Spriters Resource (864 × 707), and NinjaCakes' Green Hill-style tileset (725 × 617). That one is used as a tileset: the ground is built from its 8 × 8 pieces on a grid, column after column as its "main tiles" go side by side (tufts and stretches of tall grass sticking up, the grass into the earth along the ground's top, then its earth down to the bottom), in the sheet's own pixels so they stay square, following the slopes. Its backdrop goes behind the levels by day (its sky, clouds, mountains and islands scrolling at their own pace, the sea shimmering below the horizon and in the pits) and whose palms, sunflowers, totem poles and plants stand here and there on the ground. Any other sheet is laid out in the sprite region editor, under **Zone** (`--sprite-regions=zone`), where its tiles are listed instead of animations:
+The levels can be drawn from a sheet too, kept as `zone.png`: the ground of the acts and of your levels, the ledges in the air, the zone's gimmicks (bridges, swinging platforms, crumbling ledges, walls, spiked logs, rocks), and if it has them a backdrop and scenery. Two sheets are recognised as they are (*Sonic sprites…* puts them in place by their size): the Green Hill Zone objects sheet from The Spriters Resource (864 × 707), and NinjaCakes' Green Hill-style tileset (725 × 617). That one is used as a tileset: the ground is built from its 8 × 8 pieces on a grid, column after column as its "main tiles" go side by side (tufts and stretches of tall grass sticking up, the grass into the earth along the ground's top, then its earth down to the bottom), in the sheet's own pixels so they stay square, following the slopes. Its backdrop goes behind the levels by day (its sky, clouds, mountains and islands scrolling at their own pace, the sea shimmering below the horizon and in the pits) and whose palms, sunflowers, totem poles and plants stand here and there on the ground. Any other sheet is laid out in the sprite region editor, under **Zone** (`gravity_studio --sprite-regions=zone`), where its tiles are listed instead of animations:
 
 - `grass`: the ground's top, repeated along it, its cross on the line the character runs on (the blades above it are drawn over the sky); `ground`: what is inside, repeated all over the world, so the pieces of ground meet; `platform`: the ledges in the air, along them (the cross on their top). A box over several of a tileset's pieces drawn apart (8 × 8 pieces a pixel apart, say) is fine: the pieces are joined without the gaps, so the ground has no seams.
 - `log` (a bridge's), `post_left` / `post_right` (its ends), `swing`, `chain` and `anchor` (a swinging platform), `ledge` (a crumbling ledge's columns, one picture after the other), `wall` (repeated over the wall), `spike_log` (eight pictures, an eighth of a turn each: the spikes going round the log) and `rock` (made as big as the rock).
@@ -263,7 +279,7 @@ Without a zone sheet (or a tile it has no picture for), they are drawn as before
 
 #### Editing the regions
 
-*Edit sprite regions…* in the settings (or `--sprite-regions[=CHARACTER]`) opens a character's sheet over the whole window, to change which pictures each animation uses, where the character stands in them, how long each shows and at what pace the animation plays: for a built-in layout that is a little off, or **any sheet at all**. The buttons along the top switch between the characters (one without a sheet asks for a picture) and **Zone**, the zone's tiles (see *The zone's sheet*).
+**Sprite regions** in the studio (or *Edit sprite regions…* in the game's settings, or `gravity_studio --sprite-regions[=CHARACTER]`) opens a character's sheet over the whole window, to change which pictures each animation uses, where the character stands in them, how long each shows and at what pace the animation plays: for a built-in layout that is a little off, or **any sheet at all**. The buttons along the top switch between the characters (one without a sheet asks for a picture) and **Zone**, the zone's tiles (see *The zone's sheet*).
 
 **Any picture as a sheet.** *Open…* (bottom left, under SHEET) makes any picture (PNG, WebP, GIF, BMP or JPEG) the character's sheet: it is kept as a PNG under the character's name (`sheet.png` for Sonic, `tails.png`…), and a sheet the game does not know opens empty. *Pick* (`I`) is an eyedropper: click the sheet's background and that colour is cut out (pick several if it has more; click a swatch to put one back). *Soft edges* cuts them out by closeness, for lossy pictures such as JPEGs, and *Scale* tells how many sheet pixels make one of the game's (2 for sprites drawn twice as big). A checkerboard shows through what is cut out. Once the background is gone, the sheet's sprites are found by themselves: hold Shift to see them.
 
@@ -586,7 +602,7 @@ Press **F1** in the app for the full list.
 
 ## Download
 
-Linux and Windows builds are attached to each [release](https://github.com/elimanee/gravity-engine/releases). The Linux build runs on distributions with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later) and needs `libopenmpt`. On Windows, unzip `gravity_engine-windows-x86_64.zip` and run `gravity_engine.exe` (keep the DLLs next to it).
+Linux and Windows builds are attached to each [release](https://github.com/elimanee/gravity-engine/releases). The Linux build runs on distributions with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later) and needs `libopenmpt`: download `gravity_engine-linux-x86_64`, and `gravity_studio-linux-x86_64` beside it for the studio (the game finds it there). On Windows, unzip `gravity_engine-windows-x86_64.zip` and run `gravity_engine.exe`, or `gravity_studio.exe` for the studio (keep the DLLs next to them).
 
 Or play the [web version](https://elimanee.github.io/gravity-engine/) in your browser, with nothing to install.
 
@@ -597,10 +613,11 @@ Requires Rust (stable) plus a few system libraries. On Debian / Ubuntu:
 ```bash
 sudo apt install pkg-config libopenmpt-dev libasound2-dev libx11-dev libxi-dev \
                  libgl1-mesa-dev libwayland-dev libxkbcommon-dev libgtk-3-dev libdbus-1-dev
-cargo run --release
+cargo run --release                          # the game
+cargo run --release --bin gravity_studio     # the studio
 ```
 
-Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins. `--act=N` and `--special-stage=N` go straight into Sonic act N (1–7) or special stage N (1–7), `--3d=run` and `--3d=zone` into the 3D mode, `--sprite-regions[=CHARACTER]` into the sprite region editor (`sonic`, `tails`, `knuckles`, `amy` or `exe`, or `zone` for the zone's tiles), and `--characters` into the character editor.
+Command line: `gravity_engine [--no-title] [--benchmark] [FILES…]` — files can be images, audio, playlists, `.gscene` scenes, `.gchallenge` challenges or `.wsz` skins. `--act=N` and `--special-stage=N` go straight into Sonic act N (1–7) or special stage N (1–7), and `--3d=run` and `--3d=zone` into the 3D mode. `gravity_studio [--characters | --sprite-regions[=WHO]]` opens the studio on the character editor, or on the sprite region editor (`sonic`, `tails`, `knuckles`, `amy`, `exe`, `custom:NAME`, or `zone` for the zone's tiles).
 
 `gravity_engine --benchmark` runs five stress scenes for a few seconds each at a fixed 60 Hz and prints the frame times (average, 95th percentile, worst), the bodies still moving, the time spent waiting for the screen and where each frame's time goes, then quits without saving anything.
 

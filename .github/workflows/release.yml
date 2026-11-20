@@ -52,11 +52,15 @@ jobs:
       - name: Build
         run: |
           cargo build --release --locked
-          need=$(objdump -T target/release/gravity_engine | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
-          echo "Needs $need"
-          [ "$(printf '%s\n' "$need" GLIBC_2.35 | sort -V | tail -1)" = GLIBC_2.35 ]
           mkdir dist
-          cp target/release/gravity_engine dist/gravity_engine-linux-x86_64
+          # The game and the studio (named alike: the game finds the studio
+          # beside it by its own name).
+          for program in gravity_engine gravity_studio; do
+            need=$(objdump -T target/release/$program | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+            echo "$program needs $need"
+            [ "$(printf '%s\n' "$need" GLIBC_2.35 | sort -V | tail -1)" = GLIBC_2.35 ]
+            cp target/release/$program dist/$program-linux-x86_64
+          done
 
       - uses: actions/upload-artifact@v4
         with:
@@ -93,7 +97,7 @@ jobs:
         run: |
           $pkg = "gravity_engine-windows-x86_64"
           New-Item -ItemType Directory -Force -Path $pkg, dist | Out-Null
-          Copy-Item target\release\gravity_engine.exe $pkg\
+          Copy-Item target\release\gravity_engine.exe, target\release\gravity_studio.exe $pkg\
           Copy-Item "$env:OPENMPT_BIN_DIR\*.dll" $pkg\
           Copy-Item README.md, CHANGELOG.md $pkg\
           Compress-Archive -Path $pkg -DestinationPath "dist\$pkg.zip"

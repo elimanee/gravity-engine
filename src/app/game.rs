@@ -293,7 +293,7 @@ impl App {
         if let Some(g) = &self.game {
             let best = self.s.act_scores.entry(g.spec.name.clone()).or_insert(0);
             *best = (*best).max(g.score);
-            let _ = self.s.save();
+            self.keep_settings();
         }
         // Through the giant ring first.
         let next = self.next_act();
